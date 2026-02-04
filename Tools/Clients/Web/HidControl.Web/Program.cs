@@ -336,6 +336,15 @@ app.MapGet("/", () =>
         try { msg = JSON.parse(ev.data); } catch { return; }
         if (!msg || !msg.type) return;
 
+        if (msg.type === "webrtc.hello") {
+          console.log("webrtc hello", msg);
+          return;
+        }
+        if (msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined") {
+          console.log("webrtc room", msg);
+          return;
+        }
+
         if (msg.type === "webrtc.signal" && msg.data) {
           const data = msg.data;
           if (!pc) return;
@@ -344,7 +353,7 @@ app.MapGet("/", () =>
             await pc.setRemoteDescription(data.sdp);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            sig.send(JSON.stringify({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "answer", sdp: pc.localDescription } }));
+            await sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "answer", sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
             return;
           }
           if (data.kind === "answer") {
@@ -362,15 +371,41 @@ app.MapGet("/", () =>
       return sig;
     }
 
+    async function waitSigOpen() {
+      const s = ensureSig();
+      if (s.readyState === WebSocket.OPEN) return;
+      if (s.readyState !== WebSocket.CONNECTING) throw new Error("signaling_not_open");
+      await new Promise((resolve, reject) => {
+        const onOpen = () => { cleanup(); resolve(); };
+        const onErr = () => { cleanup(); reject(new Error("signaling_error")); };
+        const onClose = () => { cleanup(); reject(new Error("signaling_closed")); };
+        function cleanup() {
+          s.removeEventListener("open", onOpen);
+          s.removeEventListener("error", onErr);
+          s.removeEventListener("close", onClose);
+        }
+        s.addEventListener("open", onOpen);
+        s.addEventListener("error", onErr);
+        s.addEventListener("close", onClose);
+      });
+    }
+
+    async function sigSend(obj) {
+      await waitSigOpen();
+      sig.send(JSON.stringify(obj));
+    }
+
     async function ensurePc() {
       if (pc) return pc;
       pc = new RTCPeerConnection({ iceServers: getIceServers() });
       pc.onicecandidate = (e) => {
         if (!e.candidate) return;
-        if (!sig || sig.readyState !== WebSocket.OPEN) return;
-        sig.send(JSON.stringify({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "candidate", candidate: e.candidate } }));
+        const cand = (typeof e.candidate.toJSON === "function") ? e.candidate.toJSON() : e.candidate;
+        sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "candidate", candidate: cand } }).catch(() => {});
       };
       pc.onconnectionstatechange = () => setRtcStatus("pc: " + pc.connectionState);
+      pc.oniceconnectionstatechange = () => console.log("ice:", pc.iceConnectionState);
+      pc.onsignalingstatechange = () => console.log("signaling:", pc.signalingState);
       pc.ondatachannel = (e) => {
         dc = e.channel;
         wireDc();
@@ -388,30 +423,22 @@ app.MapGet("/", () =>
 
     document.getElementById("rtcJoin").onclick = async () => {
       const room = document.getElementById("rtcRoom").value.trim() || "demo";
-      const s = ensureSig();
       await ensurePc();
-      if (s.readyState === WebSocket.CONNECTING) {
-        await new Promise(r => setTimeout(r, 150));
-      }
-      s.send(JSON.stringify({ type: "join", room }));
+      await sigSend({ type: "join", room });
       setRtcStatus("joined room: " + room);
     };
 
     document.getElementById("rtcCall").onclick = async () => {
       const room = document.getElementById("rtcRoom").value.trim() || "demo";
-      const s = ensureSig();
       const p = await ensurePc();
-      if (s.readyState === WebSocket.CONNECTING) {
-        await new Promise(r => setTimeout(r, 150));
-      }
-      s.send(JSON.stringify({ type: "join", room }));
+      await sigSend({ type: "join", room });
 
       dc = p.createDataChannel("data");
       wireDc();
 
       const offer = await p.createOffer();
       await p.setLocalDescription(offer);
-      s.send(JSON.stringify({ type: "signal", room, data: { kind: "offer", sdp: p.localDescription } }));
+      await sigSend({ type: "signal", room, data: { kind: "offer", sdp: { type: p.localDescription.type, sdp: p.localDescription.sdp } } });
       setRtcStatus("calling...");
     };
 
