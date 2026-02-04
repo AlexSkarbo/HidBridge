@@ -483,45 +483,58 @@ app.MapGet("/", () =>
       dc.onmessage = (e) => show({ webrtc: "message", data: e.data });
     }
 
-    document.getElementById("rtcJoin").onclick = async () => {
+    document.getElementById("rtcJoin").addEventListener("click", async () => {
       const room = document.getElementById("rtcRoom").value.trim() || "demo";
-      await ensurePc();
-      await sigSend({ type: "join", room });
-      setRtcStatus("joined room: " + room);
-    };
+      rtcLog("ui.join_click", { room });
+      try {
+        await ensurePc();
+        await sigSend({ type: "join", room });
+        setRtcStatus("joined room: " + room);
+      } catch (e) {
+        rtcLog("ui.join_error", { room, error: String(e) });
+      }
+    });
 
-    document.getElementById("rtcCall").onclick = async () => {
+    document.getElementById("rtcCall").addEventListener("click", async () => {
       const room = document.getElementById("rtcRoom").value.trim() || "demo";
-      const p = await ensurePc();
-      await sigSend({ type: "join", room });
+      rtcLog("ui.call_click", { room });
+      try {
+        const p = await ensurePc();
+        await sigSend({ type: "join", room });
 
-      dc = p.createDataChannel("data");
-      wireDc();
+        dc = p.createDataChannel("data");
+        wireDc();
 
-      const offer = await p.createOffer();
-      await p.setLocalDescription(offer);
-      await sigSend({ type: "signal", room, data: { kind: "offer", sdp: { type: p.localDescription.type, sdp: p.localDescription.sdp } } });
-      setRtcStatus("calling...");
-    };
+        const offer = await p.createOffer();
+        await p.setLocalDescription(offer);
+        await sigSend({ type: "signal", room, data: { kind: "offer", sdp: { type: p.localDescription.type, sdp: p.localDescription.sdp } } });
+        setRtcStatus("calling...");
+      } catch (e) {
+        rtcLog("ui.call_error", { room, error: String(e) });
+      }
+    });
 
-    document.getElementById("rtcHangup").onclick = async () => {
+    document.getElementById("rtcHangup").addEventListener("click", async () => {
+      rtcLog("ui.hangup_click", {});
       try { if (sig && sig.readyState === WebSocket.OPEN) sig.send(JSON.stringify({ type: "leave" })); } catch {}
       try { if (dc) dc.close(); } catch {}
       try { if (pc) pc.close(); } catch {}
       try { if (sig) sig.close(); } catch {}
       sig = null; pc = null; dc = null;
+      pendingCandidates = [];
       setRtcStatus("disconnected");
-    };
+    });
 
-    document.getElementById("rtcSendBtn").onclick = async () => {
+    document.getElementById("rtcSendBtn").addEventListener("click", async () => {
       const text = document.getElementById("rtcSend").value;
+      rtcLog("ui.send_click", { hasDc: !!dc, dcState: dc ? dc.readyState : null });
       if (!dc || dc.readyState !== "open") {
         show({ ok: false, error: "datachannel_not_open" });
         return;
       }
       dc.send(text);
       show({ ok: true, sent: text });
-    };
+    });
   </script>
 </body>
 </html>
