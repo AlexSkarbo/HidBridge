@@ -6,9 +6,13 @@ Repository: `https://github.com/AlexSkarbo/HidBridge.git`
 
 ## License
 
-Copyright (c) 2026 Alexander Skarbo.
+Copyright (c) 2026 Skarbo Oleksandr / Alexander Skarbo.
 
 This project is **proprietary**. No license is granted for use/distribution without a separate written agreement. See `LICENSE`.
+
+## Commercial Licensing
+
+If you want to legally use HidBridge in a product/service, you need a commercial license. See `COMMERCIAL_LICENSE.md`.
 
 At a high level:
 - `B_host` enumerates a USB HID peripheral as a **USB host** and forwards input to `A_device`.
