@@ -57,68 +57,22 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, active = snapshot.ActiveProfile, profiles = snapshot.Profiles });
         });
 
-        group.MapGet("/modes", (string? id, bool? refresh, Options opt, VideoSourceStore store, AppState appState) =>
+        group.MapGet("/modes", async (string? id, bool? refresh, GetVideoModesUseCase useCase, HttpContext ctx) =>
         {
-            if (!OperatingSystem.IsWindows())
+            var result = await useCase.ExecuteAsync(id, refresh == true, ctx.RequestAborted);
+            if (!result.Ok)
             {
-                return Results.Ok(new { ok = false, error = "not_supported" });
+                return Results.Ok(new { ok = false, error = result.Error ?? "failed" });
             }
-            if (string.IsNullOrWhiteSpace(id))
+            return Results.Ok(new
             {
-                return Results.Ok(new { ok = false, error = "missing_id" });
-            }
-            if (!ExecutableService.TryValidateExecutablePath(opt.FfmpegPath, out string ffmpegError))
-            {
-                return Results.Ok(new { ok = false, error = $"ffmpeg {ffmpegError}" });
-            }
-            VideoSourceConfig? src = store.GetAll().FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase));
-            if (src is null)
-            {
-                return Results.Ok(new { ok = false, error = "source_not_found" });
-            }
-            if (string.IsNullOrWhiteSpace(src.Name))
-            {
-                return Results.Ok(new { ok = false, error = "source_name_missing" });
-            }
-
-            string deviceName = src.Name;
-            try
-            {
-                var dshow = ServerVideoMode.ListDshowDevices(opt.FfmpegPath);
-                var match = dshow.FirstOrDefault(d => string.Equals(d.Name, src.Name, StringComparison.OrdinalIgnoreCase));
-                if (match is not null && !string.IsNullOrWhiteSpace(match.AlternativeName))
-                {
-                    deviceName = match.AlternativeName;
-                }
-            }
-            catch { }
-
-            string cacheKey = src.Id;
-            bool bypassCache = refresh == true;
-            int cacheTtlSeconds = opt.VideoModesCacheTtlSeconds;
-            if (!bypassCache && cacheTtlSeconds > 0 && appState.VideoModesCache.TryGetValue(cacheKey, out var cached))
-            {
-                if (string.Equals(cached.DeviceName, deviceName, StringComparison.OrdinalIgnoreCase) &&
-                    (DateTimeOffset.UtcNow - cached.CachedAt) < TimeSpan.FromSeconds(cacheTtlSeconds))
-                {
-                    var cachedPayload = cached.Modes.Select(m => new { width = m.Width, height = m.Height, maxFps = m.MaxFps }).ToList();
-                    return Results.Ok(new { ok = true, cached = true, source = src.Id, device = deviceName, modes = cachedPayload, supportsMjpeg = cached.SupportsMjpeg });
-                }
-            }
-
-            HidControl.Contracts.VideoModesResult modesResult;
-            try
-            {
-                modesResult = ServerVideoMode.ListDshowModes(opt.FfmpegPath, deviceName);
-            }
-            catch (Exception ex)
-            {
-                return Results.Ok(new { ok = false, error = ex.Message });
-            }
-
-            appState.VideoModesCache[cacheKey] = new AppState.VideoModesCacheEntry(DateTimeOffset.UtcNow, deviceName, modesResult.Modes, modesResult.SupportsMjpeg);
-            var payload = modesResult.Modes.Select(m => new { width = m.Width, height = m.Height, maxFps = m.MaxFps }).ToList();
-            return Results.Ok(new { ok = true, source = src.Id, device = deviceName, modes = payload, supportsMjpeg = modesResult.SupportsMjpeg });
+                ok = true,
+                cached = result.Cached,
+                source = result.Source,
+                device = result.Device,
+                modes = result.Modes.Select(m => new { width = m.Width, height = m.Height, maxFps = m.MaxFps }).ToList(),
+                supportsMjpeg = result.SupportsMjpeg
+            });
         });
 
         group.MapGet("/diag", (GetVideoDiagUseCase useCase) =>
