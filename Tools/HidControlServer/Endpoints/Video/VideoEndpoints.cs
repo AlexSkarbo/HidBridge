@@ -207,19 +207,20 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, streams = list });
         });
 
-        group.MapGet("/output", () =>
+        group.MapGet("/output", (GetVideoOutputStatusUseCase useCase) =>
         {
-            var state = outputService.Get();
+            var result = useCase.Execute();
+            var state = result.State;
             return Results.Ok(new
             {
-                ok = true,
+                ok = result.Ok,
                 hls = state.Hls,
                 mjpeg = state.Mjpeg,
                 flv = state.Flv,
                 mjpegPassthrough = state.MjpegPassthrough,
                 mjpegFps = state.MjpegFps,
                 mjpegSize = state.MjpegSize,
-                mode = VideoOutputService.ResolveMode(state)
+                mode = result.Mode
             });
         });
 

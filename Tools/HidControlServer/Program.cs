@@ -103,6 +103,7 @@ builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOrphanKi
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoProcessTracker, VideoProcessTrackerAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoFfmpegOptions, VideoFfmpegOptionsAdapter>();
 builder.Services.AddSingleton<ApplyVideoOutputUseCase>();
+builder.Services.AddSingleton<GetVideoOutputStatusUseCase>();
 builder.Services.AddSingleton<StartFfmpegUseCase>();
 builder.Services.AddSingleton<StopFfmpegUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoDiagProvider, VideoDiagProviderAdapter>();
