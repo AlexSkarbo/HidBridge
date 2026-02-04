@@ -770,9 +770,9 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, path });
         });
 
-        group.MapPost("/ffmpeg/start", async (FfmpegStartRequest? req, StartFfmpegUseCase useCase) =>
+        group.MapPost("/ffmpeg/start", async (FfmpegStartRequest? req, StartFfmpegUseCase useCase, HttpContext ctx) =>
         {
-            var result = await useCase.ExecuteAsync(req, CancellationToken.None);
+            var result = await useCase.ExecuteAsync(req, ctx.RequestAborted);
             if (!string.IsNullOrWhiteSpace(result.Error))
             {
                 if (string.Equals(result.Error, "manual_stop", StringComparison.OrdinalIgnoreCase))
@@ -796,7 +796,7 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapPost("/ffmpeg/stop", (string? id, StopFfmpegUseCase useCase) =>
+        group.MapPost("/ffmpeg/stop", (string? id, StopFfmpegUseCase useCase, HttpContext ctx) =>
         {
             ServerEventLog.Log("ffmpeg", "stop_request:manual", new { id });
             var result = useCase.Execute(id);
