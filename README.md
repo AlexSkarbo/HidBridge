@@ -4,17 +4,6 @@ HidBridge is a **dual-MCU HID proxy/bridge** (Pico/RP2040-class) with tooling fo
 
 Repository: `https://github.com/AlexSkarbo/HidBridge.git`
 
-## License
-
-Copyright (c) 2026 Skarbo Oleksandr / Alexander Skarbo.
-
-This project is **proprietary**. No license is granted for use/distribution without a separate written agreement. See `LICENSE`.
-
-## Commercial Licensing
-
-If you want to legally use HidBridge in a product/service, you need a commercial license. See `COMMERCIAL_LICENSE.md`.
-Contact: `alexandr.skarbo@gmail.com`
-
 At a high level:
 - `B_host` enumerates a USB HID peripheral as a **USB host** and forwards input to `A_device`.
 - `A_device` presents itself to the target PC as a **USB HID device**.
@@ -75,3 +64,14 @@ Notes:
 - UART control protocol: `Docs/uart_control_protocol.md`
 - WebSocket control protocol: `Docs/ws_control_protocol.md`
 - Video endpoints mapping: `Docs/video_streams.md`
+
+## Commercial Licensing
+
+If you want to legally use HidBridge in a product/service, you need a commercial license. See `COMMERCIAL_LICENSE.md`.
+Contact: `alexandr.skarbo@gmail.com`
+
+## License
+
+Copyright (c) 2026 Skarbo Oleksandr / Alexander Skarbo.
+
+This project is **proprietary**. No license is granted for use/distribution without a separate written agreement. See `LICENSE`.
