@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HidControl.Application.UseCases;
 using HidControlServer;
 using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
@@ -19,55 +20,51 @@ public static class MouseEndpoints
     {
         var group = app.MapGroup("/mouse");
 
-        group.MapPost("/move", async (MouseMoveRequest req, Options opt, MouseState state, HidUartClient uart, CancellationToken ct) =>
+        group.MapPost("/move", async (MouseMoveRequest req, MouseMoveUseCase useCase, CancellationToken ct) =>
         {
-            if (!opt.MouseMoveAllowZero && req.Dx == 0 && req.Dy == 0 && (req.Wheel ?? 0) == 0)
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
+            {
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
+            }
+            if (result.Skipped)
             {
                 return Results.Ok(new { ok = true, skipped = true });
             }
-            byte buttons = state.GetButtons();
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.MouseTypeName, opt.MouseItfSel, uart, ct);
-            if (itfSel == 0xFF) return Results.BadRequest(new { ok = false, error = "mouse_itf_unresolved" });
-            await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ct);
-            byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, buttons, req.Dx, req.Dy, req.Wheel ?? 0, opt.MouseReportLen);
-            await uart.SendInjectReportAsync(itfSel, report, opt.MouseMoveTimeoutMs, 0, opt.MouseMoveDropIfBusy, ct);
             return Results.Ok(new { ok = true });
         });
 
-        group.MapPost("/button", async (MouseButtonRequest req, Options opt, MouseState state, HidUartClient uart, MouseMappingStore mappingStore, CancellationToken ct) =>
+        group.MapPost("/button", async (MouseButtonRequest req, MouseButtonUseCase useCase, CancellationToken ct) =>
         {
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.MouseTypeName, opt.MouseItfSel, uart, ct);
-            if (itfSel == 0xFF) return Results.BadRequest(new { ok = false, error = "mouse_itf_unresolved" });
-            byte mask = InputReportBuilder.ResolveMouseButtonMask(req.Button, opt, uart, mappingStore, itfSel);
-            InputReportBuilder.ApplyMouseButtonMask(state, mask, req.Down);
-            await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ct);
-            byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, state.GetButtons(), 0, 0, 0, opt.MouseReportLen);
-            await uart.SendInjectReportAsync(itfSel, report, opt.InjectTimeoutMs, opt.InjectRetries, false, ct);
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
+            {
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
+            }
             return Results.Ok(new { ok = true });
         });
 
-        group.MapPost("/wheel", async (MouseWheelRequest req, Options opt, MouseState state, HidUartClient uart, CancellationToken ct) =>
+        group.MapPost("/wheel", async (MouseWheelRequest req, MouseWheelUseCase useCase, CancellationToken ct) =>
         {
-            if (!opt.MouseWheelAllowZero && req.Delta == 0)
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
+            {
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
+            }
+            if (result.Skipped)
             {
                 return Results.Ok(new { ok = true, skipped = true });
             }
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.MouseTypeName, opt.MouseItfSel, uart, ct);
-            if (itfSel == 0xFF) return Results.BadRequest(new { ok = false, error = "mouse_itf_unresolved" });
-            await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ct);
-            byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, state.GetButtons(), 0, 0, req.Delta, opt.MouseReportLen);
-            await uart.SendInjectReportAsync(itfSel, report, opt.MouseWheelTimeoutMs, 0, opt.MouseWheelDropIfBusy, ct);
             return Results.Ok(new { ok = true });
         });
 
-        group.MapPost("/buttons", async (MouseButtonsMaskRequest req, Options opt, MouseState state, HidUartClient uart, CancellationToken ct) =>
+        group.MapPost("/buttons", async (MouseButtonsMaskRequest req, MouseButtonsMaskUseCase useCase, CancellationToken ct) =>
         {
-            state.SetButtonsMask(req.ButtonsMask);
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.MouseTypeName, opt.MouseItfSel, uart, ct);
-            if (itfSel == 0xFF) return Results.BadRequest(new { ok = false, error = "mouse_itf_unresolved" });
-            await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ct);
-            byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, state.GetButtons(), 0, 0, 0, opt.MouseReportLen);
-            await uart.SendInjectReportAsync(itfSel, report, opt.InjectTimeoutMs, opt.InjectRetries, false, ct);
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
+            {
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
+            }
             return Results.Ok(new { ok = true });
         });
 

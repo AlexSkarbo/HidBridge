@@ -38,6 +38,10 @@ public static class HidWsEndpoints
             var keyboardPressUseCase = ctx.RequestServices.GetRequiredService<KeyboardPressUseCase>();
             var keyboardTextUseCase = ctx.RequestServices.GetRequiredService<KeyboardTextUseCase>();
             var keyboardShortcutUseCase = ctx.RequestServices.GetRequiredService<KeyboardShortcutUseCase>();
+            var mouseMoveUseCase = ctx.RequestServices.GetRequiredService<MouseMoveUseCase>();
+            var mouseWheelUseCase = ctx.RequestServices.GetRequiredService<MouseWheelUseCase>();
+            var mouseButtonsMaskUseCase = ctx.RequestServices.GetRequiredService<MouseButtonsMaskUseCase>();
+            var mouseButtonUseCase = ctx.RequestServices.GetRequiredService<MouseButtonUseCase>();
             string mouseTypeName = opt.MouseTypeName ?? "mouse";
             string keyboardTypeName = opt.KeyboardTypeName ?? "keyboard";
 
@@ -122,57 +126,49 @@ public static class HidWsEndpoints
                                 int dx = GetInt(root, "dx");
                                 int dy = GetInt(root, "dy");
                                 int wheel = GetInt(root, "wheel");
-                                if (!opt.MouseMoveAllowZero && dx == 0 && dy == 0 && wheel == 0)
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                var moveRes = await mouseMoveUseCase.ExecuteAsync(new HidControl.Contracts.MouseMoveRequest(dx, dy, wheel, itfSelReq), ctx.RequestAborted);
+                                if (!moveRes.Ok)
+                                {
+                                    await SendAsync(new { ok = false, type, id = msgId, error = moveRes.Error ?? "failed" }, ctx.RequestAborted);
+                                    break;
+                                }
+                                if (moveRes.Skipped)
                                 {
                                     await SendAsync(new { ok = true, type, id = msgId, skipped = true }, ctx.RequestAborted);
                                     break;
                                 }
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), mouseTypeName, opt.MouseItfSel, 0xFF, ctx.RequestAborted);
-                                if (itfSel == 0xFF)
-                                {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "mouse_itf_unresolved" }, ctx.RequestAborted);
-                                    break;
-                                }
-                                byte buttons = mouseState.GetButtons();
-                                await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, buttons, dx, dy, wheel, opt.MouseReportLen);
-                                await uart.SendInjectReportAsync(itfSel, report, opt.MouseMoveTimeoutMs, 0, opt.MouseMoveDropIfBusy, ctx.RequestAborted);
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;
                             }
                             case "mouse.wheel":
                             {
                                 int delta = GetInt(root, "delta");
-                                if (!opt.MouseWheelAllowZero && delta == 0)
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                var wheelRes = await mouseWheelUseCase.ExecuteAsync(new HidControl.Contracts.MouseWheelRequest(delta, itfSelReq), ctx.RequestAborted);
+                                if (!wheelRes.Ok)
+                                {
+                                    await SendAsync(new { ok = false, type, id = msgId, error = wheelRes.Error ?? "failed" }, ctx.RequestAborted);
+                                    break;
+                                }
+                                if (wheelRes.Skipped)
                                 {
                                     await SendAsync(new { ok = true, type, id = msgId, skipped = true }, ctx.RequestAborted);
                                     break;
                                 }
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), mouseTypeName, opt.MouseItfSel, 0xFF, ctx.RequestAborted);
-                                if (itfSel == 0xFF)
-                                {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "mouse_itf_unresolved" }, ctx.RequestAborted);
-                                    break;
-                                }
-                                await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, mouseState.GetButtons(), 0, 0, delta, opt.MouseReportLen);
-                                await uart.SendInjectReportAsync(itfSel, report, opt.MouseWheelTimeoutMs, 0, opt.MouseWheelDropIfBusy, ctx.RequestAborted);
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;
                             }
                             case "mouse.buttons":
                             {
-                                byte mask = (byte)GetInt(root, "mask");
-                                mouseState.SetButtonsMask(mask);
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), mouseTypeName, opt.MouseItfSel, 0xFF, ctx.RequestAborted);
-                                if (itfSel == 0xFF)
+                                byte mask = (byte)GetInt(root, "mask", "buttonsMask");
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                var buttonsRes = await mouseButtonsMaskUseCase.ExecuteAsync(new HidControl.Contracts.MouseButtonsMaskRequest(mask, itfSelReq), ctx.RequestAborted);
+                                if (!buttonsRes.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "mouse_itf_unresolved" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = buttonsRes.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
-                                await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, mouseState.GetButtons(), 0, 0, 0, opt.MouseReportLen);
-                                await uart.SendInjectReportAsync(itfSel, report, opt.InjectTimeoutMs, opt.InjectRetries, false, ctx.RequestAborted);
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;
                             }
@@ -180,17 +176,13 @@ public static class HidWsEndpoints
                             {
                                 string button = root.TryGetProperty("button", out var b) ? (b.GetString() ?? "") : "";
                                 bool down = root.TryGetProperty("down", out var d) && d.ValueKind == JsonValueKind.True;
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), mouseTypeName, opt.MouseItfSel, 0xFF, ctx.RequestAborted);
-                                if (itfSel == 0xFF)
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                var btnRes = await mouseButtonUseCase.ExecuteAsync(new HidControl.Contracts.MouseButtonRequest(button, down, itfSelReq), ctx.RequestAborted);
+                                if (!btnRes.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "mouse_itf_unresolved" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = btnRes.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
-                                byte mask = InputReportBuilder.ResolveMouseButtonMask(button, opt, uart, mouseMapping, itfSel);
-                                InputReportBuilder.ApplyMouseButtonMask(mouseState, mask, down);
-                                await ReportLayoutService.EnsureMouseLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                byte[] report = InputReportBuilder.TryBuildMouseReport(uart, itfSel, mouseState.GetButtons(), 0, 0, 0, opt.MouseReportLen);
-                                await uart.SendInjectReportAsync(itfSel, report, opt.InjectTimeoutMs, opt.InjectRetries, false, ctx.RequestAborted);
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;
                             }

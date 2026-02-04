@@ -111,6 +111,13 @@ builder.Services.AddSingleton<KeyboardPressUseCase>();
 builder.Services.AddSingleton<KeyboardTextUseCase>();
 builder.Services.AddSingleton<KeyboardShortcutUseCase>();
 
+// Mouse use cases (Step 5): endpoints call application use cases; UART implementation stays in server adapters.
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IMouseControl, MouseControlAdapter>();
+builder.Services.AddSingleton<MouseMoveUseCase>();
+builder.Services.AddSingleton<MouseWheelUseCase>();
+builder.Services.AddSingleton<MouseButtonUseCase>();
+builder.Services.AddSingleton<MouseButtonsMaskUseCase>();
+
 builder.Services.AddRazorPages();
 builder.Services.AddEndpointsApiExplorer();
 
