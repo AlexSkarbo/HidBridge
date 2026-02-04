@@ -95,6 +95,7 @@ builder.Services.AddSingleton<GetVideoStreamsUseCase>();
 builder.Services.AddSingleton<StopVideoCaptureUseCase>();
 builder.Services.AddSingleton<GetFfmpegStatusUseCase>();
 builder.Services.AddSingleton<GetVideoModesUseCase>();
+builder.Services.AddSingleton<GetVideoStreamsConfigUseCase>();
 builder.Services.AddSingleton<GetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetActiveVideoProfileUseCase>();
@@ -111,6 +112,7 @@ builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOptionsP
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoUrlBuilder, VideoUrlBuilderAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoInputBuilder, VideoInputBuilderAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoModesProvider, VideoModesProviderAdapter>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoStreamArgsBuilder, VideoStreamArgsBuilderAdapter>();
 builder.Services.AddSingleton<ApplyVideoOutputUseCase>();
 builder.Services.AddSingleton<GetVideoOutputStatusUseCase>();
 builder.Services.AddSingleton<StartFfmpegUseCase>();

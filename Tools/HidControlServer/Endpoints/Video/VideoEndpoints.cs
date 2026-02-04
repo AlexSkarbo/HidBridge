@@ -697,27 +697,15 @@ public static class VideoEndpoints
             await fs.CopyToAsync(ctx.Response.Body, ctx.RequestAborted);
         });
 
-        group.MapGet("/streams/config", (Options opt, VideoSourceStore store, VideoProfileStore profiles) =>
+        group.MapGet("/streams/config", (GetVideoStreamsConfigUseCase useCase) =>
         {
-            var sources = store.GetAll().Where(s => s.Enabled).ToList();
-            var outputState = outputService.Get();
-            var list = sources.Select(s => new
-            {
-                id = s.Id,
-                args = VideoInputService.BuildFfmpegStreamArgs(opt, profiles, sources, s, appState, outputState)
-            });
+            var list = useCase.Execute();
             return Results.Ok(new { ok = true, streams = list });
         });
 
-        group.MapPost("/streams/config/write", (Options opt, VideoSourceStore store, VideoProfileStore profiles) =>
+        group.MapPost("/streams/config/write", (Options opt, GetVideoStreamsConfigUseCase useCase) =>
         {
-            var sources = store.GetAll().Where(s => s.Enabled).ToList();
-            var outputState = outputService.Get();
-            var list = sources.Select(s => new
-            {
-                id = s.Id,
-                args = VideoInputService.BuildFfmpegStreamArgs(opt, profiles, sources, s, appState, outputState)
-            }).ToList();
+            var list = useCase.Execute();
             Directory.CreateDirectory(opt.VideoLogDir);
             string path = Path.Combine(opt.VideoLogDir, "video_streams.json");
             File.WriteAllText(path, global::System.Text.Json.JsonSerializer.Serialize(list));
