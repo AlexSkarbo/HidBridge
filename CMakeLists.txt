@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.24)
 
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-project(pico_hid_bridge C CXX ASM)
+project(HidBridge VERSION 0.9.9 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 

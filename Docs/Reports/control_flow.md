@@ -50,7 +50,7 @@
 ## Як запускати string_manager harness
 1. Потрібен host-компілятор (gcc/clang). Зібрати можна так:
    ```
-   cd pico_hid_bridge_v9.9
+   cd HidBridge
    gcc Firmware/tests/string_manager/string_manager_harness.c Firmware/B_host/string_manager.c \
        -IFirmware/tests/string_manager -IFirmware/B_host -IFirmware/common -o string_manager_harness
    ```
