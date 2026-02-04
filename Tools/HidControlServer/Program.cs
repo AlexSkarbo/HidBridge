@@ -92,6 +92,7 @@ builder.Services.AddSingleton<GetVideoSourcesUseCase>();
 builder.Services.AddSingleton<SetVideoSourcesUseCase>();
 builder.Services.AddSingleton<UpsertVideoSourceUseCase>();
 builder.Services.AddSingleton<GetVideoStreamsUseCase>();
+builder.Services.AddSingleton<StopVideoCaptureUseCase>();
 builder.Services.AddSingleton<GetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetActiveVideoProfileUseCase>();

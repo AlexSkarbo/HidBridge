@@ -126,26 +126,15 @@ public static class VideoEndpoints
             return Results.Ok(useCase.Execute());
         });
 
-        group.MapPost("/capture/stop", async (string? id, VideoSourceStore store) =>
+        group.MapPost("/capture/stop", async (string? id, StopVideoCaptureUseCase useCase, HttpContext ctx) =>
         {
-            var sources = store.GetAll().Where(s => s.Enabled).ToList();
-            if (string.IsNullOrWhiteSpace(id))
+            var result = await useCase.ExecuteAsync(id, ctx.RequestAborted);
+            if (!result.Ok)
             {
-                foreach (var src in sources)
-                {
-                    runtime.SetManualStop(src.Id, true);
-                }
+                return Results.Ok(new { ok = false, error = result.Error ?? "failed" });
             }
-            else
-            {
-                foreach (var src in sources.Where(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)))
-                {
-                    runtime.SetManualStop(src.Id, true);
-                }
-            }
-            var stopped = await runtime.StopCaptureWorkersAsync(id, CancellationToken.None);
-            ServerEventLog.Log("video.capture", "manual_stop", new { id, count = stopped.Count });
-            return Results.Ok(new { ok = true, stopped, count = stopped.Count });
+            ServerEventLog.Log("video.capture", "manual_stop", new { id, count = result.Stopped.Count });
+            return Results.Ok(new { ok = true, stopped = result.Stopped, count = result.Stopped.Count });
         });
 
         group.MapPost("/profiles", (VideoProfilesRequest req, SetVideoProfilesUseCase useCase) =>
