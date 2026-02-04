@@ -10,7 +10,7 @@ Key highlights:
 - STRING_REQ requests are serialized via UART; idx>2 is deliberately stalled to avoid Windows probing.
 
 ## Test Harness
-- Build: gcc tests/string_manager/string_manager_harness.c B_host/string_manager.c -Itests/string_manager -IB_host -Icommon -o string_manager_harness (or clang).
+- Build: gcc Firmware/tests/string_manager/string_manager_harness.c Firmware/B_host/string_manager.c -IFirmware/tests/string_manager -IFirmware/B_host -IFirmware/common -o string_manager_harness (or clang).
 - Run: ./string_manager_harness – harness prints PASS/FAIL for cached flow, extra fetch, idx>2 fallback, timeout, cache-eviction.
 
 For state-machine notes see control_flow.md. For roadmap/details check TODO_4.4.1.md.

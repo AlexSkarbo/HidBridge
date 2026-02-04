@@ -4,14 +4,14 @@ This project accepts **external control commands over UART** on `B_host` and inj
 
 ## UART ports
 
-- **Bridge link (B_host ↔ A_device)**: configured by `PROXY_UART_*` in `common/proxy_config.h`.
+- **Bridge link (B_host ↔ A_device)**: configured by `PROXY_UART_*` in `Firmware/common/proxy_config.h`.
   - Default pins: `uart1` TX=4 RX=5 (CTS=6 RTS=7 if enabled)
   - Default requested baud: `PROXY_UART_BAUD` (set to `PROXY_UART_BAUD_FAST` by default)
-- **Control port (external → B_host)**: configured by `PROXY_CTRL_UART_*` in `common/proxy_config.h`.
+- **Control port (external → B_host)**: configured by `PROXY_CTRL_UART_*` in `Firmware/common/proxy_config.h`.
   - Default pins: `uart0` TX=0 RX=1
   - Default requested baud: `PROXY_CTRL_UART_BAUD` (3,000,000)
 
-`common/uart_transport.c` and `B_host/control_uart.c` log the **actual** baud set by the SDK (it can be clamped by the UART clock).
+`Firmware/common/uart_transport.c` and `Firmware/B_host/control_uart.c` log the **actual** baud set by the SDK (it can be clamped by the UART clock).
 
 ## Framing
 
@@ -44,7 +44,7 @@ All integers are little-endian unless noted.
 - `crc16` is CRC-CCITT with seed `0xFFFF` over `header+payload` (`[0..5+len]`).
 - `hmac16` is computed over `header+payload+crc` (`[0..7+len]`) using the shared key.
 - The HMAC key must match on both sides:
-  - Firmware: `PROXY_CTRL_HMAC_KEY` in `common/proxy_config.h`
+  - Firmware: `PROXY_CTRL_HMAC_KEY` in `Firmware/common/proxy_config.h`
   - Server: `masterSecret` in `hidcontrol.config.json` / `--masterSecret`
 
 ## Error codes

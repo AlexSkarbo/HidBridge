@@ -51,8 +51,8 @@
 1. Потрібен host-компілятор (gcc/clang). Зібрати можна так:
    ```
    cd pico_hid_bridge_v9.9
-   gcc tests/string_manager/string_manager_harness.c B_host/string_manager.c \
-       -Itests/string_manager -IB_host -Icommon -o string_manager_harness
+   gcc Firmware/tests/string_manager/string_manager_harness.c Firmware/B_host/string_manager.c \
+       -IFirmware/tests/string_manager -IFirmware/B_host -IFirmware/common -o string_manager_harness
    ```
 2. Запустити `./string_manager_harness` — побачите PASS/FAIL для кожного сценарію та короткий summary.
 3. Щоб додати власний тест, допишіть функцію у `string_manager_harness.c` (використовуючи `harness_prepare_extra_string`, `string_manager_handle_ctrl_request`, `string_manager_task` тощо) і зареєструйте її в масиві `tests[]`.
