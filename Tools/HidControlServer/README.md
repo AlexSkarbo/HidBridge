@@ -4,7 +4,7 @@ HTTP server that injects mouse/keyboard input into `B_host` via the control UART
 
 ## Requirements
 
-- .NET SDK 8.x
+- .NET SDK 9.0+
 - USB-UART adapter connected to `B_host` control UART pins:
   - TX (adapter) → `B_host` RX (`PROXY_CTRL_UART_RX_PIN`, default GPIO1)
   - RX (adapter) → `B_host` TX (`PROXY_CTRL_UART_TX_PIN`, default GPIO0)
@@ -17,6 +17,7 @@ HTTP server that injects mouse/keyboard input into `B_host` via the control UART
    - `serialPort` = твій COM порт
    - `baud` = `3000000`
    - `masterSecret` і `uartHmacKey` = те саме, що `PROXY_CTRL_HMAC_KEY` у прошивці
+     - див. `Firmware/common/proxy_config.h`
 3) Запусти сервер:
    ```bash
    dotnet run -- --config hidcontrol.config.json
@@ -59,7 +60,7 @@ Config file (optional):
 - Copy `hidcontrol.config.json.example` → `hidcontrol.config.json` and edit values
 - Or pass `--config path\\to\\hidcontrol.config.json`
 - `mouseTypeName` / `keyboardTypeName` can be used to bind to a specific interface type without hardcoding `itfSel`.
-- `masterSecret` must match `PROXY_CTRL_HMAC_KEY` in firmware for control UART commands to work (treated as master secret for per-device derivation).
+- `masterSecret` must match `PROXY_CTRL_HMAC_KEY` in firmware (`Firmware/common/proxy_config.h`) for control UART commands to work (treated as master secret for per-device derivation).
 
 Optional flags:
 
