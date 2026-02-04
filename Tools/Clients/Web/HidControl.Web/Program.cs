@@ -1,10 +1,12 @@
 using System.Text.Json;
 using System.Linq;
 using HidControl.ClientSdk;
+using System.Net.WebSockets;
 
 var builder = WebApplication.CreateBuilder(args);
 
 var app = builder.Build();
+app.UseWebSockets();
 
 string serverUrl = Environment.GetEnvironmentVariable("HIDBRIDGE_SERVER_URL") ?? "http://127.0.0.1:8080";
 string? token = Environment.GetEnvironmentVariable("HIDBRIDGE_TOKEN");
@@ -36,6 +38,36 @@ static async Task<string> SendWsOnceAsync(Uri serverHttpBase, string? token, Fun
     await ws.CloseAsync(ct);
     return resp ?? "{\"ok\":false,\"error\":\"no_response\"}";
 }
+
+app.Map("/ws/webrtc", async ctx =>
+{
+    if (!ctx.WebSockets.IsWebSocketRequest)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await ctx.Response.WriteAsync("expected websocket request", ctx.RequestAborted);
+        return;
+    }
+
+    using WebSocket browserWs = await ctx.WebSockets.AcceptWebSocketAsync();
+
+    var serverHttpBase = new Uri(serverUrl);
+    Uri serverWsUri = ToWsUri(serverHttpBase, "/ws/webrtc");
+
+    using var serverWs = new ClientWebSocket();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        serverWs.Options.SetRequestHeader("X-HID-Token", token!);
+    }
+
+    await serverWs.ConnectAsync(serverWsUri, ctx.RequestAborted);
+
+    var toServer = PumpAsync(browserWs, serverWs, ctx.RequestAborted);
+    var toBrowser = PumpAsync(serverWs, browserWs, ctx.RequestAborted);
+
+    await Task.WhenAny(toServer, toBrowser);
+    try { await browserWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", CancellationToken.None); } catch { }
+    try { await serverWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", CancellationToken.None); } catch { }
+});
 
 app.MapGet("/", () =>
 {
@@ -128,6 +160,28 @@ app.MapGet("/", () =>
       <button data-btn="right" class="click">Right click</button>
       <button data-btn="middle" class="click">Middle click</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h3>WebRTC Signaling Demo (DataChannel)</h3>
+    <div class="row muted">
+      This uses a minimal signaling relay: browser &harr; <code>HidControl.Web</code> &harr; <code>HidControlServer</code> (<code>/ws/webrtc</code>).
+      Open this page in <b>two tabs</b>, use the same room, then click <b>Call</b> in one tab.
+    </div>
+    <div class="row">
+      <input id="rtcRoom" style="min-width: 220px" value="demo" />
+      <button id="rtcJoin">Join</button>
+      <button id="rtcCall">Call</button>
+      <button id="rtcHangup">Hangup</button>
+    </div>
+    <div class="row">
+      <input id="rtcIce" style="min-width: 420px" placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
+    </div>
+    <div class="row">
+      <input id="rtcSend" style="min-width: 320px" placeholder="message over data channel" />
+      <button id="rtcSendBtn">Send</button>
+    </div>
+    <div class="row muted" id="rtcStatus">disconnected</div>
   </div>
 
   <pre id="out">ready</pre>
@@ -253,6 +307,131 @@ app.MapGet("/", () =>
     document.getElementById("sendCaptured").onclick = async () => {
       const holdMs = Number.parseInt(document.getElementById("capHoldMs").value, 10) || 80;
       await post("/api/keyboard/chord", { mods: lastCaptured.mods, keys: lastCaptured.keys, holdMs });
+    };
+
+    // --- WebRTC signaling demo ---
+    let sig = null;
+    let pc = null;
+    let dc = null;
+    const rtcStatus = document.getElementById("rtcStatus");
+
+    function setRtcStatus(s) { rtcStatus.textContent = s; }
+
+    function getIceServers() {
+      const t = document.getElementById("rtcIce").value.trim();
+      if (!t) return [];
+      try { return JSON.parse(t); } catch { return []; }
+    }
+
+    function ensureSig() {
+      if (sig && (sig.readyState === WebSocket.OPEN || sig.readyState === WebSocket.CONNECTING)) return sig;
+
+      const proto = location.protocol === "https:" ? "wss://" : "ws://";
+      sig = new WebSocket(proto + location.host + "/ws/webrtc");
+      sig.onopen = () => setRtcStatus("signaling: open");
+      sig.onclose = () => setRtcStatus("signaling: closed");
+      sig.onerror = () => setRtcStatus("signaling: error");
+      sig.onmessage = async (ev) => {
+        let msg = null;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (!msg || !msg.type) return;
+
+        if (msg.type === "webrtc.signal" && msg.data) {
+          const data = msg.data;
+          if (!pc) return;
+
+          if (data.kind === "offer") {
+            await pc.setRemoteDescription(data.sdp);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            sig.send(JSON.stringify({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "answer", sdp: pc.localDescription } }));
+            return;
+          }
+          if (data.kind === "answer") {
+            await pc.setRemoteDescription(data.sdp);
+            return;
+          }
+          if (data.kind === "candidate") {
+            if (data.candidate) {
+              try { await pc.addIceCandidate(data.candidate); } catch { /* ignore */ }
+            }
+            return;
+          }
+        }
+      };
+      return sig;
+    }
+
+    async function ensurePc() {
+      if (pc) return pc;
+      pc = new RTCPeerConnection({ iceServers: getIceServers() });
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) return;
+        if (!sig || sig.readyState !== WebSocket.OPEN) return;
+        sig.send(JSON.stringify({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "candidate", candidate: e.candidate } }));
+      };
+      pc.onconnectionstatechange = () => setRtcStatus("pc: " + pc.connectionState);
+      pc.ondatachannel = (e) => {
+        dc = e.channel;
+        wireDc();
+      };
+      return pc;
+    }
+
+    function wireDc() {
+      if (!dc) return;
+      dc.onopen = () => setRtcStatus("datachannel: open");
+      dc.onclose = () => setRtcStatus("datachannel: closed");
+      dc.onerror = () => setRtcStatus("datachannel: error");
+      dc.onmessage = (e) => show({ webrtc: "message", data: e.data });
+    }
+
+    document.getElementById("rtcJoin").onclick = async () => {
+      const room = document.getElementById("rtcRoom").value.trim() || "demo";
+      const s = ensureSig();
+      await ensurePc();
+      if (s.readyState === WebSocket.CONNECTING) {
+        await new Promise(r => setTimeout(r, 150));
+      }
+      s.send(JSON.stringify({ type: "join", room }));
+      setRtcStatus("joined room: " + room);
+    };
+
+    document.getElementById("rtcCall").onclick = async () => {
+      const room = document.getElementById("rtcRoom").value.trim() || "demo";
+      const s = ensureSig();
+      const p = await ensurePc();
+      if (s.readyState === WebSocket.CONNECTING) {
+        await new Promise(r => setTimeout(r, 150));
+      }
+      s.send(JSON.stringify({ type: "join", room }));
+
+      dc = p.createDataChannel("data");
+      wireDc();
+
+      const offer = await p.createOffer();
+      await p.setLocalDescription(offer);
+      s.send(JSON.stringify({ type: "signal", room, data: { kind: "offer", sdp: p.localDescription } }));
+      setRtcStatus("calling...");
+    };
+
+    document.getElementById("rtcHangup").onclick = async () => {
+      try { if (sig && sig.readyState === WebSocket.OPEN) sig.send(JSON.stringify({ type: "leave" })); } catch {}
+      try { if (dc) dc.close(); } catch {}
+      try { if (pc) pc.close(); } catch {}
+      try { if (sig) sig.close(); } catch {}
+      sig = null; pc = null; dc = null;
+      setRtcStatus("disconnected");
+    };
+
+    document.getElementById("rtcSendBtn").onclick = async () => {
+      const text = document.getElementById("rtcSend").value;
+      if (!dc || dc.readyState !== "open") {
+        show({ ok: false, error: "datachannel_not_open" });
+        return;
+      }
+      dc.send(text);
+      show({ ok: true, sent: text });
     };
   </script>
 </body>
@@ -422,6 +601,33 @@ static object ParseJsonOrString(string s)
     catch
     {
         return s;
+    }
+}
+
+static async Task PumpAsync(WebSocket src, WebSocket dst, CancellationToken ct)
+{
+    var buffer = new byte[64 * 1024];
+    while (!ct.IsCancellationRequested && src.State == WebSocketState.Open && dst.State == WebSocketState.Open)
+    {
+        WebSocketReceiveResult result;
+        try
+        {
+            result = await src.ReceiveAsync(buffer, ct);
+        }
+        catch
+        {
+            break;
+        }
+
+        if (result.MessageType == WebSocketMessageType.Close)
+        {
+            break;
+        }
+
+        if (result.Count > 0)
+        {
+            await dst.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), result.MessageType, result.EndOfMessage, ct);
+        }
     }
 }
 

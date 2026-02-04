@@ -239,6 +239,7 @@ app.MapKeyboardEndpoints();
 app.MapUartEndpoints();
 app.MapSystemEndpoints();
 app.MapHidWsEndpoints();
+app.MapWebRtcWsEndpoints();
 
 
 // Background startup tasks (device key, migrations, auto-refresh, ffmpeg watchdog).
