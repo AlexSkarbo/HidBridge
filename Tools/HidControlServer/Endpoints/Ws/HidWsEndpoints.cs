@@ -32,6 +32,7 @@ public static class HidWsEndpoints
             var keyboardTextUseCase = ctx.RequestServices.GetRequiredService<KeyboardTextUseCase>();
             var keyboardShortcutUseCase = ctx.RequestServices.GetRequiredService<KeyboardShortcutUseCase>();
             var keyboardReportUseCase = ctx.RequestServices.GetRequiredService<KeyboardReportUseCase>();
+            var keyboardResetUseCase = ctx.RequestServices.GetRequiredService<KeyboardResetUseCase>();
             var mouseMoveUseCase = ctx.RequestServices.GetRequiredService<MouseMoveUseCase>();
             var mouseWheelUseCase = ctx.RequestServices.GetRequiredService<MouseWheelUseCase>();
             var mouseButtonsMaskUseCase = ctx.RequestServices.GetRequiredService<MouseButtonsMaskUseCase>();
@@ -94,10 +95,10 @@ public static class HidWsEndpoints
                                 break;
                             case "mouse.move":
                             {
-                                int dx = GetInt(root, "dx");
-                                int dy = GetInt(root, "dy");
-                                int wheel = GetInt(root, "wheel");
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                int dx = HidWsJson.GetInt(root, "dx");
+                                int dy = HidWsJson.GetInt(root, "dy");
+                                int wheel = HidWsJson.GetInt(root, "wheel");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var moveRes = await mouseMoveUseCase.ExecuteAsync(new HidControl.Contracts.MouseMoveRequest(dx, dy, wheel, itfSelReq), ctx.RequestAborted);
                                 if (!moveRes.Ok)
                                 {
@@ -114,8 +115,8 @@ public static class HidWsEndpoints
                             }
                             case "mouse.wheel":
                             {
-                                int delta = GetInt(root, "delta");
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                int delta = HidWsJson.GetInt(root, "delta");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var wheelRes = await mouseWheelUseCase.ExecuteAsync(new HidControl.Contracts.MouseWheelRequest(delta, itfSelReq), ctx.RequestAborted);
                                 if (!wheelRes.Ok)
                                 {
@@ -132,8 +133,8 @@ public static class HidWsEndpoints
                             }
                             case "mouse.buttons":
                             {
-                                byte mask = (byte)GetInt(root, "mask", "buttonsMask");
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte mask = (byte)HidWsJson.GetInt(root, "mask", "buttonsMask");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var buttonsRes = await mouseButtonsMaskUseCase.ExecuteAsync(new HidControl.Contracts.MouseButtonsMaskRequest(mask, itfSelReq), ctx.RequestAborted);
                                 if (!buttonsRes.Ok)
                                 {
@@ -147,7 +148,7 @@ public static class HidWsEndpoints
                             {
                                 string button = root.TryGetProperty("button", out var b) ? (b.GetString() ?? "") : "";
                                 bool down = root.TryGetProperty("down", out var d) && d.ValueKind == JsonValueKind.True;
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var btnRes = await mouseButtonUseCase.ExecuteAsync(new HidControl.Contracts.MouseButtonRequest(button, down, itfSelReq), ctx.RequestAborted);
                                 if (!btnRes.Ok)
                                 {
@@ -159,9 +160,9 @@ public static class HidWsEndpoints
                             }
                             case "keyboard.down":
                             {
-                                byte usage = (byte)GetInt(root, "usage");
-                                byte? mods = GetByteNullable(root, "mods") ?? GetByteNullable(root, "modifiers");
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte usage = (byte)HidWsJson.GetInt(root, "usage");
+                                byte? mods = HidWsJson.GetByteNullable(root, "mods") ?? HidWsJson.GetByteNullable(root, "modifiers");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var downRes = await keyboardDownUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardPressRequest(usage, mods, itfSelReq), ctx.RequestAborted);
                                 if (!downRes.Ok)
                                 {
@@ -173,9 +174,9 @@ public static class HidWsEndpoints
                             }
                             case "keyboard.up":
                             {
-                                byte usage = (byte)GetInt(root, "usage");
-                                byte? mods = GetByteNullable(root, "mods") ?? GetByteNullable(root, "modifiers");
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte usage = (byte)HidWsJson.GetInt(root, "usage");
+                                byte? mods = HidWsJson.GetByteNullable(root, "mods") ?? HidWsJson.GetByteNullable(root, "modifiers");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var upRes = await keyboardUpUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardPressRequest(usage, mods, itfSelReq), ctx.RequestAborted);
                                 if (!upRes.Ok)
                                 {
@@ -187,9 +188,9 @@ public static class HidWsEndpoints
                             }
                             case "keyboard.press":
                             {
-                                byte usage = (byte)GetInt(root, "usage");
-                                byte modifiers = (byte)GetInt(root, "mods", "modifiers");
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte usage = (byte)HidWsJson.GetInt(root, "usage");
+                                byte modifiers = (byte)HidWsJson.GetInt(root, "mods", "modifiers");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
 
                                 var pressRes = await keyboardPressUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardPressRequest(usage, modifiers, itfSelReq), ctx.RequestAborted);
                                 if (!pressRes.Ok)
@@ -204,13 +205,13 @@ public static class HidWsEndpoints
                             case "keyboard.shortcut":
                             {
                                 string shortcut = root.TryGetProperty("shortcut", out var se) ? (se.GetString() ?? "") : "";
-                                int holdMs = root.TryGetProperty("holdMs", out var hme) && hme.ValueKind == JsonValueKind.Number ? hme.GetInt32() : 30;
-                                bool applyMapping = !(root.TryGetProperty("applyMapping", out var ame) && ame.ValueKind == JsonValueKind.False);
+                                int holdMs = HidWsJson.GetInt(root, "holdMs");
+                                bool applyMapping = HidWsJson.GetBool(root, "applyMapping", true);
 
                                 if (holdMs < 0) holdMs = 0;
                                 if (holdMs > 5000) holdMs = 5000;
 
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var shortcutRes = await keyboardShortcutUseCase.ExecuteAsync(shortcut, holdMs, applyMapping, itfSelReq, ctx.RequestAborted);
                                 if (!shortcutRes.Ok)
                                 {
@@ -230,7 +231,7 @@ public static class HidWsEndpoints
                                     await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                     break;
                                 }
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
                                 var textRes = await keyboardTextUseCase.ExecuteAsync(text, layout, itfSelReq, ctx.RequestAborted);
                                 if (!textRes.Ok)
                                 {
@@ -242,16 +243,16 @@ public static class HidWsEndpoints
                             }
                             case "keyboard.report":
                             {
-                                byte? itfSelReq = GetByteNullable(root, "itfSel");
-                                int modifiersInt = GetInt(root, "mods", "modifiers");
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
+                                int modifiersInt = HidWsJson.GetInt(root, "mods", "modifiers");
                                 if (modifiersInt < 0 || modifiersInt > 255)
                                 {
                                     await SendAsync(new { ok = false, type, id = msgId, error = "modifiers_out_of_range" }, ctx.RequestAborted);
                                     break;
                                 }
                                 byte modifiers = (byte)modifiersInt;
-                                bool applyMapping = GetBool(root, "applyMapping", true);
-                                var keysList = GetIntArray(root, "keys");
+                                bool applyMapping = HidWsJson.GetBool(root, "applyMapping", true);
+                                var keysList = HidWsJson.GetIntArray(root, "keys");
                                 if (keysList.Count > 6)
                                 {
                                     await SendAsync(new { ok = false, type, id = msgId, error = "keys_max_6" }, ctx.RequestAborted);
@@ -279,6 +280,18 @@ public static class HidWsEndpoints
                             KeyboardReportDone:
                                 break;
                             }
+                            case "keyboard.reset":
+                            {
+                                byte? itfSelReq = HidWsJson.GetByteNullable(root, "itfSel");
+                                var resetRes = await keyboardResetUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardResetRequest(itfSelReq), ctx.RequestAborted);
+                                if (!resetRes.Ok)
+                                {
+                                    await SendAsync(new { ok = false, type, id = msgId, error = resetRes.Error ?? "failed" }, ctx.RequestAborted);
+                                    break;
+                                }
+                                await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
+                                break;
+                            }
                             default:
                                 await SendAsync(new { ok = false, error = "unknown_type", type, id = msgId }, ctx.RequestAborted);
                                 break;
@@ -291,79 +304,5 @@ public static class HidWsEndpoints
                 }
             }
         }));
-    }
-
-    /// <summary>
-    /// Gets int.
-    /// </summary>
-    /// <param name="root">The root.</param>
-    /// <param name="names">The names.</param>
-    /// <returns>Result.</returns>
-    private static int GetInt(JsonElement root, params string[] names)
-    {
-        foreach (string name in names)
-        {
-            if (root.TryGetProperty(name, out var el))
-            {
-                if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out int num)) return num;
-                if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out int strNum)) return strNum;
-            }
-        }
-        return 0;
-    }
-
-    /// <summary>
-    /// Gets byte nullable.
-    /// </summary>
-    /// <param name="root">The root.</param>
-    /// <param name="name">The name.</param>
-    /// <returns>Result.</returns>
-    private static byte? GetByteNullable(JsonElement root, string name)
-    {
-        if (!root.TryGetProperty(name, out var el)) return null;
-        if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out int num)) return (byte)num;
-        if (el.ValueKind == JsonValueKind.String && byte.TryParse(el.GetString(), out byte strNum)) return strNum;
-        return null;
-    }
-
-    /// <summary>
-    /// Gets bool.
-    /// </summary>
-    /// <param name="root">The root.</param>
-    /// <param name="name">The name.</param>
-    /// <param name="fallback">The fallback.</param>
-    /// <returns>Result.</returns>
-    private static bool GetBool(JsonElement root, string name, bool fallback)
-    {
-        if (!root.TryGetProperty(name, out var el)) return fallback;
-        if (el.ValueKind == JsonValueKind.True) return true;
-        if (el.ValueKind == JsonValueKind.False) return false;
-        if (el.ValueKind == JsonValueKind.String && bool.TryParse(el.GetString(), out bool b)) return b;
-        return fallback;
-    }
-
-    /// <summary>
-    /// Gets int array.
-    /// </summary>
-    /// <param name="root">The root.</param>
-    /// <param name="name">The name.</param>
-    /// <returns>Result.</returns>
-    private static List<int> GetIntArray(JsonElement root, string name)
-    {
-        var list = new List<int>();
-        if (!root.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Array) return list;
-        foreach (var v in el.EnumerateArray())
-        {
-            if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int num))
-            {
-                list.Add(num);
-                continue;
-            }
-            if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out int strNum))
-            {
-                list.Add(strNum);
-            }
-        }
-        return list;
     }
 }

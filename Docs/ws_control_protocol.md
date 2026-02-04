@@ -84,12 +84,18 @@
 - `itfSel`: byte (опційно)
 
 Параметри keyboard payload:
-- `type`: `down` | `up` | `press` | `report` | `type`
+- `type`: `down` | `up` | `press` | `report` | `type` | `reset`
 - `usage`: int (для down/up/press)
 - `modifiers`: int (опційно)
 - `keys`: int[] (для report)
 - `text`: string (для type)
 - `itfSel`: byte (опційно)
+
+`reset` clears server-side keyboard state and emits an "all up" report:
+
+```json
+{ "type": "keyboard.reset", "itfSel": 2 }
+```
 
 ### batch (client -> server)
 
