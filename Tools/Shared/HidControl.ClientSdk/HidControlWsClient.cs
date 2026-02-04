@@ -13,6 +13,15 @@ public sealed class HidControlWsClient : IAsyncDisposable
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     /// <summary>
+    /// Sets a request header to be used on the next Connect call.
+    /// Must be called before connecting.
+    /// </summary>
+    /// <param name="name">Header name.</param>
+    /// <param name="value">Header value.</param>
+    public void SetRequestHeader(string name, string value)
+        => _ws.Options.SetRequestHeader(name, value);
+
+    /// <summary>
     /// Connects to the WebSocket endpoint.
     /// </summary>
     /// <param name="uri">The WebSocket URI.</param>
@@ -152,6 +161,35 @@ public sealed class HidControlWsClient : IAsyncDisposable
                 await onDisconnect(null).ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// Receives a single complete message as UTF-8 text.
+    /// </summary>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>Text payload, or null if the socket was closed.</returns>
+    public async Task<string?> ReceiveTextOnceAsync(CancellationToken ct = default)
+    {
+        byte[] buffer = new byte[64 * 1024];
+        using var ms = new MemoryStream();
+        while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+        {
+            WebSocketReceiveResult result = await _ws.ReceiveAsync(buffer, ct).ConfigureAwait(false);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                return null;
+            }
+            if (result.Count > 0)
+            {
+                ms.Write(buffer, 0, result.Count);
+            }
+            if (result.EndOfMessage)
+            {
+                break;
+            }
+        }
+
+        return Encoding.UTF8.GetString(ms.ToArray());
     }
 
     /// <summary>
