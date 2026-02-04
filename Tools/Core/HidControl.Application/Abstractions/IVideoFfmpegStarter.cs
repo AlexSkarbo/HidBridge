@@ -1,5 +1,4 @@
 using HidControl.Contracts;
-using HidControl.UseCases.Video;
 using AppFfmpegStartResult = HidControl.Application.Models.FfmpegStartResult;
 
 namespace HidControl.Application.Abstractions;

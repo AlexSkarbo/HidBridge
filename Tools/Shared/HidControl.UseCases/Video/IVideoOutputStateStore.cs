@@ -1,3 +1,5 @@
+using HidControl.Contracts;
+
 namespace HidControl.UseCases.Video;
 
 // Storage abstraction for video output settings.

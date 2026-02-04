@@ -7,6 +7,5 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\HidControl.Contracts\HidControl.Contracts.csproj" />
     <ProjectReference Include="..\..\Shared\HidControl.Core\HidControl.Core.csproj" />
-    <ProjectReference Include="..\..\Shared\HidControl.UseCases\HidControl.UseCases.csproj" />
   </ItemGroup>
 </Project>

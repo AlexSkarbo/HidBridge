@@ -1,4 +1,4 @@
-using HidControl.UseCases.Video;
+using HidControl.Contracts;
 
 namespace HidControl.Application.Abstractions;
 

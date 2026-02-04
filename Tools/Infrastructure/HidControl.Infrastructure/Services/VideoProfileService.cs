@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using HidControl.Contracts;
-using HidControl.UseCases;
 
 namespace HidControl.Infrastructure.Services;
 

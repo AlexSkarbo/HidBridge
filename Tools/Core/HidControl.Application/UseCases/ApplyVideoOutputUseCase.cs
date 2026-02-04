@@ -1,7 +1,6 @@
 using HidControl.Application.Abstractions;
 using HidControl.Application.Models;
 using HidControl.Contracts;
-using HidControl.UseCases.Video;
 using System.Linq;
 using AppFfmpegStartResult = HidControl.Application.Models.FfmpegStartResult;
 using System.Collections.Generic;
@@ -90,7 +89,7 @@ public sealed class ApplyVideoOutputUseCase
             Ok: true,
             State: state,
             Error: null,
-            Mode: VideoOutputService.ResolveMode(state),
+            Mode: VideoOutputModes.ResolveMode(state),
             AnyRunningBefore: anyRunningBefore,
             SourcesEligible: eligible.Count,
             ManualStops: manualStops,

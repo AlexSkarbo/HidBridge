@@ -1,5 +1,4 @@
 using HidControl.Contracts;
-using HidControl.UseCases.Video;
 
 namespace HidControl.Application.Abstractions;
 
@@ -17,4 +16,3 @@ public interface IVideoOutputApplier
     /// <returns>True when applied.</returns>
     bool TryApply(VideoOutputRequest req, out VideoOutputState next, out string? error);
 }
-

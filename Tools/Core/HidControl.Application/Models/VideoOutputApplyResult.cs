@@ -1,4 +1,4 @@
-using HidControl.UseCases.Video;
+using HidControl.Contracts;
 
 namespace HidControl.Application.Models;
 
@@ -26,4 +26,3 @@ public sealed record VideoOutputApplyResult(
     IReadOnlyList<string> StoppedWorkers,
     IReadOnlyList<string> StoppedFfmpeg,
     FfmpegStartResult StartResult);
-
