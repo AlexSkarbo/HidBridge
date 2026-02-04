@@ -443,10 +443,25 @@ app.MapGet("/", () =>
         const cand = (typeof e.candidate.toJSON === "function") ? e.candidate.toJSON() : e.candidate;
         sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "candidate", candidate: cand } }).catch(() => {});
       };
-      pc.onconnectionstatechange = () => setRtcStatus("pc: " + pc.connectionState);
+      pc.onconnectionstatechange = () => {
+        setRtcStatus("pc: " + pc.connectionState);
+        rtcLog("pc.connectionState", pc.connectionState);
+      };
       pc.oniceconnectionstatechange = () => console.log("ice:", pc.iceConnectionState);
       pc.onsignalingstatechange = () => console.log("signaling:", pc.signalingState);
       pc.onicegatheringstatechange = () => console.log("gathering:", pc.iceGatheringState);
+      pc.oniceconnectionstatechange = () => {
+        console.log("ice:", pc.iceConnectionState);
+        rtcLog("pc.iceConnectionState", pc.iceConnectionState);
+      };
+      pc.onsignalingstatechange = () => {
+        console.log("signaling:", pc.signalingState);
+        rtcLog("pc.signalingState", pc.signalingState);
+      };
+      pc.onicegatheringstatechange = () => {
+        console.log("gathering:", pc.iceGatheringState);
+        rtcLog("pc.iceGatheringState", pc.iceGatheringState);
+      };
       pc.ondatachannel = (e) => {
         dc = e.channel;
         wireDc();
