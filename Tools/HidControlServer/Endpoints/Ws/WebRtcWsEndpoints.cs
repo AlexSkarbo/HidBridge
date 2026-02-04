@@ -1,7 +1,7 @@
-using System.Collections.Concurrent;
-using System.Text;
-using System.Text.Json;
-using System.Net.WebSockets;
+using global::System.Collections.Concurrent;
+using global::System.Net.WebSockets;
+using global::System.Text;
+using global::System.Text.Json;
 
 namespace HidControlServer.Endpoints.Ws;
 
@@ -351,4 +351,3 @@ public static class WebRtcWsEndpoints
         }
     }
 }
-
