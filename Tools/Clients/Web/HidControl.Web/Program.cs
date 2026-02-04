@@ -313,6 +313,7 @@ app.MapGet("/", () =>
     let sig = null;
     let pc = null;
     let dc = null;
+    let pendingCandidates = [];
     const rtcStatus = document.getElementById("rtcStatus");
 
     function setRtcStatus(s) { rtcStatus.textContent = s; }
@@ -347,10 +348,15 @@ app.MapGet("/", () =>
 
         if (msg.type === "webrtc.signal" && msg.data) {
           const data = msg.data;
-          if (!pc) return;
+          if (!pc) await ensurePc();
 
           if (data.kind === "offer") {
             await pc.setRemoteDescription(data.sdp);
+            // Apply any ICE candidates that arrived before the offer.
+            for (const c of pendingCandidates) {
+              try { await pc.addIceCandidate(c); } catch { /* ignore */ }
+            }
+            pendingCandidates = [];
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             await sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "answer", sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
@@ -358,11 +364,21 @@ app.MapGet("/", () =>
           }
           if (data.kind === "answer") {
             await pc.setRemoteDescription(data.sdp);
+            // Apply any ICE candidates that arrived before the answer.
+            for (const c of pendingCandidates) {
+              try { await pc.addIceCandidate(c); } catch { /* ignore */ }
+            }
+            pendingCandidates = [];
             return;
           }
           if (data.kind === "candidate") {
             if (data.candidate) {
-              try { await pc.addIceCandidate(data.candidate); } catch { /* ignore */ }
+              // Some browsers deliver candidates before remote description is set.
+              if (!pc.remoteDescription || !pc.remoteDescription.type) {
+                pendingCandidates.push(data.candidate);
+              } else {
+                try { await pc.addIceCandidate(data.candidate); } catch { /* ignore */ }
+              }
             }
             return;
           }
