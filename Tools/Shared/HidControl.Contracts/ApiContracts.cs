@@ -57,6 +57,15 @@ public sealed record KeyboardPressRequest(byte Usage, byte? Modifiers, byte? Itf
 public sealed record KeyboardTypeRequest(string Text, byte? ItfSel);
 
 /// <summary>
+/// API contract model for KeyboardShortcutRequest.
+/// </summary>
+/// <param name="Shortcut">Shortcut chord (e.g. "Ctrl+Alt+Del", "Win+R", "Alt+F4").</param>
+/// <param name="ItfSel">ItfSel (optional).</param>
+/// <param name="HoldMs">Optional delay in milliseconds between key-down and key-up (default: server-defined).</param>
+/// <param name="ApplyMapping">True to apply per-device mapping (default: true).</param>
+public sealed record KeyboardShortcutRequest(string Shortcut, byte? ItfSel, int? HoldMs, bool? ApplyMapping);
+
+/// <summary>
 /// API contract model for KeyboardReportRequest.
 /// </summary>
 /// <param name="Modifiers">Modifiers.</param>

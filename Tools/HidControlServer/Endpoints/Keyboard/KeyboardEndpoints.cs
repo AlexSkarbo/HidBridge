@@ -164,6 +164,113 @@ public static class KeyboardEndpoints
         group.MapPost("/type", HandleType);
         group.MapPost("/text", HandleType);
 
+        group.MapPost("/shortcut", async (KeyboardShortcutRequest req, Options opt, HidUartClient uart, KeyboardMappingStore mappingStore, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Shortcut))
+            {
+                return Results.BadRequest(new { ok = false, error = "shortcut is required" });
+            }
+
+            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.KeyboardTypeName, opt.KeyboardItfSel, uart, ct);
+            if (itfSel == 0xFE)
+            {
+                return Results.BadRequest(new { ok = false, error = "keyboard_itf_unresolved" });
+            }
+
+            if (!HidKeyboardShortcuts.TryParseChord(req.Shortcut, out byte parsedMods, out byte[] parsedKeys, out string? parseErr))
+            {
+                return Results.BadRequest(new { ok = false, error = parseErr ?? "invalid shortcut" });
+            }
+
+            bool applyMapping = req.ApplyMapping ?? true;
+            byte finalMods = 0;
+            var finalKeys = new List<byte>(Math.Min(6, parsedKeys.Length));
+
+            if (applyMapping)
+            {
+                // Map modifier bits as individual usages (0xE0..0xE7) through the per-device mapping store.
+                for (int i = 0; i < 8; i++)
+                {
+                    byte bit = (byte)(1 << i);
+                    if ((parsedMods & bit) == 0) continue;
+                    byte usage = (byte)(0xE0 + i);
+                    byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, mappingStore, itfSel, usage);
+                    if (InputReportBuilder.IsModifierUsage(mapped))
+                    {
+                        finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
+                        continue;
+                    }
+                    if (!finalKeys.Contains(mapped))
+                    {
+                        finalKeys.Add(mapped);
+                        if (finalKeys.Count > 6)
+                        {
+                            return Results.BadRequest(new { ok = false, error = "too many non-modifier keys (max 6)" });
+                        }
+                    }
+                }
+
+                foreach (byte usage in parsedKeys)
+                {
+                    byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, mappingStore, itfSel, usage);
+                    if (InputReportBuilder.IsModifierUsage(mapped))
+                    {
+                        finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
+                        continue;
+                    }
+                    if (finalKeys.Contains(mapped)) continue;
+                    finalKeys.Add(mapped);
+                    if (finalKeys.Count > 6)
+                    {
+                        return Results.BadRequest(new { ok = false, error = "too many non-modifier keys (max 6)" });
+                    }
+                }
+            }
+            else
+            {
+                finalMods = parsedMods;
+                foreach (byte usage in parsedKeys)
+                {
+                    if (finalKeys.Contains(usage)) continue;
+                    finalKeys.Add(usage);
+                    if (finalKeys.Count > 6)
+                    {
+                        return Results.BadRequest(new { ok = false, error = "too many non-modifier keys (max 6)" });
+                    }
+                }
+            }
+
+            int holdMs = req.HoldMs ?? 30;
+            if (holdMs < 0) holdMs = 0;
+            if (holdMs > 5000) holdMs = 5000;
+
+            await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ct);
+            byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, finalMods, finalKeys);
+            byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
+            try
+            {
+                await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
+                if (holdMs > 0)
+                {
+                    await Task.Delay(holdMs, ct);
+                }
+                await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
+
+            return Results.Ok(new
+            {
+                ok = true,
+                itfSel,
+                shortcut = req.Shortcut,
+                modifiers = finalMods,
+                keys = finalKeys
+            });
+        });
+
         group.MapPost("/report", async (KeyboardReportRequest req, Options opt, HidUartClient uart, KeyboardMappingStore mappingStore, CancellationToken ct) =>
         {
             byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.KeyboardTypeName, opt.KeyboardItfSel, uart, ct);
