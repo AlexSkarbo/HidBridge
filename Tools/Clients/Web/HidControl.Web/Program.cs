@@ -182,12 +182,14 @@ app.MapGet("/", () =>
       <button id="rtcSendBtn">Send</button>
     </div>
     <div class="row muted" id="rtcStatus">disconnected</div>
+    <pre id="rtcOut">webrtc: ready</pre>
   </div>
 
   <pre id="out">ready</pre>
 
   <script>
     const out = document.getElementById("out");
+    const rtcOut = document.getElementById("rtcOut");
 
     function show(x) {
       out.textContent = typeof x === "string" ? x : JSON.stringify(x, null, 2);
@@ -320,7 +322,11 @@ app.MapGet("/", () =>
 
     function rtcLog(kind, payload) {
       rtcDebugSeq++;
-      show({ webrtc: kind, seq: rtcDebugSeq, payload });
+      const line = JSON.stringify({ webrtc: kind, seq: rtcDebugSeq, payload });
+      const lines = rtcOut.textContent.split("\n");
+      lines.push(line);
+      while (lines.length > 60) lines.shift();
+      rtcOut.textContent = lines.join("\n");
     }
 
     function setRtcStatus(s) { rtcStatus.textContent = s; }
