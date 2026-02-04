@@ -1,0 +1,222 @@
+
+    =========================== USB Port2 ===========================
+
+Connection Status        : 0x01 (Device is connected)
+Port Chain               : 2-2
+Properties               : 0x01
+ IsUserConnectable       : yes
+ PortIsDebugCapable      : no
+ PortHasMultiCompanions  : no
+ PortConnectorIsTypeC    : no
+ConnectionIndex          : 0x02 (Port 2)
+CompanionIndex           : 0
+ CompanionHubSymLnk      : USB#ROOT_HUB30#5&315b279c&0&0#{f18a0e88-c30c-11d0-8815-00a0c906bed8}
+ CompanionPortNumber     : 0x06 (Port 6)
+ -> CompanionPortChain   : 2-6
+
+      ========================== Summary =========================
+Vendor ID                : 0x1BCF (Sunplus Innovation Technology Inc.)
+Product ID               : 0x0005
+Manufacturer String      : ---
+Product String           : "USB Optical Mouse"
+Serial                   : ---
+USB Version              : 2.0 (but 12 Mbit/s FullSpeed only)
+Port maximum Speed       : High-Speed (Companion Port 2-6 is doing the SuperSpeed)
+Device maximum Speed     : Full-Speed
+Device Connection Speed  : Full-Speed
+Self powered             : no
+Demanded Current         : 98 mA
+Used Endpoints           : 2
+
+      ======================== USB Device ========================
+
+        +++++++++++++++++ Device Information ++++++++++++++++++
+Device Description       : USB-устройство ввода
+Device Path 1            : \\?\USB#VID_1BCF&PID_0005#6&5280d8e&0&2#{a5dcbf10-6530-11d2-901f-00c04fb951ed} (GUID_DEVINTERFACE_USB_DEVICE)
+Device Path 2            : \\?\USB#VID_1BCF&PID_0005#6&5280d8e&0&2#{a6782bce-4376-4de2-8096-70aa9e8fed19}
+Kernel Name              : \Device\USBPDO-69
+Device ID                : USB\VID_1BCF&PID_0005\6&5280D8E&0&2
+Hardware IDs             : USB\VID_1BCF&PID_0005&REV_0014 USB\VID_1BCF&PID_0005
+Driver KeyName           : {745a17a0-74d3-11d0-b6fe-00a0c90f57da}\0080 (GUID_DEVCLASS_HIDCLASS)
+Driver                   : \SystemRoot\System32\drivers\hidusb.sys (Version: 10.0.26100.7262  Date: 2025-11-18  Company: Microsoft Corporation)
+Driver Inf               : C:\WINDOWS\inf\input.inf
+Legacy BusType           : PNPBus
+Class                    : HIDClass
+Class GUID               : {745a17a0-74d3-11d0-b6fe-00a0c90f57da} (GUID_DEVCLASS_HIDCLASS)
+Service                  : HidUsb
+Enumerator               : USB
+Location Info            : Port_#0002.Hub_#0001
+Address                  : 2
+Location IDs             : PCIROOT(0)#PCI(0801)#PCI(0003)#USBROOT(0)#USB(2), ACPI(_SB_)#ACPI(PCI0)#ACPI(GP17)#ACPI(XHC0)#ACPI(RHUB)#ACPI(PRT2)
+Container ID             : {f08908cd-cfd3-11f0-8ee7-010101010000}
+Manufacturer Info        : (Стандартные системные устройства)
+Capabilities             : 0x84 (Removable, SurpriseRemovalOK)
+Status                   : 0x0180600A (DN_DRIVER_LOADED, DN_STARTED, DN_DISABLEABLE, DN_REMOVABLE, DN_NT_ENUMERATOR, DN_NT_DRIVER)
+Problem Code             : 0
+SelectiveSuspendEnabled  : 0
+EnhancedPowerMgmtEnabled : 1
+Power State              : D0 (supported: D0, D1, D2, D3, wake from D0, wake from D1, wake from D2)
+
+        +++++++++++++++++ Registry USB Flags +++++++++++++++++
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\usbflags\1BCF00050014
+ osvc                    : REG_BINARY 00 00
+
+        ---------------- Connection Information ---------------
+Connection Index         : 0x02 (Port 2)
+Connection Status        : 0x01 (DeviceConnected)
+Current Config Value     : 0x01 (Configuration 1)
+Device Address           : 0x05 (5)
+Is Hub                   : 0x00 (no)
+Device Bus Speed         : 0x01 (Full-Speed)
+Number of open Pipes     : 0x01 (1 pipe to data endpoints)
+Pipe[0]                  : EndpointID=1  Direction=IN   ScheduleOffset=0  Type=Interrupt  wMaxPacketSize=0x7     bInterval=10  -> 186 Bits/ms = 23250 Bytes/s
+Data (HexDump)           : 02 00 00 00 12 01 00 02 00 00 00 40 CF 1B 05 00   ...........@....
+                           14 00 00 02 00 01 01 01 00 05 00 01 00 00 00 01   ................
+                           00 00 00 07 05 81 03 07 00 0A 00 00 00 00         ..............
+
+        --------------- Connection Information V2 -------------
+Connection Index         : 0x02 (2)
+Length                   : 0x10 (16 bytes)
+SupportedUsbProtocols    : 0x03
+ Usb110                  : 1 (yes, port supports USB 1.1)
+ Usb200                  : 1 (yes, port supports USB 2.0)
+ Usb300                  : 0 (no, port not supports USB 3.0) -> but Companion Port 2-6 does
+ ReservedMBZ             : 0x00
+Flags                    : 0x00
+ DevIsOpAtSsOrHigher     : 0 (Device is not operating at SuperSpeed or higher)
+ DevIsSsCapOrHigher      : 0 (Device is not SuperSpeed capable or higher)
+ DevIsOpAtSsPlusOrHigher : 0 (Device is not operating at SuperSpeedPlus or higher)
+ DevIsSsPlusCapOrHigher  : 0 (Device is not SuperSpeedPlus capable or higher)
+ ReservedMBZ             : 0x00
+Data (HexDump)           : 02 00 00 00 10 00 00 00 03 00 00 00 00 00 00 00   ................
+
+    ---------------------- Device Descriptor ----------------------
+bLength                  : 0x12 (18 bytes)
+bDescriptorType          : 0x01 (Device Descriptor)
+bcdUSB                   : 0x200 (USB Version 2.0) -> but device is Full-Speed only
+bDeviceClass             : 0x00 (defined by the interface descriptors)
+bDeviceSubClass          : 0x00
+bDeviceProtocol          : 0x00
+bMaxPacketSize0          : 0x40 (64 bytes)
+idVendor                 : 0x1BCF (Sunplus Innovation Technology Inc.)
+idProduct                : 0x0005
+bcdDevice                : 0x0014
+iManufacturer            : 0x00 (No String Descriptor)
+iProduct                 : 0x02 (String Descriptor 2)
+ Language 0x0409         : "USB Optical Mouse"
+iSerialNumber            : 0x00 (No String Descriptor)
+bNumConfigurations       : 0x01 (1 Configuration)
+Data (HexDump)           : 12 01 00 02 00 00 00 40 CF 1B 05 00 14 00 00 02   .......@........
+                           00 01                                             ..
+
+    ------------------ Configuration Descriptor -------------------
+bLength                  : 0x09 (9 bytes)
+bDescriptorType          : 0x02 (Configuration Descriptor)
+wTotalLength             : 0x0022 (34 bytes)
+bNumInterfaces           : 0x01 (1 Interface)
+bConfigurationValue      : 0x01 (Configuration 1)
+iConfiguration           : 0x00 (No String Descriptor)
+bmAttributes             : 0xA0
+ D7: Reserved, set 1     : 0x01
+ D6: Self Powered        : 0x00 (no)
+ D5: Remote Wakeup       : 0x01 (yes)
+ D4..0: Reserved, set 0  : 0x00
+MaxPower                 : 0x31 (98 mA)
+Data (HexDump)           : 09 02 22 00 01 01 00 A0 31 09 04 00 00 01 03 01   ..".....1.......
+                           02 00 09 21 10 01 00 01 22 4B 00 07 05 81 03 07   ...!...."K......
+                           00 0A                                             ..
+
+        ---------------- Interface Descriptor -----------------
+bLength                  : 0x09 (9 bytes)
+bDescriptorType          : 0x04 (Interface Descriptor)
+bInterfaceNumber         : 0x00 (Interface 0)
+bAlternateSetting        : 0x00
+bNumEndpoints            : 0x01 (1 Endpoint)
+bInterfaceClass          : 0x03 (HID - Human Interface Device)
+bInterfaceSubClass       : 0x01 (Boot Interface)
+bInterfaceProtocol       : 0x02 (Mouse)
+iInterface               : 0x00 (No String Descriptor)
+Data (HexDump)           : 09 04 00 00 01 03 01 02 00                        .........
+
+        ------------------- HID Descriptor --------------------
+bLength                  : 0x09 (9 bytes)
+bDescriptorType          : 0x21 (HID Descriptor)
+bcdHID                   : 0x0110 (HID Version 1.10)
+bCountryCode             : 0x00 (00 = not localized)
+bNumDescriptors          : 0x01
+Data (HexDump)           : 09 21 10 01 00 01 22 4B 00                        .!...."K.
+Descriptor 1:
+bDescriptorType          : 0x22 (Class=Report)
+wDescriptorLength        : 0x004B (75 bytes)
+Error reading descriptor : ERROR_GEN_FAILURE (due to a obscure limitation of the Win32 USB API, see F1 Help)
+
+        ----------------- Endpoint Descriptor -----------------
+bLength                  : 0x07 (7 bytes)
+bDescriptorType          : 0x05 (Endpoint Descriptor)
+bEndpointAddress         : 0x81 (Direction=IN EndpointID=1)
+bmAttributes             : 0x03 (TransferType=Interrupt)
+wMaxPacketSize           : 0x0007 (7 bytes)
+bInterval                : 0x0A (10 ms)
+Data (HexDump)           : 07 05 81 03 07 00 0A                              .......
+
+    ----------------- Device Qualifier Descriptor -----------------
+Error                    : ERROR_GEN_FAILURE  (because the device is Full-Speed only)
+
+      -------------------- String Descriptors -------------------
+             ------ String Descriptor 0 ------
+bLength                  : 0x04 (4 bytes)
+bDescriptorType          : 0x03 (String Descriptor)
+Language ID[0]           : 0x0409 (English - United States)
+Data (HexDump)           : 04 03 09 04                                       ....
+             ------ String Descriptor 1 ------
+bLength                  : 0x02 (2 bytes)
+bDescriptorType          : 0x03 (String Descriptor)
+Language 0x0409          : ""
+Data (HexDump)           : 02 03                                             ..
+             ------ String Descriptor 2 ------
+bLength                  : 0x24 (36 bytes)
+bDescriptorType          : 0x03 (String Descriptor)
+Language 0x0409          : "USB Optical Mouse"
+Data (HexDump)           : 24 03 55 00 53 00 42 00 20 00 4F 00 70 00 74 00   $.U.S.B. .O.p.t.
+                           69 00 63 00 61 00 6C 00 20 00 4D 00 6F 00 75 00   i.c.a.l. .M.o.u.
+                           73 00 65 00                                       s.e.
+             ------ String Descriptor 3 ------
+bLength                  : 0x02 (2 bytes)
+bDescriptorType          : 0x03 (String Descriptor)
+Language 0x0409          : ""
+Data (HexDump)           : 02 03                                             ..
+
+        +++++++++++++++++ Device Information ++++++++++++++++++
+Device Description       : HID-совместимая мышь
+Device Path 1            : \\?\HID#VID_1BCF&PID_0005#7&21261321&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030} (GUID_DEVINTERFACE_HID)
+Device Path 2            : \\?\HID#VID_1BCF&PID_0005#7&21261321&0&0000#{378de44c-56ef-11d1-bc8c-00a0c91405dd} (GUID_DEVINTERFACE_MOUSE)
+Kernel Name              : \Device\00000f92
+Device ID                : HID\VID_1BCF&PID_0005\7&21261321&0&0000
+Hardware IDs             : HID\VID_1BCF&PID_0005&REV_0014 HID\VID_1BCF&PID_0005 HID\VID_1BCF&UP:0001_U:0002 HID_DEVICE_SYSTEM_MOUSE HID_DEVICE_UP:0001_U:0002 HID_DEVICE
+Driver KeyName           : {4d36e96f-e325-11ce-bfc1-08002be10318}\0022 (GUID_DEVCLASS_MOUSE)
+Driver                   : \SystemRoot\System32\drivers\mouhid.sys (Version: 10.0.26100.1150  Date: 2025-11-06  Company: Microsoft Corporation)
+Driver Inf               : C:\WINDOWS\inf\msmouse.inf
+Legacy BusType           : PNPBus
+Class                    : Mouse
+Class GUID               : {4d36e96f-e325-11ce-bfc1-08002be10318} (GUID_DEVCLASS_MOUSE)
+Service                  : mouhid
+Enumerator               : HID
+Location Info            : -
+Address                  : 1
+Manufacturer Info        : Microsoft
+Capabilities             : 0xA0 (SilentInstall, SurpriseRemovalOK)
+Status                   : 0x0180200A (DN_DRIVER_LOADED, DN_STARTED, DN_DISABLEABLE, DN_NT_ENUMERATOR, DN_NT_DRIVER)
+Problem Code             : 0
+EnhancedPowerMgmtEnabled : 0
+Power State              : D0 (supported: D0, D1, D2, D3, wake from D0, wake from D1, wake from D2)
+
+             +++++++++++++ Mouse Information ++++++++++++++
+Input Data Queue Length  : 2
+Mouse Identifier         : 256
+Number of Buttons        : 5
+Sample Rate              : 0
+
+             ++++++++++++++ HID Information +++++++++++++++
+Product                  : USB Optical Mouse
+UsagePage                : 0x01 (Generic Desktop Controls)
+Usage                    : 0x02 (Mouse)

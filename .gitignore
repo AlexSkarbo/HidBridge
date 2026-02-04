@@ -1,0 +1,28 @@
+# --- Build output / temp ---
+build/
+build_wsl/
+**/bin/
+**/obj/
+
+# Visual Studio / Rider
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs / runtime artifacts
+*.log
+Tools/HidControlServer/video_hls/
+Tools/HidControlServer/video_logs/
+Tools/HidControlServer/.deps/tmp/
+Tools/HidControlServer/.deps/ffmpeg/
+Tools/HidControlServer/.deps/mediamtx/
+
+# Local machine config / caches
+Tools/HidControlServer/hidcontrol.config.json
+Tools/HidControlServer/devices_cache.json
+Tools/HidControlServer/tmp_source.json
+
+# Keep workspace editor settings
+!.vscode/*

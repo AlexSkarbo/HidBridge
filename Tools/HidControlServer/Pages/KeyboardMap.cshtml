@@ -1,0 +1,814 @@
+﻿@page "/keyboard/map"
+@model HidControlServer.Pages.KeyboardMapModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Keyboard Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; color: #1a1a1a; }
+    button, select, input { margin-right: 8px; }
+    button { border: 1px solid #ccc; background: #fff; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #f7f7f7; }
+    #status { white-space: pre; background: #f4f4f4; padding: 8px; }
+    #hint { color: #555; }
+    .row { margin: 8px 0; }
+    .mod-grid { display: grid; grid-template-columns: repeat(4, max-content); gap: 6px 12px; align-items: center; }
+    .capture { border: 1px dashed #999; padding: 10px; border-radius: 6px; background: #fcfcfc; }
+    .btn-icon { margin-right: 6px; }
+    .kbd-ctrl, .kbd-ctrl * { box-sizing: border-box; margin: 0; padding: 0; }
+    .kbd-ctrl { margin-top: 8px; display: flex; justify-content: center; }
+    .kbd-ctrl button { border: 0; background-color: #ededed; border-radius: 0.125em; box-shadow: -0.2em -0.125em 0.125em rgba(0, 0, 0, 0.25), 0 0 0 0.04em rgba(0, 0, 0, 0.3), 0.02em 0.02em 0.02em rgba(0, 0, 0, 0.4) inset, -0.05em -0.05em 0.02em rgba(255, 255, 255, 0.8) inset; color: #787878; display: block; font-size: 1em; outline: transparent; position: relative; appearance: none; user-select: none; padding: 0; }
+    .kbd-ctrl button:active { box-shadow: 0.1em 0.1em 0.1em rgba(0, 0, 0, 0.2), 0 0 0 0.05em rgba(0, 0, 0, 0.4), -0.025em -0.05em 0.025em rgba(255, 255, 255, 0.8) inset; }
+    .kbd-ctrl button span { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; }
+    .kbd-ctrl button > span { margin: auto; padding: 0.2em 0.375em; position: absolute; top: 50%; left: 0; font-size: 0.5em; line-height: 2; transform: translateY(-50%) scaleX(0.875); width: 100%; }
+    .kbd-ctrl button[aria-pressed=true] .dot-light { color: #88ff00; text-shadow: 0 0 2px #498a00; }
+    .kbd-ctrl .keyboard { background-image: linear-gradient(90deg, #878787, #cccccc); border-radius: 0.5em; box-shadow: -0.4em -0.4em 0.6em rgba(0, 0, 0, 0.6), 0 0 0 1px #ababab inset; display: grid; gap: 0.375em 0.875em; grid-template-columns: 21.25em 4.125em 0.125em; grid-template-rows: 0.75em 1.125em 1.125em 1.125em 1.125em 1.375em; font-size: 36px; padding: 0.25em; width: 26.7em; height: 9em; }
+    .kbd-ctrl .row { display: flex; gap: 0.35em; }
+    .kbd-ctrl .row:nth-of-type(14) { margin: auto; }
+    .kbd-ctrl .row:nth-of-type(n + 14):nth-of-type(-3n + 17) { transform: translateY(0.25em); }
+    .kbd-ctrl .bump { border-radius: 0.1em; box-shadow: -0.05em -0.02em 0 0.05em rgba(0, 0, 0, 0.3); padding: 0; top: 85%; left: calc(50% - 0.4em); width: 0.8em; height: 0.15em; }
+    .kbd-ctrl .btn-0 { width: 1.325em; height: 0.75em; }
+    .kbd-ctrl .btn-2 { width: 1.125em; height: 1.125em; }
+    .kbd-ctrl .btn-3 { width: 2em; height: 1.125em; }
+    .kbd-ctrl .btn-4 { width: 2.3em; height: 1.125em; }
+    .kbd-ctrl .btn-5 { width: 3.05em; height: 1.125em; }
+    .kbd-ctrl .btn-6 { width: 1.5625em; height: 1.375em; }
+    .kbd-ctrl .btn-7 { width: 1.8375em; height: 1.375em; }
+    .kbd-ctrl .btn-8 { width: 1.125em; height: 1.375em; }
+    .kbd-ctrl .btn-9 { width: 2.6875em; height: 1.375em; }
+    .kbd-ctrl .btn-10 { width: 1.125em; height: 2.875em; }
+    .kbd-ctrl .btn-longest { width: 8.625em; height: 1.375em; }
+    .kbd-ctrl .ul, .kbd-ctrl .ll, .kbd-ctrl .ur, .kbd-ctrl .lr { top: 0; transform: scaleX(0.875); }
+    .kbd-ctrl .ul, .kbd-ctrl .ll { justify-content: flex-start; transform-origin: 0 50%; }
+    .kbd-ctrl .ur, .kbd-ctrl .lr { justify-content: flex-end; transform-origin: 100% 50%; }
+    .kbd-ctrl .ll, .kbd-ctrl .lr { top: auto; bottom: 0; }
+    .kbd-ctrl .ll.noxscale, .kbd-ctrl .lr.noxscale { transform: scaleX(1); }
+    .kbd-ctrl .xxs { font-size: 0.25em; line-height: 1.5; }
+    .kbd-ctrl .xs { font-size: 0.3em; line-height: 1.125; }
+    .kbd-ctrl .sm { font-size: 0.4em; line-height: 1.25; }
+    .kbd-ctrl .up, .kbd-ctrl .right, .kbd-ctrl .down, .kbd-ctrl .left { width: 0; height: 0; vertical-align: 0.1em; }
+    .kbd-ctrl .up { border-left: 0.25em solid transparent; border-right: 0.25em solid transparent; border-bottom: 0.5em solid currentColor; }
+    .kbd-ctrl .right { border-left: 0.5em solid currentColor; border-top: 0.25em solid transparent; border-bottom: 0.25em solid transparent; }
+    .kbd-ctrl .down { border-left: 0.25em solid transparent; border-right: 0.25em solid transparent; border-top: 0.5em solid currentColor; }
+    .kbd-ctrl .left { border-right: 0.5em solid currentColor; border-top: 0.25em solid transparent; border-bottom: 0.25em solid transparent; }
+    .kbd-ctrl .noxpad { padding: 0.2em 0; }
+    .kbd-ctrl button.mapped-source { box-shadow: 0 0 0 0.06em #f39c12 inset; }
+    .kbd-ctrl button.mapped-target { box-shadow: 0 0 0 0.08em #2e7d32 inset; }
+    .legend-source { color: #f39c12; font-weight: 600; }
+    .legend-target { color: #2e7d32; font-weight: 600; }
+    .mapping-active { border-color: #2e7d32; color: #2e7d32; }
+    .mapping-unmap { border-color: #d35400; color: #d35400; }
+  </style>
+</head>
+<body>
+  <h2>Keyboard Map</h2>
+  <div class="row">
+    <select id="kbdSelect"></select>
+    <button id="refreshDevices"><i class="fa-solid fa-rotate btn-icon"></i>Refresh</button>
+  </div>
+  <div class="row" id="hint"></div>
+  <div class="row"><b>Status:</b></div>
+  <pre id="status"></pre>
+
+  <div class="row"><b>Modifiers:</b></div>
+  <div class="mod-grid" id="mods">
+    <label><input type="checkbox" data-mod="0"> LCtrl</label>
+    <label><input type="checkbox" data-mod="1"> LShift</label>
+    <label><input type="checkbox" data-mod="2"> LAlt</label>
+    <label><input type="checkbox" data-mod="3"> LGUI</label>
+    <label><input type="checkbox" data-mod="4"> RCtrl</label>
+    <label><input type="checkbox" data-mod="5"> RShift</label>
+    <label><input type="checkbox" data-mod="6"> RAlt</label>
+    <label><input type="checkbox" data-mod="7"> RGUI</label>
+  </div>
+
+  <div class="row"><b>Type:</b></div>
+  <div class="row">
+    <input id="typeText" type="text" size="40" placeholder="type text to send" />
+    <button id="sendType"><i class="fa-solid fa-paper-plane btn-icon"></i>Send</button>
+  </div>
+
+  <div class="row"><b>Keyboard mapping:</b></div>
+  <div class="row">
+    <button id="mapToggle"><i class="fa-solid fa-link btn-icon"></i>Start Mapping</button>
+    <button id="mapUnmap"><i class="fa-solid fa-eraser btn-icon"></i>Unmap Key</button>
+    <button id="mapWinLeft"><i class="fa-brands fa-windows btn-icon"></i>Map Win (L)</button>
+    <button id="mapWinRight"><i class="fa-brands fa-windows btn-icon"></i>Map Win (R)</button>
+    <button id="mapClear"><i class="fa-solid fa-broom btn-icon"></i>Clear Mapping</button>
+    <button id="mapExport"><i class="fa-solid fa-file-export btn-icon"></i>Export</button>
+    <button id="mapImportBtn"><i class="fa-solid fa-file-import btn-icon"></i>Import</button>
+  </div>
+  <div class="row" id="mapHint">Mapping is off.</div>
+  <div class="row" id="mapLegend">Legend: <span class="legend-source">source</span> → <span class="legend-target">target</span> | mapped: <span id="mapCount">0</span></div>
+  <input id="mapImport" type="file" accept="application/json" hidden />
+
+  <div class="row"><b>Key capture:</b></div>
+  <div class="capture" id="capture" tabindex="0">Click here, then press a key to send.</div>
+
+  <div class="row"><b>Keyboard control:</b></div>
+  <div class="kbd-ctrl" id="kbdCtrl">
+    <div class="keyboard" ontouchstart="">
+      <div class="row">
+        <button type="button" class="btn-0"><span class="xs">esc</span></button>
+        <button type="button" class="btn-0"><span class="xs">F1</span></button>
+        <button type="button" class="btn-0"><span class="xs">F2</span></button>
+        <button type="button" class="btn-0"><span class="xs">F3</span></button>
+        <button type="button" class="btn-0"><span class="xs">F4</span></button>
+        <button type="button" class="btn-0"><span class="xs">F5</span></button>
+        <button type="button" class="btn-0"><span class="xs">F6</span></button>
+        <button type="button" class="btn-0"><span class="xs">F7</span></button>
+        <button type="button" class="btn-0"><span class="xs">F8</span></button>
+        <button type="button" class="btn-0"><span class="xs">F9</span></button>
+        <button type="button" class="btn-0"><span class="xs">F10</span></button>
+        <button type="button" class="btn-0"><span class="xs">F11</span></button>
+        <button type="button" class="btn-0"><span class="xs">F12</span></button>
+      </div>
+      <div class="row"></div>
+      <div class="row"></div>
+      <div class="row">
+        <button type="button" class="btn-2"><span class="sm">~<br/>`</span></button>
+        <button type="button" class="btn-2"><span class="sm">!<br/>1</span></button>
+        <button type="button" class="btn-2"><span class="sm">&#64;<br/>2</span></button>
+        <button type="button" class="btn-2"><span class="sm">#<br/>3</span></button>
+        <button type="button" class="btn-2"><span class="sm">$<br/>4</span></button>
+        <button type="button" class="btn-2"><span class="sm">%<br/>5</span></button>
+        <button type="button" class="btn-2"><span class="sm">^<br/>6</span></button>
+        <button type="button" class="btn-2"><span class="sm">&amp;<br/>7</span></button>
+        <button type="button" class="btn-2"><span class="sm">*<br/>8</span></button>
+        <button type="button" class="btn-2"><span class="sm">(<br/>9</span></button>
+        <button type="button" class="btn-2"><span class="sm">)<br/>0</span></button>
+        <button type="button" class="btn-2"><span class="sm">_<br/>-</span></button>
+        <button type="button" class="btn-2"><span class="sm">+<br/>=</span></button>
+                <button type="button" class="btn-3"><span class="lr xs">backspace</span><span class="ur xs">⌫</span></button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn-2"><span class="xs">insert</span></button>
+        <button type="button" class="btn-2"><span class="xs">home</span></button>
+        <button type="button" class="btn-2"><span class="xs">page up</span></button>
+      </div>
+      <div class="row"></div>
+      <div class="row">
+        <button type="button" class="btn-3"><span class="ll xs">tab</span></button>
+        <button type="button" class="btn-2"><span>Q</span></button>
+        <button type="button" class="btn-2"><span>W</span></button>
+        <button type="button" class="btn-2"><span>E</span></button>
+        <button type="button" class="btn-2"><span>R</span></button>
+        <button type="button" class="btn-2"><span>T</span></button>
+        <button type="button" class="btn-2"><span>Y</span></button>
+        <button type="button" class="btn-2"><span>U</span></button>
+        <button type="button" class="btn-2"><span>I</span></button>
+        <button type="button" class="btn-2"><span>O</span></button>
+        <button type="button" class="btn-2"><span>P</span></button>
+        <button type="button" class="btn-2"><span class="sm">{<br/>[</span></button>
+        <button type="button" class="btn-2"><span class="sm">}<br/>]</span></button>
+        <button type="button" class="btn-2"><span class="sm">|<br/>\</span></button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn-2"><span class="xs noxpad">delete</span></button>
+        <button type="button" class="btn-2"><span class="xs">end</span></button>
+        <button type="button" class="btn-2"><span class="xs">page down</span></button>
+      </div>
+      <div class="row"></div>
+      <div class="row">
+        <button type="button" id="caps-lock" class="btn-4" data-code="CapsLock" aria-pressed="false">
+          <span class="ul xs dot-light" aria-hidden="true">*</span>
+          <span class="ll xs">caps lock</span>
+        </button>
+        <button type="button" class="btn-2"><span>A</span></button>
+        <button type="button" class="btn-2"><span>S</span></button>
+        <button type="button" class="btn-2"><span>D</span></button>
+        <button type="button" class="btn-2"><span>F</span><span class="bump"></span></button>
+        <button type="button" class="btn-2"><span>G</span></button>
+        <button type="button" class="btn-2"><span>H</span></button>
+        <button type="button" class="btn-2"><span>J</span><span class="bump"></span></button>
+        <button type="button" class="btn-2"><span>K</span></button>
+        <button type="button" class="btn-2"><span>L</span></button>
+        <button type="button" class="btn-2"><span class="sm">:<br/>;</span></button>
+        <button type="button" class="btn-2"><span class="sm">&quot;<br/>'</span></button>
+                <button type="button" class="btn-4"><span class="lr xs">enter</span><span class="ur sm">⏎</span></button>
+      </div>
+      <div class="row"></div>
+      <div class="row"></div>
+      <div class="row">
+        <button type="button" class="btn-5" data-code="ShiftLeft"><span class="ll xs">shift</span></button>
+        <button type="button" class="btn-2"><span>Z</span></button>
+        <button type="button" class="btn-2"><span>X</span></button>
+        <button type="button" class="btn-2"><span>C</span></button>
+        <button type="button" class="btn-2"><span>V</span></button>
+        <button type="button" class="btn-2"><span>B</span></button>
+        <button type="button" class="btn-2"><span>N</span></button>
+        <button type="button" class="btn-2"><span>M</span></button>
+        <button type="button" class="btn-2"><span class="sm">&lt;<br/>,</span></button>
+        <button type="button" class="btn-2"><span class="sm">&gt;<br/>.</span></button>
+        <button type="button" class="btn-2"><span class="sm">?<br/>/</span></button>
+        <button type="button" class="btn-5" data-code="ShiftRight"><span class="lr xs">shift</span></button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn-2" data-code="ArrowUp"><span><span class="up"></span></span></button>
+      </div>
+      <div class="row"></div>
+      <div class="row">
+        <button type="button" class="btn-7" data-code="ControlLeft"><span class="ll xs">ctrl</span></button>
+                <button type="button" class="btn-6" data-code="MetaLeft"><span class="ll xs">win</span><span class="ul sm">⊞</span></button>
+        <button type="button" class="btn-7" data-code="AltLeft"><span class="ll xs">alt</span></button>
+        <button type="button" class="btn-longest" data-code="Space"><span></span></button>
+        <button type="button" class="btn-7" data-code="AltRight"><span class="lr xs">alt</span></button>
+                <button type="button" class="btn-6" data-code="ContextMenu"><span class="lr xs">menu</span><span class="ur sm">☰</span></button>
+        <button type="button" class="btn-7" data-code="ControlRight"><span class="lr xs">ctrl</span></button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn-2" data-code="ArrowLeft"><span><span class="left"></span></span></button>
+        <button type="button" class="btn-2" data-code="ArrowDown"><span><span class="down"></span></span></button>
+        <button type="button" class="btn-2" data-code="ArrowRight"><span><span class="right"></span></span></button>
+      </div>
+      <div class="row"></div>
+    </div>
+  </div>
+
+
+<script>
+const tokenParam = new URLSearchParams(window.location.search).get("access_token");
+if (tokenParam && tokenParam.trim().length > 0) {
+  localStorage.setItem("hidToken", tokenParam.trim());
+}
+const savedToken = localStorage.getItem("hidToken") || "";
+function buildHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (savedToken) {
+    headers["X-HID-Token"] = savedToken;
+  }
+  return headers;
+}
+async function apiFetch(path, options = {}) {
+  const opts = { ...options };
+  opts.headers = { ...(options.headers || {}), ...buildHeaders() };
+  return fetch(path, opts);
+}
+
+const statusView = document.getElementById("status");
+const hintView = document.getElementById("hint");
+const kbdSelect = document.getElementById("kbdSelect");
+const capture = document.getElementById("capture");
+const typeText = document.getElementById("typeText");
+const mapToggle = document.getElementById("mapToggle");
+const mapUnmap = document.getElementById("mapUnmap");
+const mapWinLeft = document.getElementById("mapWinLeft");
+const mapWinRight = document.getElementById("mapWinRight");
+const mapClear = document.getElementById("mapClear");
+const mapExport = document.getElementById("mapExport");
+const mapImportBtn = document.getElementById("mapImportBtn");
+const mapImport = document.getElementById("mapImport");
+const mapHint = document.getElementById("mapHint");
+const mapCount = document.getElementById("mapCount");
+let kbdList = [];
+let deviceInfo = null;
+let keyboardMapping = null;
+let mappingMode = false;
+let mappingTarget = null;
+let unmapMode = false;
+
+const keyMap = {
+  Escape: 0x29, F1: 0x3A, F2: 0x3B, F3: 0x3C, F4: 0x3D, F5: 0x3E, F6: 0x3F,
+  F7: 0x40, F8: 0x41, F9: 0x42, F10: 0x43, F11: 0x44, F12: 0x45,
+  Backquote: 0x35, Digit1: 0x1E, Digit2: 0x1F, Digit3: 0x20, Digit4: 0x21,
+  Digit5: 0x22, Digit6: 0x23, Digit7: 0x24, Digit8: 0x25, Digit9: 0x26, Digit0: 0x27,
+  Minus: 0x2D, Equal: 0x2E, Backspace: 0x2A,
+  Tab: 0x2B, KeyQ: 0x14, KeyW: 0x1A, KeyE: 0x08, KeyR: 0x15, KeyT: 0x17,
+  KeyY: 0x1C, KeyU: 0x18, KeyI: 0x0C, KeyO: 0x12, KeyP: 0x13,
+  BracketLeft: 0x2F, BracketRight: 0x30, Backslash: 0x31,
+  CapsLock: 0x39, KeyA: 0x04, KeyS: 0x16, KeyD: 0x07, KeyF: 0x09, KeyG: 0x0A,
+  KeyH: 0x0B, KeyJ: 0x0D, KeyK: 0x0E, KeyL: 0x0F, Semicolon: 0x33, Quote: 0x34,
+  Enter: 0x28,
+  ShiftLeft: 0xE1, KeyZ: 0x1D, KeyX: 0x1B, KeyC: 0x06, KeyV: 0x19, KeyB: 0x05,
+  KeyN: 0x11, KeyM: 0x10, Comma: 0x36, Period: 0x37, Slash: 0x38, ShiftRight: 0xE5,
+  ControlLeft: 0xE0, AltLeft: 0xE2, MetaLeft: 0xE3, Space: 0x2C, MetaRight: 0xE7,
+  AltRight: 0xE6, ContextMenu: 0x65, ControlRight: 0xE4,
+  ArrowUp: 0x52, ArrowDown: 0x51, ArrowLeft: 0x50, ArrowRight: 0x4F,
+  Insert: 0x49, Delete: 0x4C, Home: 0x4A, End: 0x4D, PageUp: 0x4B, PageDown: 0x4E
+};
+
+
+function renderStatus(prefix) {
+  const mods = getModifiers();
+  const mapFlag = keyboardMapping ? "map=on" : "map=off";
+  statusView.textContent = (prefix ? prefix + "\n" : "") + "itf=" + (deviceInfo ? deviceInfo.itf : "?") + " mods=0x" + mods.toString(16) + " " + mapFlag;
+}
+
+function updateKeyboardMappingView() {
+  let count = 0;
+  const buttons = document.querySelectorAll("#kbdCtrl button");
+  for (const btn of buttons) {
+    btn.classList.remove("mapped-source", "mapped-target");
+    const code = resolveCodeFromButton(btn);
+    if (!code) continue;
+    const usage = keyMap[code];
+    if (!usage) continue;
+    if (keyboardMapping) {
+      const dec = String(usage);
+      const hex = "0x" + usage.toString(16).toUpperCase().padStart(2, "0");
+      if (keyboardMapping[dec] != null || keyboardMapping[hex] != null) {
+        btn.classList.add("mapped-source");
+        count++;
+      }
+      for (const val of Object.values(keyboardMapping)) {
+        if (val === usage) {
+          btn.classList.add("mapped-target");
+          break;
+        }
+      }
+    }
+  }
+  if (mapCount) mapCount.textContent = String(count);
+}
+
+function resolveUsageFromMapping(usage) {
+  if (!keyboardMapping) return null;
+  const dec = String(usage);
+  const hex = "0x" + usage.toString(16).toUpperCase().padStart(2, "0");
+  if (keyboardMapping[dec] != null) return keyboardMapping[dec];
+  if (keyboardMapping[hex] != null) return keyboardMapping[hex];
+  return null;
+}
+
+async function loadKeyboardMapping() {
+  keyboardMapping = null;
+  if (!deviceInfo || !deviceInfo.deviceId) {
+    if (!deviceInfo) {
+      renderStatus();
+      return;
+    }
+    const byItf = await apiFetch("/keyboard/mapping/byItf?itf=" + deviceInfo.itf);
+    if (byItf.status === 404) {
+      renderStatus("mapping: none");
+      return;
+    }
+    if (!byItf.ok) {
+      renderStatus("mapping load failed: " + byItf.status);
+      return;
+    }
+    const dataByItf = await byItf.json();
+    keyboardMapping = dataByItf && dataByItf.mapping ? dataByItf.mapping : null;
+    if (dataByItf && dataByItf.deviceId) deviceInfo.deviceId = dataByItf.deviceId;
+    if (dataByItf && dataByItf.reportDescHash) deviceInfo.reportDescHash = dataByItf.reportDescHash;
+    renderStatus("mapping: loaded");
+    updateKeyboardMappingView();
+    return;
+  }
+  const res = await apiFetch("/keyboard/mapping?deviceId=" + encodeURIComponent(deviceInfo.deviceId));
+  if (res.status === 404) {
+    renderStatus("mapping: none");
+    return;
+  }
+  if (!res.ok) {
+    renderStatus("mapping load failed: " + res.status);
+    return;
+  }
+  const data = await res.json();
+  keyboardMapping = data && data.mapping ? data.mapping : null;
+  renderStatus("mapping: loaded");
+  updateKeyboardMappingView();
+}
+
+async function refreshKeyboardLayout() {
+  if (!deviceInfo) return;
+  const res = await apiFetch("/keyboard/layout?itf=" + deviceInfo.itf);
+  if (!res.ok) return;
+  const data = await res.json();
+  if (!data || !data.ok) return;
+  deviceInfo.keyboardReportId = data.reportId;
+  deviceInfo.keyboardReportLen = data.reportLen;
+  deviceInfo.keyboardHasReportId = data.hasReportId;
+  const idPart = deviceInfo.deviceId ? ("deviceId=" + deviceInfo.deviceId) : "deviceId=?";
+  const lenPart = deviceInfo.keyboardReportLen != null ? ("len=" + deviceInfo.keyboardReportLen) : "len=?";
+  const ridPart = deviceInfo.keyboardReportId != null ? ("reportId=" + deviceInfo.keyboardReportId) : "reportId=?";
+  const hasIdPart = deviceInfo.keyboardHasReportId != null ? ("hasId=" + (deviceInfo.keyboardHasReportId ? "yes" : "no")) : "hasId=?";
+  hintView.textContent = "type=" + deviceInfo.typeName + ", " + idPart + ", " + lenPart + ", " + ridPart + ", " + hasIdPart;
+}
+
+function resolveCodeFromButton(btn) {
+  const explicit = btn.dataset.code;
+  if (explicit) return explicit;
+  const text = (btn.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!text) return null;
+  if (text === "esc") return "Escape";
+  if (text.startsWith("f")) {
+    const n = parseInt(text.slice(1), 10);
+    if (n >= 1 && n <= 12) return "F" + n;
+  }
+  if (text.includes("backspace")) return "Backspace";
+  if (text.includes("tab")) return "Tab";
+  if (text.includes("caps lock")) return "CapsLock";
+  if (text.includes("enter")) return "Enter";
+  if (text === "insert") return "Insert";
+  if (text === "delete") return "Delete";
+  if (text === "home") return "Home";
+  if (text === "end") return "End";
+  if (text === "page up") return "PageUp";
+  if (text === "page down") return "PageDown";
+  if (text === "menu") return "ContextMenu";
+  if (text === "win") return "MetaLeft";
+  if (text === "shift") return "ShiftLeft";
+  if (text === "ctrl") return "ControlLeft";
+  if (text === "alt") return "AltLeft";
+  if (text.includes("`") || text.includes("~")) return "Backquote";
+  if (text.includes("-") || text.includes("_")) return "Minus";
+  if (text.includes("=") || text.includes("+")) return "Equal";
+  if (text.includes("[") || text.includes("{")) return "BracketLeft";
+  if (text.includes("]") || text.includes("}")) return "BracketRight";
+  if (text.includes("\\") || text.includes("|")) return "Backslash";
+  if (text.includes(";") || text.includes(":")) return "Semicolon";
+  if (text.includes("'") || text.includes("\"")) return "Quote";
+  if (text.includes(",") || text.includes("<")) return "Comma";
+  if (text.includes(".") || text.includes(">")) return "Period";
+  if (text.includes("/") || text.includes("?")) return "Slash";
+  const digitMatch = text.match(/[0-9]/);
+  if (digitMatch) return "Digit" + digitMatch[0];
+  if (text.length === 1 && text >= "a" && text <= "z") return "Key" + text.toUpperCase();
+  return null;
+}
+
+function toggleModifierByCode(code) {
+  const modMap = {
+    ControlLeft: 0,
+    ShiftLeft: 1,
+    AltLeft: 2,
+    MetaLeft: 3,
+    ControlRight: 4,
+    ShiftRight: 5,
+    AltRight: 6,
+    MetaRight: 7
+  };
+  if (!(code in modMap)) return false;
+  const bit = modMap[code];
+  const cb = document.querySelector("#mods input[data-mod=\"" + bit + "\"]");
+  if (!cb) return false;
+  cb.checked = !cb.checked;
+  return true;
+}
+
+function getModifiers() {
+  let mask = 0;
+  for (const cb of document.querySelectorAll("#mods input[type=checkbox]")) {
+    if (cb.checked) {
+      const bit = parseInt(cb.dataset.mod, 10);
+      mask |= (1 << bit);
+    }
+  }
+  return mask;
+}
+
+async function sendPress(usage, modifiers) {
+  if (!deviceInfo) return;
+  await apiFetch("/keyboard/press", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usage, modifiers, itfSel: deviceInfo.itf })
+  });
+}
+
+async function sendType(text) {
+  if (!deviceInfo) return;
+  await apiFetch("/keyboard/type", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, itfSel: deviceInfo.itf })
+  });
+}
+
+async function saveKeyboardMapping(mapping, statusText) {
+  if (!deviceInfo || !deviceInfo.deviceId || !deviceInfo.reportDescHash) {
+    renderStatus("mapping save failed: no device");
+    return false;
+  }
+  const res = await apiFetch("/keyboard/mapping", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deviceId: deviceInfo.deviceId,
+      itf: deviceInfo.itf,
+      reportDescHash: deviceInfo.reportDescHash,
+      mapping: mapping
+    })
+  });
+  if (!res.ok) {
+    renderStatus("mapping save failed: " + res.status);
+    return false;
+  }
+  if (statusText) renderStatus(statusText);
+  return true;
+}
+
+
+async function handleKeydownEvent(e) {
+  const mappingActive = mappingMode || unmapMode;
+  if (mappingActive) {
+    e.preventDefault();
+    e.stopPropagation();
+  } else if (document.activeElement !== capture) {
+    return;
+  } else {
+    e.preventDefault();
+  }
+  let code = e.code || "";
+  if (!code || code === "Meta") {
+    if (e.key === "Meta") {
+      code = e.location === 2 ? "MetaRight" : "MetaLeft";
+    }
+  }
+  const baseUsage = keyMap[code];
+  if (!baseUsage) {
+    renderStatus("no mapping for: " + code);
+    return;
+  }
+  const usage = resolveUsageFromMapping(baseUsage) ?? baseUsage;
+  if (mappingMode && mappingTarget) {
+    const map = keyboardMapping && typeof keyboardMapping === "object" ? keyboardMapping : {};
+    map[String(baseUsage)] = mappingTarget.usage;
+    const saved = await saveKeyboardMapping(map, "mapping: saved");
+    if (!saved) return;
+    keyboardMapping = map;
+    mappingTarget = null;
+    mapHint.textContent = "Mapped. Click another target or Stop Mapping.";
+    renderStatus("mapping: saved");
+    updateKeyboardMappingView();
+    return;
+  }
+  if (mappingMode || unmapMode) {
+    renderStatus("mapping active: input ignored");
+    return;
+  }
+  const mods = getModifiers();
+  await sendPress(usage, mods);
+  renderStatus("press: " + code + " usage=0x" + usage.toString(16));
+}
+
+capture.addEventListener("keydown", handleKeydownEvent);
+window.addEventListener("keydown", handleKeydownEvent, { capture: true });
+window.addEventListener("keyup", (e) => {
+  if (mappingMode || unmapMode) {
+    if (e.key === "Meta" || e.code === "MetaLeft" || e.code === "MetaRight") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+}, { capture: true });
+
+document.getElementById("kbdCtrl").addEventListener("click", async (e) => {
+  e.preventDefault();
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  const code = resolveCodeFromButton(btn);
+  if (!code) {
+    renderStatus("no code");
+    return;
+  }
+  const baseUsage = keyMap[code];
+  if (unmapMode) {
+    if (!baseUsage) {
+      renderStatus("no usage for: " + code);
+      return;
+    }
+    if (!keyboardMapping) {
+      renderStatus("mapping: empty");
+      return;
+    }
+    const updated = {};
+    for (const [k, v] of Object.entries(keyboardMapping)) {
+      if (v !== baseUsage) updated[k] = v;
+    }
+    const saved = await saveKeyboardMapping(updated, "mapping: updated");
+    if (!saved) return;
+    keyboardMapping = updated;
+    updateKeyboardMappingView();
+    return;
+  }
+  if (mappingMode) {
+    if (!baseUsage) {
+      renderStatus("no usage for: " + code);
+      return;
+    }
+    if (mappingTarget) {
+      const map = keyboardMapping && typeof keyboardMapping === "object" ? keyboardMapping : {};
+      map[String(baseUsage)] = mappingTarget.usage;
+      const saved = await saveKeyboardMapping(map, "mapping: saved");
+      if (!saved) return;
+      keyboardMapping = map;
+      mappingTarget = null;
+      mapHint.textContent = "Mapped. Click another target or Stop Mapping.";
+      updateKeyboardMappingView();
+      return;
+    }
+    mappingTarget = { code, usage: baseUsage, label: btn.textContent };
+    mapHint.textContent = "Target set: " + code + ". Press a source key (or click source).";
+    return;
+  }
+  if (mappingMode || unmapMode) {
+    renderStatus("mapping active: input ignored");
+    return;
+  }
+  if (toggleModifierByCode(code)) {
+    renderStatus("toggle: " + code);
+    return;
+  }
+  if (btn.id === "caps-lock") {
+    const pressed = btn.getAttribute("aria-pressed") === "true";
+    btn.setAttribute("aria-pressed", pressed ? "false" : "true");
+  }
+  if (!baseUsage) {
+    renderStatus("no usage for: " + code);
+    return;
+  }
+  const usage = resolveUsageFromMapping(baseUsage) ?? baseUsage;
+  const mods = getModifiers();
+  await sendPress(usage, mods);
+  renderStatus("press: " + code + " usage=0x" + usage.toString(16));
+});
+
+async function loadDevices() {
+  hintView.textContent = "loading devices...";
+  let data = null;
+  let keyMode = null;
+  try {
+    const res = await apiFetch("/devices?includeReportDesc=true&allowStale=true");
+    data = await res.json();
+  } catch { }
+  if (!data || !data.ok || !data.list || !data.list.interfaces) {
+    try {
+      const res = await apiFetch("/devices?includeReportDesc=true&useBootstrapKey=true&allowStale=true");
+      data = await res.json();
+      keyMode = "bootstrap";
+    } catch { }
+  }
+  if (!data || !data.ok || !data.list || !data.list.interfaces) {
+    hintView.textContent = "failed to load devices";
+    return;
+  }
+  if (data.keyMode) keyMode = data.keyMode;
+  kbdList = data.list.interfaces
+    .filter(x => x.typeName && x.typeName.indexOf("keyboard") !== -1)
+    .map(x => ({
+      deviceId: x.deviceId || "",
+      typeName: x.typeName || "unknown",
+      itf: x.itf,
+      reportDescHash: x.reportDescHash || "",
+      keyboardReportId: x.keyboardReportId ?? null,
+      keyboardReportLen: x.keyboardReportLen ?? null,
+      keyboardHasReportId: x.keyboardHasReportId ?? null
+    }));
+  if (kbdList.length === 0 && data.list.interfaces.length > 0) {
+    const itf = data.list.interfaces[0];
+    kbdList = [{
+      deviceId: itf.deviceId || "",
+      typeName: itf.typeName || "unknown",
+      itf: itf.itf,
+      reportDescHash: itf.reportDescHash || "",
+      keyboardReportId: itf.keyboardReportId ?? null,
+      keyboardReportLen: itf.keyboardReportLen ?? null,
+      keyboardHasReportId: itf.keyboardHasReportId ?? null
+    }];
+  }
+  if (kbdList.length === 0) {
+    hintView.textContent = "no keyboard interface";
+    return;
+  }
+  kbdSelect.innerHTML = "";
+  kbdList.forEach((k, idx) => {
+    const opt = document.createElement("option");
+    opt.value = String(idx);
+    const shortHash = k.reportDescHash ? k.reportDescHash.slice(0, 12) : "";
+    const hashLabel = shortHash ? (" hash=" + shortHash) : "";
+    opt.textContent = k.typeName + " itf=" + k.itf + hashLabel + " " + k.deviceId;
+    kbdSelect.appendChild(opt);
+  });
+  kbdSelect.value = "0";
+  deviceInfo = kbdList[0];
+  const idPart = deviceInfo.deviceId ? ("deviceId=" + deviceInfo.deviceId) : "deviceId=?";
+  const lenPart = deviceInfo.keyboardReportLen != null ? ("len=" + deviceInfo.keyboardReportLen) : "len=?";
+  const ridPart = deviceInfo.keyboardReportId != null ? ("reportId=" + deviceInfo.keyboardReportId) : "reportId=?";
+  const hasIdPart = deviceInfo.keyboardHasReportId != null ? ("hasId=" + (deviceInfo.keyboardHasReportId ? "yes" : "no")) : "hasId=?";
+  const keyPart = keyMode ? (" keyMode=" + keyMode) : "";
+  hintView.textContent = "type=" + deviceInfo.typeName + ", " + idPart + ", " + lenPart + ", " + ridPart + ", " + hasIdPart + keyPart;
+  renderStatus();
+  await loadKeyboardMapping();
+  await refreshKeyboardLayout();
+}
+
+kbdSelect.addEventListener("change", () => {
+  const idx = parseInt(kbdSelect.value, 10);
+  deviceInfo = kbdList[idx] || null;
+  if (deviceInfo) {
+    const idPart = deviceInfo.deviceId ? ("deviceId=" + deviceInfo.deviceId) : "deviceId=?";
+    const lenPart = deviceInfo.keyboardReportLen != null ? ("len=" + deviceInfo.keyboardReportLen) : "len=?";
+    const ridPart = deviceInfo.keyboardReportId != null ? ("reportId=" + deviceInfo.keyboardReportId) : "reportId=?";
+    const hasIdPart = deviceInfo.keyboardHasReportId != null ? ("hasId=" + (deviceInfo.keyboardHasReportId ? "yes" : "no")) : "hasId=?";
+    hintView.textContent = "type=" + deviceInfo.typeName + ", " + idPart + ", " + lenPart + ", " + ridPart + ", " + hasIdPart;
+  }
+  renderStatus();
+  loadKeyboardMapping();
+  refreshKeyboardLayout();
+});
+
+document.getElementById("refreshDevices").addEventListener("click", loadDevices);
+document.getElementById("sendType").addEventListener("click", async () => {
+  const text = typeText.value || "";
+  if (text.length === 0) return;
+  await sendType(text);
+  renderStatus("typed: " + text.length + " chars");
+});
+mapToggle.addEventListener("click", () => {
+  mappingMode = !mappingMode;
+  if (mappingMode) unmapMode = false;
+  mappingTarget = null;
+  mapToggle.textContent = mappingMode ? "Stop Mapping" : "Start Mapping";
+  mapToggle.classList.toggle("mapping-active", mappingMode);
+  mapUnmap.classList.remove("mapping-unmap");
+  mapHint.textContent = mappingMode ? "Click a target key, then press or click a source key." : "Mapping is off.";
+  if (mappingMode) capture.focus();
+});
+mapUnmap.addEventListener("click", () => {
+  unmapMode = !unmapMode;
+  if (unmapMode) mappingMode = false;
+  mappingTarget = null;
+  mapUnmap.textContent = unmapMode ? "Stop Unmap" : "Unmap Key";
+  mapUnmap.classList.toggle("mapping-unmap", unmapMode);
+  mapToggle.classList.remove("mapping-active");
+  mapHint.textContent = unmapMode ? "Click a target key to unmap it." : "Mapping is off.";
+});
+async function mapWinButton(usage) {
+  if (!mappingMode || !mappingTarget) {
+    renderStatus("mapping: click a target key first");
+    return;
+  }
+  const map = keyboardMapping && typeof keyboardMapping === "object" ? keyboardMapping : {};
+  map[String(usage)] = mappingTarget.usage;
+  const saved = await saveKeyboardMapping(map, "mapping: saved");
+  if (!saved) return;
+  keyboardMapping = map;
+  mappingTarget = null;
+  mapHint.textContent = "Mapped. Click another target or Stop Mapping.";
+  updateKeyboardMappingView();
+}
+mapWinLeft.addEventListener("click", () => mapWinButton(0xE3));
+mapWinRight.addEventListener("click", () => mapWinButton(0xE7));
+mapClear.addEventListener("click", async () => {
+  if (!confirm("Clear all keyboard mappings?")) return;
+  if (!deviceInfo || !deviceInfo.deviceId || !deviceInfo.reportDescHash) {
+    renderStatus("mapping clear failed: no device");
+    return;
+  }
+  const saved = await saveKeyboardMapping({}, "mapping: cleared");
+  if (!saved) return;
+  keyboardMapping = null;
+  updateKeyboardMappingView();
+});
+mapExport.addEventListener("click", () => {
+  const payload = {
+    deviceId: deviceInfo ? deviceInfo.deviceId : null,
+    reportDescHash: deviceInfo ? deviceInfo.reportDescHash : null,
+    mapping: keyboardMapping || {}
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "keyboard-mapping.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+mapImportBtn.addEventListener("click", () => {
+  mapImport.click();
+});
+mapImport.addEventListener("change", async () => {
+  if (!mapImport.files || mapImport.files.length === 0) return;
+  const file = mapImport.files[0];
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    renderStatus("import failed: invalid json");
+    return;
+  }
+  const mapping = parsed && parsed.mapping ? parsed.mapping : parsed;
+  if (typeof mapping !== "object" || mapping === null) {
+    renderStatus("import failed: invalid mapping");
+    return;
+  }
+  const saved = await saveKeyboardMapping(mapping, "mapping: imported");
+  if (!saved) return;
+  keyboardMapping = mapping;
+  updateKeyboardMappingView();
+});
+
+loadDevices();
+</script>
+</body>
+</html>

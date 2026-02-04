@@ -1,0 +1,2760 @@
+@page "/video"
+@model HidControlServer.Pages.VideoModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Live View</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #0f1216;
+      --panel: #161b22;
+      --ink: #e8eef6;
+      --muted: #9aa6b2;
+      --accent: #7cc0ff;
+      --border: #243041;
+    }
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Lucida Sans Unicode", "Lucida Grande", sans-serif;
+      background: radial-gradient(1200px 600px at 10% 0%, #1b2432, #0f1216);
+      color: var(--ink);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 24px auto;
+      padding: 0 16px 32px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0.5px;
+    }
+    .panel {
+      margin-top: 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .panel + .panel {
+      margin-top: 12px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .row label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.3px;
+    }
+    select, button {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0f141b;
+      color: var(--ink);
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:hover {
+      border-color: var(--accent);
+    }
+    button.btn-danger {
+      border-color: #7f1d1d;
+      background: #3b0a0a;
+      color: #fecaca;
+    }
+    button.btn-danger:hover {
+      border-color: #ef4444;
+      background: #571010;
+    }
+    button.btn-ok {
+      border-color: #064e3b;
+      background: #052e26;
+      color: #bbf7d0;
+    }
+    button.btn-ok:hover {
+      border-color: #10b981;
+      background: #0a3a31;
+    }
+    fieldset.stop-required {
+      border: 1px solid #3a3f55;
+      border-radius: 10px;
+      padding: 8px 10px 10px 10px;
+      margin: 6px 0;
+      background: #0f1322;
+    }
+    fieldset.stop-required legend {
+      padding: 0 6px;
+      color: #fda4af;
+      font-weight: 600;
+    }
+    fieldset.stop-required[disabled] {
+      opacity: 0.7;
+      filter: saturate(0.7);
+    }
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .spinner {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid rgba(160, 173, 192, 0.35);
+      border-top-color: #e6eef8;
+      display: none;
+      vertical-align: -2px;
+      margin-right: 6px;
+      animation: spin 0.9s linear infinite;
+    }
+    @@keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .live {
+      margin-top: 12px;
+      border-radius: 12px;
+      background: #06080b;
+      border: 1px solid #1d2532;
+      overflow: hidden;
+      position: relative;
+      min-height: 320px;
+      display: grid;
+      place-items: center;
+    }
+    .live.fullscreen {
+      width: 100vw;
+      height: 100vh;
+    }
+    video, img {
+      width: 100%;
+      height: auto;
+      display: none;
+    }
+    .live.fullscreen video,
+    .live.fullscreen img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .live.no-upscale video,
+    .live.no-upscale img {
+      width: auto;
+      height: auto;
+      max-width: 100%;
+      max-height: 100%;
+    }
+    .live.sharp video,
+    .live.sharp img {
+      image-rendering: crisp-edges;
+      image-rendering: pixelated;
+    }
+    .live.fit-contain video,
+    .live.fit-contain img {
+      object-fit: contain;
+    }
+    .live.fit-cover video,
+    .live.fit-cover img {
+      object-fit: cover;
+    }
+    .live.fit-native video,
+    .live.fit-native img {
+      object-fit: none;
+    }
+    .osd-hidden .badge,
+    .osd-hidden .overlay,
+    .osd-hidden .ws-indicator,
+    .osd-hidden #perfIndicator {
+      display: none;
+    }
+    .badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 3;
+      background: rgba(15, 18, 22, 0.8);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+    .loading-mask {
+      position: absolute;
+      inset: 0;
+      background: rgba(6, 8, 11, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 4;
+    }
+    .loading-mask.active {
+      display: flex;
+    }
+    .loading-panel {
+      background: rgba(15, 18, 22, 0.9);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      min-width: 240px;
+      text-align: center;
+    }
+    .loading-title {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .loading-bar {
+      width: 240px;
+      height: 8px;
+      background: #0d1118;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 0 auto 6px;
+    }
+    .loading-bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #6fb7ff, #7cc0ff);
+      transition: width 160ms linear;
+    }
+    .loading-note {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .footnote {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .control-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .control-row input[type="text"], .control-row input[type="number"] {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0f141b;
+      color: var(--ink);
+      padding: 8px 10px;
+      font-size: 14px;
+      min-width: 220px;
+    }
+    .control-row input[type="checkbox"] {
+      accent-color: var(--accent);
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      background: #0d1118;
+    }
+    .live.capture {
+      outline: 2px dashed rgba(124, 192, 255, 0.6);
+      outline-offset: -6px;
+    }
+    .overlay {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(10, 12, 15, 0.65);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      z-index: 3;
+    }
+    .ws-indicator {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(10, 12, 15, 0.65);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      z-index: 3;
+    }
+    #perfIndicator {
+      top: 36px;
+      left: 10px;
+    }
+    .ws-indicator.ok {
+      color: #a6ffcf;
+      border-color: rgba(166, 255, 207, 0.5);
+    }
+    .ws-indicator.warn {
+      color: #ffd18a;
+      border-color: rgba(255, 209, 138, 0.5);
+    }
+    .ws-indicator.err {
+      color: #ff9b9b;
+      border-color: rgba(255, 155, 155, 0.5);
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>Live View</h1>
+      <button id="refresh">Refresh</button>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <label for="source">Source</label>
+        <select id="source"></select>
+        <button id="load">Load</button>
+        <a id="openHls" href="#" target="_blank" rel="noopener">Open HLS</a>
+        <a id="openFlv" href="#" target="_blank" rel="noopener">Open FLV</a>
+      </div>
+      <div class="status" id="status"></div>
+      <div class="live">
+        <div class="loading-mask" id="loadingMask">
+          <div class="loading-panel">
+            <div class="loading-title" id="loadingTitle">Starting stream...</div>
+            <div class="loading-bar"><span id="loadingBar"></span></div>
+            <div class="loading-note" id="loadingNote">waiting for backend…</div>
+          </div>
+        </div>
+        <span class="ws-indicator" id="wsIndicator">ws: idle</span>
+        <span class="ws-indicator" id="perfIndicator">fps: - | rtt: -</span>
+        <span class="badge" id="badge">idle</span>
+        <span class="overlay" id="overlay">click to focus</span>
+        <video id="hlsPlayer" playsinline muted autoplay disablePictureInPicture controlslist="nodownload noplaybackrate noremoteplayback"></video>
+        <video id="flvPlayer" playsinline muted autoplay disablePictureInPicture controlslist="nodownload noplaybackrate noremoteplayback"></video>
+        <img id="mjpegPlayer" alt="Live MJPEG" />
+      </div>
+      <div class="footnote" id="footnote"></div>
+    </div>
+
+    <div class="panel">
+      <div class="control-grid">
+        <div class="control-row">
+          <label for="wsUrl">WS URL</label>
+          <input id="wsUrl" type="text" />
+          <label for="wsToken">Token</label>
+          <input id="wsToken" type="text" placeholder="optional" />
+        </div>
+        <div class="control-row">
+          <button id="wsConnect">Connect WS</button>
+          <button id="wsDisconnect">Disconnect</button>
+          <button id="fullscreenToggle">Fullscreen</button>
+          <span class="chip" id="wsState">ws: idle</span>
+          <span class="chip" id="itfState">itf: auto</span>
+          <span class="chip" id="lastKey">last key: -</span>
+        </div>
+        <div class="control-row">
+          <button id="streamStop" class="btn-danger">STOP STREAM</button>
+          <button id="streamStart" class="btn-ok">START STREAM</button>
+          <span class="chip" id="streamState">stream: -</span>
+        </div>
+        <div class="control-row">
+          <label><input id="captureToggle" type="checkbox" /> Capture input</label>
+        </div>
+        <fieldset id="stopRequiredFieldset" class="stop-required">
+          <legend>Requires STOP STREAM</legend>
+          <div class="control-row">
+            <label><input id="pointerToggle" type="checkbox" checked /> Pointer lock</label>
+            <span class="chip">Output</span>
+            <span class="chip" id="outputModeLabel">mode: -</span>
+            <label><input type="radio" name="outputMode" id="outModeHls" value="hls" /> H.264 (HLS)</label>
+            <label><input type="radio" name="outputMode" id="outModeMjpeg" value="mjpeg" /> MJPEG</label>
+            <label><input type="radio" name="outputMode" id="outModeMjpegPass" value="mjpeg-passthrough" /> MJPEG passthrough</label>
+            <label><input type="radio" name="outputMode" id="outModeFlv" value="flv" /> H.264 (FLV)</label>
+            <label><input id="noUpscale" type="checkbox" /> 1:1 scale</label>
+            <label><input id="sharpScale" type="checkbox" /> Sharp scale</label>
+            <label><input id="fullscreenUi" type="checkbox" checked /> Fullscreen with UI</label>
+            <label for="fitMode">Fit</label>
+            <select id="fitMode">
+              <option value="contain">contain</option>
+              <option value="cover">cover</option>
+              <option value="native">1:1</option>
+            </select>
+            <label for="mjpegFps">MJPEG FPS</label>
+            <input id="mjpegFps" type="number" min="1" max="60" step="1" value="30" />
+            <span class="chip" id="passthroughState">passthrough: off</span>
+            <label><input id="rawMjpeg" type="checkbox" /> Raw MJPEG</label>
+            <label><input id="preferMjpeg" type="checkbox" /> Prefer MJPEG</label>
+            <label><input id="flvUseWs" type="checkbox" /> FLV via WebSocket</label>
+            <label><input id="flvUltraLowLatency" type="checkbox" /> FLV ultra‑low latency</label>
+            <label for="mjpegQuality">MJPEG quality</label>
+            <input id="mjpegQuality" type="range" min="2" max="20" step="1" value="2" />
+            <span class="chip" id="mjpegQualityLabel">q=2</span>
+            <label for="mjpegSize">Resolution</label>
+            <select id="mjpegSize"></select>
+            <span class="chip" id="mjpegMaxFpsLabel">max fps: -</span>
+            <button id="refreshModes">Refresh modes</button>
+            <button id="resetMjpeg">Reset MJPEG</button>
+            <label for="sensitivity">Sensitivity</label>
+            <input id="sensitivity" type="number" min="0.2" max="5" step="0.1" value="1.0" />
+          </div>
+          <div class="control-row">
+            <span class="chip">Encoder</span>
+            <label for="profileSelect">Profile</label>
+            <select id="profileSelect"></select>
+            <button id="profileApply">Apply profile</button>
+            <span class="chip" id="profileActiveLabel">profile: -</span>
+          </div>
+        </fieldset>
+        <div class="control-row">
+          <label for="kbMode">Keyboard mode</label>
+          <select id="kbMode">
+            <option value="text">text (ASCII only)</option>
+            <option value="keycode">keycode (layout on remote)</option>
+          </select>
+          <label><input id="autoReconnect" type="checkbox" checked /> Auto reconnect</label>
+          <span class="chip" id="modsState">mods: -</span>
+          <button id="resetPrefs">Reset settings</button>
+        </div>
+        <div class="control-row">
+          <label>Layout switch</label>
+          <button id="switchAltShift">Alt+Shift</button>
+          <button id="switchCtrlShift">Ctrl+Shift</button>
+          <button id="switchWinSpace">Win+Space</button>
+          <span class="chip" id="layoutState">layout: unknown</span>
+        </div>
+        <div class="status" id="modeStatus"></div>
+        <div class="status" id="outputStatus"></div>
+        <div class="status" id="hidStatus"></div>
+        <div class="status" id="profileStatus">
+          <span class="spinner" id="profileSpinner" aria-hidden="true"></span>
+          <span id="profileStatusText"></span>
+        </div>
+        <div class="status" id="hintStatus">Підказка: [ / ] = +/- FPS, Alt+1/2/3/4/5 = 5/10/15/30/60 FPS, Ctrl+Alt+Enter = повний екран</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const sourceEl = document.getElementById("source");
+    const statusEl = document.getElementById("status");
+    const badgeEl = document.getElementById("badge");
+    const hlsPlayer = document.getElementById("hlsPlayer");
+    const flvPlayer = document.getElementById("flvPlayer");
+    const mjpegPlayer = document.getElementById("mjpegPlayer");
+    const openHls = document.getElementById("openHls");
+    const openFlv = document.getElementById("openFlv");
+    const footnote = document.getElementById("footnote");
+    const liveEl = document.querySelector(".live");
+    const loadingMaskEl = document.getElementById("loadingMask");
+    const loadingTitleEl = document.getElementById("loadingTitle");
+    const loadingBarEl = document.getElementById("loadingBar");
+    const loadingNoteEl = document.getElementById("loadingNote");
+    const overlayEl = document.getElementById("overlay");
+    const wsUrlEl = document.getElementById("wsUrl");
+    const wsTokenEl = document.getElementById("wsToken");
+    const wsConnectEl = document.getElementById("wsConnect");
+    const wsDisconnectEl = document.getElementById("wsDisconnect");
+    const fullscreenToggleEl = document.getElementById("fullscreenToggle");
+    const wsStateEl = document.getElementById("wsState");
+    const itfStateEl = document.getElementById("itfState");
+    const lastKeyEl = document.getElementById("lastKey");
+    const wsIndicatorEl = document.getElementById("wsIndicator");
+    const perfIndicatorEl = document.getElementById("perfIndicator");
+    const captureToggleEl = document.getElementById("captureToggle");
+    const pointerToggleEl = document.getElementById("pointerToggle");
+    const sensitivityEl = document.getElementById("sensitivity");
+    const preferMjpegEl = document.getElementById("preferMjpeg");
+    const outModeHlsEl = document.getElementById("outModeHls");
+    const outModeMjpegEl = document.getElementById("outModeMjpeg");
+    const outModeMjpegPassEl = document.getElementById("outModeMjpegPass");
+    const outModeFlvEl = document.getElementById("outModeFlv");
+    const noUpscaleEl = document.getElementById("noUpscale");
+    const sharpScaleEl = document.getElementById("sharpScale");
+    const fullscreenUiEl = document.getElementById("fullscreenUi");
+    const fitModeEl = document.getElementById("fitMode");
+    const mjpegFpsEl = document.getElementById("mjpegFps");
+    const rawMjpegEl = document.getElementById("rawMjpeg");
+    const flvUseWsEl = document.getElementById("flvUseWs");
+    const flvUltraLowLatencyEl = document.getElementById("flvUltraLowLatency");
+    const profileSelectEl = document.getElementById("profileSelect");
+    const profileApplyEl = document.getElementById("profileApply");
+    const profileActiveLabelEl = document.getElementById("profileActiveLabel");
+    const streamStopEl = document.getElementById("streamStop");
+    const streamStartEl = document.getElementById("streamStart");
+    const streamStateEl = document.getElementById("streamState");
+    const stopRequiredFieldsetEl = document.getElementById("stopRequiredFieldset");
+    const passthroughStateEl = document.getElementById("passthroughState");
+    const mjpegQualityEl = document.getElementById("mjpegQuality");
+    const mjpegQualityLabelEl = document.getElementById("mjpegQualityLabel");
+    const mjpegSizeEl = document.getElementById("mjpegSize");
+    const mjpegMaxFpsLabelEl = document.getElementById("mjpegMaxFpsLabel");
+    const refreshModesEl = document.getElementById("refreshModes");
+    const resetMjpegEl = document.getElementById("resetMjpeg");
+    const outputModeLabelEl = document.getElementById("outputModeLabel");
+    const kbModeEl = document.getElementById("kbMode");
+    const autoReconnectEl = document.getElementById("autoReconnect");
+    const modsStateEl = document.getElementById("modsState");
+    const resetPrefsEl = document.getElementById("resetPrefs");
+    const switchAltShiftEl = document.getElementById("switchAltShift");
+    const switchCtrlShiftEl = document.getElementById("switchCtrlShift");
+    const switchWinSpaceEl = document.getElementById("switchWinSpace");
+    const layoutStateEl = document.getElementById("layoutState");
+    const modeStatusEl = document.getElementById("modeStatus");
+    const outputStatusEl = document.getElementById("outputStatus");
+    const hidStatusEl = document.getElementById("hidStatus");
+    const profileStatusEl = document.getElementById("profileStatus");
+    const profileStatusTextEl = document.getElementById("profileStatusText");
+    const profileSpinnerEl = document.getElementById("profileSpinner");
+
+    let streams = [];
+    let ws = null;
+    let lastPos = null;
+    let mouseItf = null;
+    let keyboardItf = null;
+    let videoProfiles = [];
+    let forcePlayerReload = false;
+    let activeProfileName = "";
+    let reconnectTimer = null;
+    let modsMask = 0;
+    let escArmed = false;
+    let pingTimer = null;
+    let lastPingId = 0;
+    let pendingPings = new Map();
+    let decodeFps = NaN;
+    let decodeCount = 0;
+    let decodeStart = performance.now();
+    let deviceModes = [];
+    let mjpegSupported = false;
+    let mjpegSupportKnown = false;
+    let outputMode = "mjpeg";
+    let outputState = { mode: "mjpeg", mjpegPassthrough: false };
+    let streamRunning = false;
+    let streamStopReason = "";
+    // Radical mode: no automatic FLV/ffmpeg restarts; user controls START/STOP.
+    let autoRecoverFlv = false;
+    let streamDiagTimer = null;
+    let streamRestartCooldownAt = 0;
+    let streamNoSubscriberAt = 0;
+    let flvInstance = null;
+    let hlsWatchTimer = null;
+    let hlsLastTime = 0;
+    let hlsStallAt = 0;
+    let hlsLastNoteAt = 0;
+    let streamWaitTimer = null;
+    let streamWaitStart = 0;
+    let playerRetryTimer = null;
+    let currentPlayback = { mode: null, id: null, url: null };
+    let flvLastStatsAt = 0;
+    let flvWatchTimer = null;
+    let flvLastRestartAt = 0;
+    let flvLastTime = 0;
+    let flvLastTimeAt = 0;
+    let flvLastSyncAt = 0;
+    let flvLastResyncAt = 0;
+    let flvStallAt = 0;
+    let flvRestartCount = 0;
+    let flvRestartWindowAt = 0;
+    let flvWaitingTimer = null;
+    let flvDiagTimer = null;
+    let flvPostStartTimer = null;
+    let flvTrimTimer = null;
+    let flvDiagLastTagAt = 0;
+    let flvWaitingFlag = false;
+    const flvClientRecoveryEnabled = false;
+    const flvClientSyncEnabled = true;
+    const flvTrimEnabled = true;
+    let updateToken = 0;
+
+    function logEvent(label, extra) {
+      const ts = new Date().toISOString();
+      const suffix = extra ? ` | ${extra}` : "";
+      console.log(`[video ${ts}] ${label}${suffix}`);
+    }
+
+    function showLoading(title, note) {
+      logEvent("loading:start", `${title || ""} ${note || ""}`.trim());
+      if (loadingTitleEl) loadingTitleEl.textContent = title || "Starting stream...";
+      if (loadingNoteEl) loadingNoteEl.textContent = note || "waiting for backend…";
+      if (loadingBarEl) loadingBarEl.style.width = "0%";
+      if (loadingMaskEl) loadingMaskEl.classList.add("active");
+      streamWaitStart = performance.now();
+      if (streamWaitTimer) {
+        clearInterval(streamWaitTimer);
+      }
+      streamWaitTimer = setInterval(() => {
+        const elapsed = performance.now() - streamWaitStart;
+        const pct = Math.min(95, Math.max(5, (elapsed / 8000) * 100));
+        if (loadingBarEl) loadingBarEl.style.width = `${pct.toFixed(0)}%`;
+      }, 200);
+    }
+
+    function hideLoading() {
+      logEvent("loading:done");
+      if (streamWaitTimer) {
+        clearInterval(streamWaitTimer);
+        streamWaitTimer = null;
+      }
+      if (loadingBarEl) loadingBarEl.style.width = "100%";
+      if (loadingMaskEl) loadingMaskEl.classList.remove("active");
+    }
+
+    async function waitForStreamReady(stream, timeoutMs) {
+      logEvent("wait:start", `${outputMode} timeout=${timeoutMs}ms`);
+      const start = performance.now();
+      let attempts = 0;
+      while (performance.now() - start < timeoutMs) {
+        if (!stream || !sourceEl || stream.id !== sourceEl.value) return false;
+        attempts += 1;
+        if (outputMode !== "flv") {
+          try {
+            const res = await fetch("/video/output");
+            const data = await res.json();
+            if (data && data.ok) {
+              if (outputMode === "hls" && data.hls) return true;
+              if (outputMode === "mjpeg" && data.mjpeg) return true;
+              if (outputMode === "mjpeg-passthrough" && data.mjpegPassthrough) return true;
+            }
+          } catch {
+            // ignore
+          }
+        }
+        if (outputMode === "flv" && stream && stream.flvUrl) {
+          try {
+            const headUrl = buildFlvHttpUrl(stream);
+            const head = await fetch(headUrl, { method: "HEAD" });
+            if (head.ok) {
+              logEvent("wait:flv-head", "status=200");
+              return true;
+            }
+            const reason = head.headers.get("X-Video-Error") || "";
+            logEvent("wait:flv-head", `status=${head.status}${reason ? " reason=" + reason : ""}`);
+            if (reason === "stream_stopped_manual") {
+              setStreamRunningState(false, "manual-stop");
+              setHidStatus("FLV: stopped manually (use START STREAM)");
+              return false;
+            }
+          } catch {
+            // ignore
+          }
+        }
+        await new Promise(r => setTimeout(r, 400 + attempts * 50));
+      }
+      logEvent("wait:timeout", outputMode);
+      return false;
+    }
+
+    async function waitForFlvReady(sourceId, timeoutMs) {
+      const id = sourceId || sourceEl.value;
+      if (!id) return false;
+      const start = performance.now();
+      let attempts = 0;
+      while (performance.now() - start < timeoutMs) {
+        attempts += 1;
+        if (outputMode !== "flv") return false;
+        try {
+          const resp = await fetch("/video/diag", { cache: "no-store" });
+          if (resp.ok) {
+            const data = await resp.json();
+            const src = (data.sources || []).find(s => s.id === id);
+            if (src?.manualStop && !src?.ffmpegRunning) {
+              logEvent("wait:flv-diag", "manual-stop");
+              setStreamRunningState(false, "manual-stop");
+              setHidStatus("FLV: stopped manually (use START STREAM)");
+              return false;
+            }
+            const hub = src?.flvHub;
+            const tagAt = hub?.lastTagAtUtc ? Date.parse(hub.lastTagAtUtc) : 0;
+            const recent = tagAt > 0 && Date.now() - tagAt < 5000;
+            const ready = !!src?.ffmpegRunning && hub?.hasHeader && hub?.hasVideoConfig && hub?.hasKeyframe && recent;
+            if (ready) {
+              logEvent("wait:flv-diag", "ready");
+              setHidStatus("");
+              return true;
+            }
+          }
+        } catch {
+          // ignore diag failures
+        }
+        if (attempts % 4 === 0) {
+          logEvent("wait:flv-diag", "not-ready");
+        }
+        await new Promise(r => setTimeout(r, 400));
+      }
+      logEvent("wait:flv-diag", "timeout");
+      if (outputMode === "flv") {
+        setHidStatus("FLV: not ready yet (use START STREAM)");
+        if (autoRecoverFlv) {
+          await restartActiveSourceHard("flv_not_ready");
+        }
+      }
+      return false;
+    }
+
+    function canPlayHls() {
+      if (!hlsPlayer || !hlsPlayer.canPlayType) return false;
+      const support = hlsPlayer.canPlayType("application/vnd.apple.mpegurl");
+      return support && support !== "no";
+    }
+
+    function setStatus(text, badge) {
+      statusEl.textContent = text || "";
+      badgeEl.textContent = badge || "idle";
+    }
+    function setHidStatus(text) {
+      hidStatusEl.textContent = text || "";
+    }
+    function setProfileStatus(text) {
+      if (profileStatusTextEl) {
+        profileStatusTextEl.textContent = text || "";
+      }
+      if (profileSpinnerEl) {
+        profileSpinnerEl.style.display = text ? "inline-block" : "none";
+      }
+    }
+    function setWsState(text) {
+      wsStateEl.textContent = text;
+      wsIndicatorEl.textContent = text;
+      wsIndicatorEl.classList.remove("ok", "warn", "err");
+      if (text.includes("open")) wsIndicatorEl.classList.add("ok");
+      else if (text.includes("connecting")) wsIndicatorEl.classList.add("warn");
+      else if (text.includes("error")) wsIndicatorEl.classList.add("err");
+    }
+    function updateScaleMode() {
+      liveEl.classList.toggle("no-upscale", noUpscaleEl.checked);
+      liveEl.classList.toggle("sharp", sharpScaleEl.checked);
+    }
+    function updateFitMode() {
+      liveEl.classList.remove("fit-contain", "fit-cover", "fit-native");
+      const mode = fitModeEl.value;
+      if (mode === "cover") liveEl.classList.add("fit-cover");
+      else if (mode === "native") liveEl.classList.add("fit-native");
+      else liveEl.classList.add("fit-contain");
+    }
+    function toggleOsd() {
+      liveEl.classList.toggle("osd-hidden");
+    }
+    function setPerfIndicator(rttMs) {
+      const fps = Number.parseInt(mjpegFpsEl.value, 10);
+      const fpsText = Number.isFinite(fps) ? fps : "-";
+      const rttText = Number.isFinite(rttMs) ? `${Math.round(rttMs)}ms` : "-";
+      const decodeText = Number.isFinite(decodeFps) ? `${decodeFps.toFixed(1)}` : "-";
+      perfIndicatorEl.textContent = `fps: ${fpsText} | decode: ${decodeText} | rtt: ${rttText}`;
+    }
+    function setLastKey(text) {
+      lastKeyEl.textContent = "last key: " + (text || "-");
+    }
+    function setModsState() {
+      if (!modsMask) {
+        modsStateEl.textContent = "mods: -";
+        return;
+      }
+      const names = [];
+      if (modsMask & 0x01) names.push("LCTRL");
+      if (modsMask & 0x02) names.push("LSHIFT");
+      if (modsMask & 0x04) names.push("LALT");
+      if (modsMask & 0x08) names.push("LGUI");
+      if (modsMask & 0x10) names.push("RCTRL");
+      if (modsMask & 0x20) names.push("RSHIFT");
+      if (modsMask & 0x40) names.push("RALT");
+      if (modsMask & 0x80) names.push("RGUI");
+      modsStateEl.textContent = "mods: " + names.join("+");
+    }
+    function setLayoutState(text) {
+      layoutStateEl.textContent = "layout: " + (text || "unknown");
+    }
+    function setModeStatus(text) {
+      modeStatusEl.textContent = text || "";
+    }
+    function setOutputStatus(text) {
+      outputStatusEl.textContent = text || "";
+    }
+    function setControlsLocked(locked) {
+      const disabled = !!locked;
+      if (stopRequiredFieldsetEl) {
+        stopRequiredFieldsetEl.disabled = disabled;
+      }
+      profileSelectEl.disabled = disabled;
+      profileApplyEl.disabled = disabled;
+      outModeHlsEl.disabled = disabled;
+      outModeMjpegEl.disabled = disabled;
+      outModeMjpegPassEl.disabled = disabled;
+      outModeFlvEl.disabled = disabled;
+      mjpegFpsEl.disabled = disabled || outputState.mjpegPassthrough;
+      mjpegQualityEl.disabled = disabled || outputState.mjpegPassthrough;
+      mjpegSizeEl.disabled = disabled || outputState.mjpegPassthrough;
+      refreshModesEl.disabled = disabled;
+      resetMjpegEl.disabled = disabled;
+      rawMjpegEl.disabled = disabled;
+      preferMjpegEl.disabled = disabled;
+      flvUseWsEl.disabled = disabled;
+    }
+    function setStreamRunningState(running, reason) {
+      streamRunning = !!running;
+      streamStopReason = streamRunning ? "" : (reason || "stopped");
+      const label = streamRunning ? "stream: running" : "stream: stopped";
+      streamStateEl.textContent = reason ? `${label} (${reason})` : label;
+      streamStateEl.style.borderColor = streamRunning ? "#065f46" : "#3b0a0a";
+      streamStateEl.style.color = streamRunning ? "#bbf7d0" : "#fecaca";
+      setControlsLocked(streamRunning);
+    }
+    async function restartActiveSourceHard(reason, manualStart) {
+      const now = Date.now();
+      if (now - streamRestartCooldownAt < 20000) {
+        return;
+      }
+      streamRestartCooldownAt = now;
+      logEvent("ffmpeg:restart", reason || "auto");
+      stopFlvPlayback();
+      try {
+        await restartActiveSource(!!manualStart);
+      } catch {
+        // ignore
+      }
+    }
+    async function refreshStreamState() {
+      const id = sourceEl.value;
+      if (!id) return;
+      try {
+        const resp = await fetch("/video/diag", { cache: "no-store" });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const src = (data.sources || []).find(s => s.id === id);
+        const hub = src?.flvHub;
+        const running = !!src?.ffmpegRunning;
+        if (!running && src?.manualStop) {
+          setStreamRunningState(false, "manual-stop");
+          return;
+        }
+        if (!running) {
+          setStreamRunningState(false, "idle");
+          return;
+        }
+        if (outputMode === "flv" && hub) {
+          const tagAtMs = hub.lastTagAtUtc ? Date.parse(hub.lastTagAtUtc) : 0;
+          const recent = tagAtMs > 0 && Date.now() - tagAtMs < 6000;
+          const ready = hub.hasHeader && hub.hasVideoConfig && hub.hasKeyframe && recent;
+          setStreamRunningState(true, ready ? "flv-ready" : "flv-waiting");
+        } else {
+          setStreamRunningState(true, "");
+        }
+        if (outputMode !== "flv" || !hub) return;
+        const tagAt = hub.lastTagAtUtc ? Date.parse(hub.lastTagAtUtc) : 0;
+        const staleTags = tagAt > 0 && Date.now() - tagAt > 12000;
+        const ready = hub.hasHeader && hub.hasVideoConfig && hub.hasKeyframe;
+        if (ready && staleTags && autoRecoverFlv) {
+          await restartActiveSourceHard("stale_tags");
+        }
+      } catch {
+        // ignore diag failures
+      }
+    }
+    async function stopStreamManual() {
+      const id = sourceEl.value;
+      if (!id) return;
+      showLoading("Stopping stream...", id);
+      stopFlvPlayback();
+      try {
+        await fetch(`/video/capture/stop?id=${encodeURIComponent(id)}`, { method: "POST" });
+      } catch {
+        // ignore
+      }
+      try {
+        await fetch(`/video/ffmpeg/stop?id=${encodeURIComponent(id)}`, { method: "POST" });
+      } catch {
+        // ignore
+      }
+      setStreamRunningState(false, "manual-stop");
+      hideLoading();
+      await loadStreams({ updatePlayers: false });
+      await refreshStreamState();
+    }
+    async function startStreamManual() {
+      const id = sourceEl.value;
+      if (!id) return;
+      streamStopReason = "";
+      showLoading("Starting stream...", id);
+      await restartActiveSourceHard("manual_start", true);
+      hideLoading();
+      await loadStreams({ updatePlayers: false });
+      await refreshStreamState();
+      const stream = streams.find(s => s.id === id);
+      updatePlayers(stream);
+    }
+    function setMjpegQualityLabel() {
+      const q = Number.parseInt(mjpegQualityEl.value, 10);
+      if (Number.isFinite(q)) {
+        mjpegQualityLabelEl.textContent = `q=${q}`;
+        return;
+      }
+      mjpegQualityLabelEl.textContent = "q=-";
+    }
+    function normalizeOutputMode(value) {
+      return (value || "").trim().toLowerCase();
+    }
+    function isMjpegPassthroughMode() {
+      return outputState.mjpegPassthrough;
+    }
+    function setOutputModeState(mode, mjpegPassthrough) {
+      const normalized = normalizeOutputMode(mode) || "mjpeg";
+      outputMode = normalized;
+      outputState.mode = normalized;
+      outputState.mjpegPassthrough = !!mjpegPassthrough || normalized === "mjpeg-passthrough";
+      outModeHlsEl.checked = normalized === "hls";
+      outModeMjpegEl.checked = normalized === "mjpeg";
+      outModeMjpegPassEl.checked = normalized === "mjpeg-passthrough";
+      outModeFlvEl.checked = normalized === "flv";
+      applyMjpegPassthroughState();
+      updateOutputStatus();
+      refreshStreamState();
+    }
+    function setPassthroughState() {
+      passthroughStateEl.textContent = isMjpegPassthroughMode() ? "passthrough: on" : "passthrough: off";
+    }
+    function applyMjpegPassthroughState() {
+      const enabled = outputState.mjpegPassthrough;
+      mjpegQualityEl.disabled = enabled;
+      mjpegSizeEl.disabled = enabled;
+      mjpegFpsEl.disabled = enabled;
+      setPassthroughState();
+      if (enabled) {
+        setHidStatus("mjpeg passthrough: q/fps/size are ignored");
+      }
+    }
+    function applyRawMjpegState() {
+      const enabled = rawMjpegEl.checked;
+      mjpegQualityEl.disabled = enabled;
+      mjpegSizeEl.disabled = enabled;
+      mjpegFpsEl.disabled = enabled;
+      if (enabled) {
+        setHidStatus("raw mjpeg: q/fps/size are ignored");
+      }
+    }
+    function setMaxFpsLabel(value) {
+      mjpegMaxFpsLabelEl.textContent = `max fps: ${value ?? "-"}`;
+    }
+    function updateModsFromEvent(ev) {
+      let mask = 0;
+      if (ev.ctrlKey) mask |= 0x01;
+      if (ev.shiftKey) mask |= 0x02;
+      if (ev.altKey) mask |= 0x04;
+      if (ev.metaKey) mask |= 0x08;
+      modsMask = mask;
+      setModsState();
+    }
+    function setItfState() {
+      const mouseLabel = mouseItf === null ? "auto" : String(mouseItf);
+      const keyLabel = keyboardItf === null ? "auto" : String(keyboardItf);
+      itfStateEl.textContent = `itf: m=${mouseLabel} k=${keyLabel}`;
+    }
+
+    function showHls(url) {
+      logEvent("show:hls", url);
+      currentPlayback = { mode: "hls", id: sourceEl.value, url };
+      showLoading("Starting HLS...", "waiting for stream…");
+      clearPlayerRetry();
+      clearFlvWaitingTimer();
+      stopFlvDiagWatch();
+      flvWaitingFlag = false;
+      if (flvWatchTimer) {
+        clearInterval(flvWatchTimer);
+        flvWatchTimer = null;
+      }
+      if (hlsWatchTimer) {
+        clearInterval(hlsWatchTimer);
+        hlsWatchTimer = null;
+      }
+      if (flvInstance) {
+        try { flvInstance.destroy(); } catch { }
+        flvInstance = null;
+      }
+      if (window.hlsInstance) {
+        window.hlsInstance.destroy();
+        window.hlsInstance = null;
+      }
+      hlsPlayer.style.display = "block";
+      mjpegPlayer.style.display = "none";
+      flvPlayer.style.display = "none";
+      hlsPlayer.autoplay = true;
+      hlsPlayer.muted = true;
+      hlsPlayer.playsInline = true;
+      hlsPlayer.onloadedmetadata = () => {
+        hlsPlayer.play().catch(() => {});
+      };
+      hlsPlayer.onwaiting = () => { setHidStatus("HLS: buffering..."); logEvent("hls:waiting"); };
+      hlsPlayer.onstalled = () => { setHidStatus("HLS: stalled"); logEvent("hls:stalled"); };
+      hlsPlayer.onerror = () => { setHidStatus("HLS: video error"); logEvent("hls:error"); };
+      if (hlsPlayer.canPlayType("application/vnd.apple.mpegurl")) {
+        hlsPlayer.src = url;
+        hlsPlayer.load();
+        hlsPlayer.play().catch(() => {});
+      } else if (window.Hls && window.Hls.isSupported()) {
+        const hls = new window.Hls({
+          enableWorker: false,
+          lowLatencyMode: true,
+          backBufferLength: 0,
+          maxBufferLength: 3,
+          maxBufferSize: 6 * 1024 * 1024,
+          liveSyncDurationCount: 2,
+          liveMaxLatencyDurationCount: 4,
+          maxLiveSyncPlaybackRate: 1.5,
+          startPosition: -1
+        });
+        window.hlsInstance = hls;
+        hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+          logEvent("hls:manifest");
+          hlsPlayer.play().catch(() => {});
+        });
+        hls.on(window.Hls.Events.LEVEL_LOADED, (event, data) => {
+          logEvent("hls:level-loaded");
+          if (data && data.details && data.details.live) {
+            const sync = hls.liveSyncPosition;
+            if (Number.isFinite(sync)) {
+              hlsPlayer.currentTime = sync;
+            }
+          }
+        });
+        hls.on(window.Hls.Events.FRAG_BUFFERED, () => hideLoading());
+        hls.on(window.Hls.Events.ERROR, (event, data) => {
+          const detail = data && data.details ? data.details : "unknown";
+          setHidStatus(`HLS error: ${detail}`);
+          logEvent("hls:error", `${data?.type || ""} ${detail}`);
+          if (data && data.fatal) {
+            if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+            } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else {
+              hls.destroy();
+            }
+          }
+        });
+        hls.loadSource(url);
+        hls.attachMedia(hlsPlayer);
+      } else {
+        hlsPlayer.src = url;
+        hlsPlayer.load();
+        hlsPlayer.play().catch(() => {});
+        setHidStatus("HLS: hls.js недоступний, потрібен MSE");
+      }
+      hlsPlayer.onplaying = () => hideLoading();
+      hlsLastTime = hlsPlayer.currentTime || 0;
+      hlsStallAt = performance.now();
+      hlsWatchTimer = setInterval(() => {
+        if (outputMode !== "hls") return;
+        const now = performance.now();
+        const ct = hlsPlayer.currentTime || 0;
+        if (ct !== hlsLastTime) {
+          hlsLastTime = ct;
+          hlsStallAt = now;
+          return;
+        }
+        if (now - hlsStallAt < 10000) return;
+        hlsStallAt = now;
+        if (now - hlsLastNoteAt > 4000) {
+          hlsLastNoteAt = now;
+          setHidStatus("HLS: resync");
+        }
+        if (window.hlsInstance && Number.isFinite(window.hlsInstance.liveSyncPosition)) {
+          hlsPlayer.currentTime = window.hlsInstance.liveSyncPosition;
+        } else if (Number.isFinite(hlsPlayer.duration) && hlsPlayer.duration > 0) {
+          hlsPlayer.currentTime = Math.max(0, hlsPlayer.duration - 0.1);
+        }
+        hlsPlayer.play().catch(() => {});
+        if (window.hlsInstance) {
+          window.hlsInstance.startLoad();
+        }
+      }, 2000);
+    }
+
+    function showMjpeg(url) {
+      logEvent("show:mjpeg", url);
+      currentPlayback = { mode: "mjpeg", id: sourceEl.value, url };
+      showLoading("Starting MJPEG...", "waiting for stream…");
+      clearPlayerRetry();
+      clearFlvWaitingTimer();
+      stopFlvDiagWatch();
+      flvWaitingFlag = false;
+      if (flvWatchTimer) {
+        clearInterval(flvWatchTimer);
+        flvWatchTimer = null;
+      }
+      if (hlsWatchTimer) {
+        clearInterval(hlsWatchTimer);
+        hlsWatchTimer = null;
+      }
+      if (window.hlsInstance) {
+        window.hlsInstance.destroy();
+        window.hlsInstance = null;
+      }
+      if (flvInstance) {
+        try { flvInstance.destroy(); } catch { }
+        flvInstance = null;
+      }
+      hlsPlayer.removeAttribute("src");
+      hlsPlayer.style.display = "none";
+      flvPlayer.removeAttribute("src");
+      flvPlayer.style.display = "none";
+      mjpegPlayer.style.display = "block";
+      mjpegPlayer.addEventListener("error", async () => {
+        logEvent("mjpeg:error");
+        try {
+          const res = await fetch(url);
+          const text = await res.text();
+          if (text) {
+            setHidStatus(`mjpeg error: ${text}`);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+        setHidStatus("mjpeg error (check passthrough/no-frames)");
+      }, { once: true });
+      mjpegPlayer.onload = () => hideLoading();
+      mjpegPlayer.src = url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+    }
+
+    function withCacheBuster(url) {
+      if (!url) return url;
+      const join = url.includes("?") ? "&" : "?";
+      return `${url}${join}t=${Date.now()}`;
+    }
+
+    function stripCacheBuster(url) {
+      if (!url) return url;
+      try {
+        const u = new URL(url, location.href);
+        u.searchParams.delete("t");
+        return u.toString();
+      } catch {
+        return url.replace(/([?&])t=\d+(&?)/, (match, sep, tail) => (sep === "?" && tail ? "?" : sep) + tail).replace(/[?&]$/, "");
+      }
+    }
+
+    function restartFlv(reason, url) {
+      const now = Date.now();
+      if (!flvRestartWindowAt || now - flvRestartWindowAt > 15000) {
+        flvRestartWindowAt = now;
+        flvRestartCount = 0;
+      }
+      flvRestartCount += 1;
+      if (flvRestartCount > 6) {
+        logEvent("flv:restart:stop", "too_many_restarts");
+        setHidStatus("FLV: too many restarts, check console");
+        return;
+      }
+      flvLastRestartAt = now;
+      logEvent("flv:restart", reason || "unknown");
+      try {
+        if (flvInstance) {
+          flvInstance.pause();
+          flvInstance.unload();
+          flvInstance.detachMediaElement();
+          flvInstance.destroy();
+        }
+      } catch { }
+      flvInstance = null;
+      flvPlayer.removeAttribute("src");
+      flvPlayer.load();
+      if (url) {
+        showFlv(withCacheBuster(url));
+      }
+    }
+
+    function showFlv(url) {
+      logEvent("show:flv", url);
+      currentPlayback = { mode: "flv", id: sourceEl.value, url: stripCacheBuster(url) };
+      showLoading("Starting FLV...", "waiting for stream…");
+      clearPlayerRetry();
+      clearFlvWaitingTimer();
+      clearFlvPostStartTimer();
+      clearFlvTrimTimer();
+      stopFlvDiagWatch();
+      flvWaitingFlag = false;
+      flvDiagLastTagAt = 0;
+      if (hlsWatchTimer) {
+        clearInterval(hlsWatchTimer);
+        hlsWatchTimer = null;
+      }
+      if (window.hlsInstance) {
+        window.hlsInstance.destroy();
+        window.hlsInstance = null;
+      }
+      if (window.flvjs && window.flvjs.isSupported()) {
+        if (flvInstance) {
+          try { flvInstance.destroy(); } catch { }
+          flvInstance = null;
+        }
+        hlsPlayer.removeAttribute("src");
+        hlsPlayer.style.display = "none";
+        mjpegPlayer.removeAttribute("src");
+        mjpegPlayer.style.display = "none";
+        flvPlayer.style.display = "block";
+        const ultraLowLatency = !!flvUltraLowLatencyEl?.checked;
+        flvInstance = window.flvjs.createPlayer({
+          type: "flv",
+          url: url,
+          isLive: true,
+          hasAudio: false
+        }, {
+          enableWorker: false,
+          enableStashBuffer: !ultraLowLatency,
+          stashInitialSize: ultraLowLatency ? 16 : 256,
+          lazyLoad: false,
+          lazyLoadMaxDuration: 0,
+          lazyLoadRecoverDuration: 0,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: ultraLowLatency ? 0.2 : 1.5,
+          autoCleanupMinBackwardDuration: ultraLowLatency ? 0.05 : 0.5,
+          fixAudioTimestampGap: false,
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: ultraLowLatency ? 0.3 : 1.2,
+          liveBufferLatencyMinRemain: ultraLowLatency ? 0.05 : 0.3
+        });
+        flvInstance.attachMediaElement(flvPlayer);
+        flvInstance.load();
+        flvPlayer.play().catch(() => {});
+        flvInstance.on("error", (errType, errDetail) => {
+          setHidStatus(`FLV error: ${errType} ${errDetail}`);
+          logEvent("flv:error", `${errType} ${errDetail}`);
+          if (flvClientRecoveryEnabled && autoRecoverFlv && outputMode === "flv") {
+            restartFlv("error", url);
+          }
+        });
+        flvInstance.on("loading_error", (errType, errDetail) => {
+          logEvent("flv:loading_error", `${errType} ${errDetail}`);
+          if (outputMode !== "flv") return;
+          if (Date.now() - flvLastRestartAt < 3000) return;
+          if (flvClientRecoveryEnabled && autoRecoverFlv) restartFlv("loading_error", url);
+        });
+        flvInstance.on("loading_complete", () => {
+          logEvent("flv:loading_complete");
+          if (outputMode !== "flv") return;
+          if (Date.now() - flvLastRestartAt < 3000) return;
+          if (flvClientRecoveryEnabled && autoRecoverFlv) restartFlv("loading_complete", url);
+        });
+        flvInstance.on("statistics_info", () => {
+          const now = Date.now();
+          const ct = flvPlayer.currentTime || 0;
+          if (ct !== flvLastTime) {
+            flvLastTime = ct;
+            flvLastTimeAt = now;
+            flvStallAt = performance.now();
+            flvLastStatsAt = now;
+          } else if (!flvLastStatsAt) {
+            flvLastStatsAt = now;
+          }
+          clearFlvWaitingTimer();
+          flvWaitingFlag = false;
+          hideLoading();
+          if (flvPlayer.paused) {
+            flvPlayer.play().catch(() => {});
+          }
+          if (flvClientSyncEnabled) {
+            syncFlvPlayback("stats");
+          }
+        });
+        flvPlayer.onplaying = () => {
+          clearFlvWaitingTimer();
+          flvWaitingFlag = false;
+          hideLoading();
+        };
+        flvPlayer.ontimeupdate = () => {
+          flvLastTime = flvPlayer.currentTime || flvLastTime;
+          flvStallAt = performance.now();
+          clearFlvWaitingTimer();
+          flvWaitingFlag = false;
+        };
+        flvPlayer.onstalled = () => {
+          logEvent("flv:stalled");
+          flvWaitingFlag = true;
+          if (flvClientRecoveryEnabled && autoRecoverFlv && outputMode === "flv") {
+            restartFlv("stalled", url);
+          }
+        };
+        flvPlayer.onwaiting = () => {
+          logEvent("flv:waiting");
+          if (outputMode !== "flv") return;
+          flvWaitingFlag = true;
+          if (flvClientSyncEnabled) {
+            syncFlvPlayback("waiting");
+          }
+          if (flvPlayer.paused) {
+            flvPlayer.play().catch(() => {});
+          }
+        };
+        flvLastStatsAt = Date.now();
+        flvLastTime = flvPlayer.currentTime || 0;
+        flvLastTimeAt = Date.now();
+        flvStallAt = performance.now();
+        if (flvTrimEnabled) {
+          startFlvTrimWatch();
+        }
+        if (flvClientRecoveryEnabled) {
+          startFlvWatch();
+          startFlvDiagWatch();
+        }
+        // Quick guard: if WS closes immediately after a profile switch, retry fast.
+        flvPostStartTimer = setTimeout(async () => {
+          if (outputMode !== "flv") return;
+          const id = sourceEl.value;
+          if (!id) return;
+          try {
+            const resp = await fetch("/video/diag", { cache: "no-store" });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const src = (data.sources || []).find(s => s.id === id);
+            const hub = src?.flvHub;
+            const ready = hub?.hasVideoConfig && hub?.hasKeyframe;
+            if (flvClientRecoveryEnabled && autoRecoverFlv && src?.ffmpegRunning && !ready) {
+              logEvent("flv:restart", "post_start_not_ready");
+              restartFlv("post_start_not_ready", url);
+            }
+          } catch {
+            // ignore
+          }
+        }, 2500);
+      } else {
+        setHidStatus("FLV: flv.js недоступний");
+        logEvent("flv:unsupported");
+      }
+    }
+
+    function buildMjpegUrl(stream) {
+      if (!stream || !stream.mjpegUrl || outputMode === "hls" || outputMode === "flv") return "";
+      let url = stream.mjpegUrl;
+      const params = [];
+      if (rawMjpegEl.checked) {
+        if (params.length > 0) {
+          url += (url.includes("?") ? "&" : "?") + params.join("&");
+        }
+        return url;
+      }
+      if (!isMjpegPassthroughMode()) {
+        const fps = Number.parseInt(mjpegFpsEl.value, 10);
+        if (Number.isFinite(fps) && fps > 0) {
+          params.push("fps=" + fps);
+        }
+        const q = Number.parseInt(mjpegQualityEl.value, 10);
+        if (Number.isFinite(q)) {
+          params.push("q=" + q);
+        }
+        const size = mjpegSizeEl.value.trim();
+        if (size) {
+          const parts = size.split("x");
+          if (parts.length === 2) {
+            params.push("w=" + parts[0]);
+            params.push("h=" + parts[1]);
+          }
+        }
+      }
+      if (params.length > 0) {
+        url += (url.includes("?") ? "&" : "?") + params.join("&");
+      }
+      return url;
+    }
+
+    function buildHlsUrl(stream) {
+      if (!stream || !stream.hlsUrl || outputMode !== "hls") return "";
+      return stream.hlsUrl;
+    }
+
+    function buildFlvUrl(stream) {
+      if (!stream || !stream.flvUrl || outputMode !== "flv") return "";
+      if (flvUseWsEl.checked) {
+        const proto = location.protocol === "https:" ? "wss://" : "ws://";
+        return proto + location.host + `/video/ws/flv/${stream.id}`;
+      }
+      return `${location.origin}/video/flv/${stream.id}`;
+    }
+
+    function buildFlvHttpUrl(stream) {
+      if (!stream || outputMode !== "flv") return "";
+      return `${location.origin}/video/flv/${stream.id}`;
+    }
+
+    function clearPlayerRetry() {
+      if (playerRetryTimer) {
+        clearTimeout(playerRetryTimer);
+        playerRetryTimer = null;
+      }
+    }
+
+    function clearFlvWaitingTimer() {
+      if (flvWaitingTimer) {
+        clearTimeout(flvWaitingTimer);
+        flvWaitingTimer = null;
+      }
+    }
+
+    function clearFlvPostStartTimer() {
+      if (flvPostStartTimer) {
+        clearTimeout(flvPostStartTimer);
+        flvPostStartTimer = null;
+      }
+    }
+    function clearFlvTrimTimer() {
+      if (flvTrimTimer) {
+        clearInterval(flvTrimTimer);
+        flvTrimTimer = null;
+      }
+    }
+
+    function stopFlvDiagWatch() {
+      if (flvDiagTimer) {
+        clearInterval(flvDiagTimer);
+        flvDiagTimer = null;
+      }
+    }
+
+    function stopFlvPlayback() {
+      clearFlvWaitingTimer();
+      clearFlvPostStartTimer();
+      clearFlvTrimTimer();
+      stopFlvDiagWatch();
+      if (flvWatchTimer) {
+        clearInterval(flvWatchTimer);
+        flvWatchTimer = null;
+      }
+      if (flvInstance) {
+        try { flvInstance.pause(); } catch { }
+        try { flvInstance.unload(); } catch { }
+        try { flvInstance.detachMediaElement(); } catch { }
+        try { flvInstance.destroy(); } catch { }
+        flvInstance = null;
+      }
+      try { flvPlayer.pause(); } catch { }
+      flvPlayer.playbackRate = 1.0;
+      flvPlayer.removeAttribute("src");
+      flvWaitingFlag = false;
+    }
+
+    function startFlvTrimWatch() {
+      if (!flvTrimEnabled) return;
+      clearFlvTrimTimer();
+      const intervalMs = flvUltraLowLatencyEl?.checked ? 600 : 1500;
+      flvTrimTimer = setInterval(() => {
+        if (outputMode !== "flv" || !flvInstance) return;
+        if (flvPlayer.readyState < 2) return;
+        const bufferedEnd = getBufferedEnd(flvPlayer);
+        if (!bufferedEnd || bufferedEnd <= 0) return;
+        const ct = flvPlayer.currentTime || 0;
+        const lag = bufferedEnd - ct;
+        const targetLag = flvUltraLowLatencyEl?.checked ? 0.2 : 0.9;
+        const maxLag = flvUltraLowLatencyEl?.checked ? 0.6 : 2.5;
+        if (lag > maxLag) {
+          try {
+            flvPlayer.currentTime = Math.max(0, bufferedEnd - targetLag);
+            flvPlayer.playbackRate = 1.0;
+            flvPlayer.play().catch(() => {});
+            logEvent("flv:trim", `ct=${ct.toFixed(2)} buf=${bufferedEnd.toFixed(2)} lag=${lag.toFixed(2)}`);
+          } catch { }
+        }
+      }, intervalMs);
+    }
+
+    function startFlvDiagWatch() {
+      stopFlvDiagWatch();
+        if (!flvClientRecoveryEnabled) return;
+        flvDiagTimer = setInterval(async () => {
+        if (outputMode !== "flv") return;
+        const id = sourceEl.value;
+        if (!id) return;
+        try {
+          const resp = await fetch("/video/diag", { cache: "no-store" });
+          if (!resp.ok) return;
+          const data = await resp.json();
+          const src = (data.sources || []).find(s => s.id === id);
+          const hub = src?.flvHub;
+          const tagAt = hub?.lastTagAtUtc ? Date.parse(hub.lastTagAtUtc) : 0;
+          const now = Date.now();
+          const restartCooldown = now - flvLastRestartAt > 3000;
+          const restartUrl = currentPlayback.url || (src ? buildFlvUrl(src) : "");
+
+          // Restart only on strong signals: no fresh tags.
+          if (restartCooldown && src?.ffmpegRunning && hub?.hasHeader && hub?.hasVideoConfig && hub?.hasKeyframe) {
+            const stalledTags = tagAt > 0 && now - tagAt > 10000;
+            if (stalledTags && flvClientRecoveryEnabled && autoRecoverFlv) {
+              logEvent("flv:restart", "diag_no_tags");
+              restartFlv("diag_no_tags", restartUrl);
+              restartActiveSourceHard("diag_no_tags");
+            }
+          }
+
+          if (tagAt > flvDiagLastTagAt) {
+            flvDiagLastTagAt = tagAt;
+          }
+        } catch {
+          // ignore diag failures
+        }
+      }, 3000);
+    }
+
+    function startFlvWatch() {
+      if (!flvClientRecoveryEnabled) return;
+      if (flvWatchTimer) return;
+      flvWatchTimer = setInterval(() => {
+        if (outputMode !== "flv") return;
+        if (!flvInstance) return;
+        const now = Date.now();
+        if (now - flvLastStatsAt < 4000) return;
+        if (now - flvLastRestartAt < 4000) return;
+        const ct = flvPlayer.currentTime || 0;
+        if (ct !== flvLastTime) {
+          flvLastTime = ct;
+          flvStallAt = performance.now();
+          flvLastStatsAt = now;
+          return;
+        }
+        if (performance.now() - flvStallAt < 8000) return;
+        const stream = streams.find(s => s.id === sourceEl.value);
+        if (!stream) return;
+        const bufferedEnd = getBufferedEnd(flvPlayer);
+        const lag = bufferedEnd - ct;
+        if (flvPlayer.paused) {
+          flvPlayer.play().catch(() => {});
+          flvLastStatsAt = now;
+          return;
+        }
+        flvLastRestartAt = now;
+        setHidStatus("FLV: stalled (use STOP/START)");
+        if (flvClientRecoveryEnabled && autoRecoverFlv) {
+          currentPlayback = { mode: null, id: null, url: null };
+          restartFlv("stall", buildFlvUrl(stream));
+        }
+      }, 1000);
+    }
+
+    async function updatePlayers(stream) {
+      const token = ++updateToken;
+      if (!stream) {
+        setStatus("no stream selected", "idle");
+        hlsPlayer.removeAttribute("src");
+        mjpegPlayer.removeAttribute("src");
+        return;
+      }
+      const forceReload = forcePlayerReload;
+      if (forceReload) {
+        logEvent("players:force", "reload");
+        currentPlayback = { mode: null, id: null, url: null };
+        stopFlvPlayback();
+        forcePlayerReload = false;
+      }
+      clearPlayerRetry();
+      const hlsUrl = buildHlsUrl(stream);
+      const mjpegUrl = buildMjpegUrl(stream);
+      const flvUrl = buildFlvUrl(stream);
+      const flvMatch = outputMode === "flv" &&
+        currentPlayback.mode === "flv" &&
+        currentPlayback.id === stream.id &&
+        stripCacheBuster(currentPlayback.url) === stripCacheBuster(flvUrl);
+      if (flvMatch && flvInstance && !forceReload) {
+        return;
+      }
+      logEvent("players:update", `mode=${outputMode} id=${stream.id}`);
+      openHls.href = hlsUrl || "#";
+      openFlv.href = flvUrl || "#";
+
+      if (outputMode === "hls" && hlsUrl) {
+        logEvent("players:prepare", "hls");
+        if (currentPlayback.mode === "hls" && currentPlayback.id === stream.id && currentPlayback.url === hlsUrl) {
+          return;
+        }
+        const ready = await waitForStreamReady(stream, 6000);
+        if (token !== updateToken) return;
+        if (!ready) {
+          setHidStatus("HLS: waiting for stream...");
+          showLoading("Starting HLS...", "waiting for stream…");
+          playerRetryTimer = setTimeout(() => updatePlayers(stream), 1200);
+          return;
+        }
+        if (outputMode !== "hls") return;
+        clearPlayerRetry();
+        setStatus("HLS: playback", "hls");
+        showHls(hlsUrl);
+        footnote.textContent = canPlayHls() ? "HLS enabled." : "HLS via MSE (hls.js).";
+        return;
+      }
+      if (outputMode === "flv" && flvUrl) {
+        logEvent("players:prepare", "flv");
+        if (!forceReload && currentPlayback.mode === "flv" && currentPlayback.id === stream.id && currentPlayback.url === flvUrl) {
+          return;
+        }
+        if (!streamRunning && streamStopReason.includes("manual")) {
+          setHidStatus("FLV: stopped manually (use START STREAM)");
+          return;
+        }
+        const ready = await waitForStreamReady(stream, 8000);
+        if (token !== updateToken) return;
+        if (!ready) {
+          if (!streamRunning && streamStopReason.includes("manual")) {
+            setHidStatus("FLV: stopped manually (use START STREAM)");
+            return;
+          }
+          setHidStatus("FLV: waiting for stream...");
+          showLoading("Starting FLV...", "waiting for stream…");
+          playerRetryTimer = setTimeout(() => updatePlayers(stream), 1200);
+          return;
+        }
+        if (outputMode !== "flv") return;
+        clearPlayerRetry();
+        setStatus("FLV: playback", "flv");
+        showFlv(forceReload ? withCacheBuster(flvUrl) : flvUrl);
+        footnote.textContent = "FLV live stream.";
+        return;
+      }
+      if (mjpegUrl) {
+        logEvent("players:prepare", "mjpeg");
+        if (currentPlayback.mode === "mjpeg" && currentPlayback.id === stream.id && currentPlayback.url === mjpegUrl) {
+          return;
+        }
+        const ready = await waitForStreamReady(stream, 4000);
+        if (token !== updateToken) return;
+        if (!ready) {
+          setHidStatus("MJPEG: waiting for stream...");
+          showLoading("Starting MJPEG...", "waiting for stream…");
+          playerRetryTimer = setTimeout(() => updatePlayers(stream), 1200);
+          return;
+        }
+        if (outputMode !== "mjpeg" && outputMode !== "mjpeg-passthrough") return;
+        clearPlayerRetry();
+        setStatus("MJPEG: playback", "mjpeg");
+        showMjpeg(mjpegUrl);
+        footnote.textContent = "MJPEG enabled.";
+        return;
+      }
+
+      setStatus("no stream URLs available", "idle");
+    }
+
+    function updateOutputStatus() {
+      const passthrough = outputState.mjpegPassthrough ? "passthrough=on" : "passthrough=off";
+      const mode = outputState.mode || "mjpeg";
+      const streamText = streamRunning ? "locked" : "unlocked";
+      setOutputStatus(`output: ${mode} (${passthrough}) | ${streamText}`);
+      outputModeLabelEl.textContent = `mode: ${mode}`;
+    }
+    function applyOutputSupportState() {
+      if (!mjpegSupportKnown) {
+        outModeMjpegPassEl.disabled = false;
+      } else {
+        outModeMjpegPassEl.disabled = !mjpegSupported;
+      }
+      if (outputState.mjpegPassthrough && mjpegSupportKnown && !mjpegSupported) {
+        setHidStatus("mjpeg passthrough unsupported");
+        setOutputModeState("mjpeg", false);
+      }
+      applyMjpegPassthroughState();
+      updateOutputStatus();
+    }
+
+    function isFlvProfile(p) {
+      const name = (p?.name || "").toLowerCase();
+      const note = (p?.note || "").toLowerCase();
+      const args = (p?.args || "").toLowerCase();
+      return name.includes("flv") || note.includes("flv") || args.includes(" -f flv");
+    }
+
+    function filterProfilesForMode(mode, profiles) {
+      if (!Array.isArray(profiles) || profiles.length === 0) return [];
+      const wantFlv = mode === "flv";
+      const filtered = profiles.filter(p => (wantFlv ? isFlvProfile(p) : !isFlvProfile(p)));
+      return filtered.length > 0 ? filtered : profiles;
+    }
+
+    function pickFlvProfile(profiles) {
+      if (!Array.isArray(profiles) || profiles.length === 0) return "";
+      const order = ["nvenc", "amf", "v4l2", "libx264", "x264"];
+      for (const key of order) {
+        const match = profiles.find(p => (p.name || "").toLowerCase().includes(key));
+        if (match) return match.name;
+      }
+      return profiles[0].name || "";
+    }
+
+    async function loadOutputConfig() {
+      try {
+        const res = await fetch("/video/output");
+        const data = await res.json();
+        if (!data || !data.ok) return;
+        const mode = normalizeOutputMode(data.mode) || (data.flv ? "flv" : data.mjpegPassthrough ? "mjpeg-passthrough" : data.mjpeg ? "mjpeg" : "hls");
+        logEvent("output:load", `mode=${mode}`);
+        setOutputModeState(mode, data.mjpegPassthrough === true);
+        await loadProfiles();
+        if (data.mjpegFps) mjpegFpsEl.value = data.mjpegFps;
+        if (typeof data.mjpegSize === "string") mjpegSizeEl.value = data.mjpegSize;
+        applyOutputSupportState();
+      } catch {
+        // ignore
+      }
+    }
+
+    function updateProfileLabel(name) {
+      profileActiveLabelEl.textContent = `profile: ${name || "-"}`;
+    }
+
+    function getBufferedEnd(videoEl) {
+      try {
+        if (!videoEl || !videoEl.buffered || videoEl.buffered.length === 0) return 0;
+        return videoEl.buffered.end(videoEl.buffered.length - 1) || 0;
+      } catch {
+        return 0;
+      }
+    }
+
+    function syncFlvPlayback(reason) {
+      if (!flvClientSyncEnabled) return;
+      const now = Date.now();
+      const minInterval = flvUltraLowLatencyEl?.checked ? 500 : 1200;
+      if (now - flvLastSyncAt < minInterval) return;
+      const bufferedEnd = getBufferedEnd(flvPlayer);
+      const ct = flvPlayer.currentTime || 0;
+      const lag = bufferedEnd - ct;
+      if (bufferedEnd <= 0 || !Number.isFinite(lag) || lag < 0) return;
+      const softLag = flvUltraLowLatencyEl?.checked ? 0.2 : 1.2;
+      const hardLag = flvUltraLowLatencyEl?.checked ? 0.6 : 2.5;
+      let rate = 1.0;
+      if (lag > hardLag) {
+        rate = flvUltraLowLatencyEl?.checked ? 2.0 : 1.12;
+      } else if (lag > softLag) {
+        rate = flvUltraLowLatencyEl?.checked ? 1.4 : 1.04;
+      }
+      if (Math.abs(flvPlayer.playbackRate - rate) > 0.01) {
+        flvPlayer.playbackRate = rate;
+        logEvent("flv:sync", `${reason} rate=${rate.toFixed(2)} lag=${lag.toFixed(2)}`);
+      }
+      flvLastSyncAt = now;
+    }
+
+    async function loadProfiles() {
+      try {
+        const res = await fetch("/video/profiles", { cache: "no-store" });
+        const data = await res.json();
+        if (!data || !data.ok) return;
+        videoProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+        activeProfileName = data.active || "";
+        const modeProfiles = filterProfilesForMode(outputMode, videoProfiles);
+        let preferred = "";
+        try {
+          const raw = localStorage.getItem("hid_video_prefs");
+          if (raw) {
+            const prefs = JSON.parse(raw);
+            if (typeof prefs.activeProfile === "string") {
+              preferred = prefs.activeProfile;
+            }
+          }
+        } catch {
+          // ignore
+        }
+        profileSelectEl.innerHTML = "";
+        let preferredFound = false;
+        modeProfiles.forEach(p => {
+          const opt = document.createElement("option");
+          opt.value = p.name;
+          const note = p.note ? ` (${p.note})` : "";
+          opt.textContent = `${p.name}${note}`;
+          if (preferred && p.name === preferred) {
+            opt.selected = true;
+            preferredFound = true;
+          } else if (!preferredFound && p.name === activeProfileName) {
+            opt.selected = true;
+          }
+          profileSelectEl.appendChild(opt);
+        });
+        if (outputMode === "flv") {
+          const selectedCfg = modeProfiles.find(p => p.name === profileSelectEl.value);
+          if (!selectedCfg || !isFlvProfile(selectedCfg)) {
+            const flvName = pickFlvProfile(modeProfiles);
+            if (flvName) {
+              profileSelectEl.value = flvName;
+            }
+          }
+        }
+        updateProfileLabel(profileSelectEl.value || activeProfileName);
+      } catch {
+        // ignore
+      }
+    }
+
+    async function restartActiveSource(manualStart) {
+      const id = sourceEl.value;
+      if (!id) return;
+      try {
+        await fetch("/video/ffmpeg/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceId: id, restart: true, manualStart: !!manualStart })
+        }).then(r => r.json()).then(data => {
+          if (data && data.ok === false && data.error === "manual_stop") {
+            setHidStatus("AUTO START BLOCKED (manual STOP)");
+            logEvent("ffmpeg:start", "blocked_manual_stop");
+          }
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    async function setOutputMode(mode) {
+      const res = await fetch("/video/output", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: mode,
+          mjpegFps: Number.parseInt(mjpegFpsEl.value, 10),
+          mjpegSize: mjpegSizeEl.value || ""
+        })
+      });
+      const data = await res.json();
+      if (!data?.ok) {
+        throw new Error(data?.error || "output_update_failed");
+      }
+      const nextMode = data.flv
+        ? "flv"
+        : data.mjpegPassthrough
+          ? "mjpeg-passthrough"
+          : data.mjpeg
+            ? "mjpeg"
+            : "hls";
+      setOutputModeState(nextMode, data.mjpegPassthrough === true);
+      return data;
+    }
+
+    async function applyProfile() {
+      const name = profileSelectEl.value;
+      if (!name) return;
+      if (streamRunning) {
+        setHidStatus("STOP STREAM first to change encoder profile");
+        return;
+      }
+      const wasFlv = outputMode === "flv";
+      if (wasFlv) stopFlvPlayback();
+      showLoading("Switching encoder profile...", "restarting ffmpeg");
+      setProfileStatus("Профіль змінено. Перезапуск потоку...");
+      logEvent("profile:save", `name=${name}`);
+      try {
+        // Radical mode switch: temporarily disable FLV during profile change.
+        let tempMode = "";
+        if (wasFlv) {
+          tempMode = (mjpegSupportKnown && mjpegSupported) ? "mjpeg-passthrough" : "mjpeg";
+          logEvent("output:temp", `mode=${tempMode}`);
+          await setOutputMode(tempMode);
+        }
+        const res = await fetch("/video/profiles/active", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        logEvent("profile:save:response", `ok=${data?.ok} active=${data?.active || name}`);
+        if (!data?.ok) {
+          setHidStatus("profile update failed");
+          return;
+        }
+        activeProfileName = data.active || name;
+        updateProfileLabel(activeProfileName);
+        await restartActiveSource(false);
+        await loadStreams({ updatePlayers: false });
+        if (wasFlv) {
+          logEvent("output:restore", "mode=flv");
+          await setOutputMode("flv");
+          await waitForFlvReady(sourceEl.value, 12000);
+        }
+        const stream = streams.find(s => s.id === sourceEl.value);
+        forcePlayerReload = true;
+        updatePlayers(stream);
+        setHidStatus(`profile: ${activeProfileName}`);
+        setProfileStatus("Профіль застосовано. Потік перезавантажується...");
+      } catch {
+        setHidStatus("profile update failed");
+        setProfileStatus("Не вдалося застосувати профіль.");
+      } finally {
+        hideLoading();
+        setTimeout(() => setProfileStatus(""), 4000);
+      }
+    }
+
+    async function saveOutputConfig() {
+      const mode = outModeHlsEl.checked
+        ? "hls"
+        : outModeFlvEl.checked
+          ? "flv"
+          : outModeMjpegPassEl.checked
+            ? "mjpeg-passthrough"
+            : "mjpeg";
+      if (streamRunning) {
+        setHidStatus("STOP STREAM first to change output mode/settings");
+        setOutputModeState(outputMode, outputState.mjpegPassthrough);
+        return;
+      }
+      logEvent("output:save", `mode=${mode}`);
+      if (mode === "mjpeg-passthrough" && mjpegSupportKnown && !mjpegSupported) {
+        setHidStatus("mjpeg passthrough unsupported");
+        setOutputModeState("mjpeg", false);
+        return;
+      }
+      // FLV needs a clean shutdown before switching modes/profiles to avoid stale WS clients.
+      if (outputMode === "flv" || mode === "flv") {
+        stopFlvPlayback();
+      }
+      setOutputModeState(mode, mode === "mjpeg-passthrough");
+      try {
+        const res = await fetch("/video/output", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: mode,
+            mjpegFps: Number.parseInt(mjpegFpsEl.value, 10),
+            mjpegSize: mjpegSizeEl.value || ""
+          })
+        });
+        const data = await res.json();
+        if (!data || !data.ok) {
+          logEvent("output:save:response", `ok=false mode=${mode} error=${data?.error || "unknown"}`);
+          setHidStatus("output update failed");
+          return;
+        }
+        logEvent("output:save:response", `ok=true mode=${mode}`);
+        const nextMode = data.flv
+          ? "flv"
+          : data.mjpegPassthrough
+            ? "mjpeg-passthrough"
+            : data.mjpeg
+              ? "mjpeg"
+              : "hls";
+        setOutputModeState(nextMode, data.mjpegPassthrough === true);
+        await loadProfiles();
+        if (outputMode === "flv") {
+          const cfg = videoProfiles.find(p => p.name === profileSelectEl.value);
+          if (cfg && isFlvProfile(cfg) && !isFlvProfile(videoProfiles.find(p => p.name === activeProfileName))) {
+            await applyProfile();
+            return;
+          }
+          await waitForFlvReady(sourceEl.value, 12000);
+        }
+        setHidStatus("output updated");
+        const stream = streams.find(s => s.id === sourceEl.value);
+        updatePlayers(stream);
+      } catch {
+        logEvent("output:save:response", `ok=false mode=${mode} error=network`);
+        setHidStatus("output update failed");
+      }
+    }
+
+    async function loadStreams(options) {
+      const opts = options || {};
+      const shouldUpdatePlayers = opts.updatePlayers !== false;
+      setStatus("loading streams...", "loading");
+      try {
+        const res = await fetch("/video/streams");
+        const data = await res.json();
+        streams = Array.isArray(data.streams) ? data.streams : [];
+        sourceEl.innerHTML = "";
+        streams.forEach((s, i) => {
+          const opt = document.createElement("option");
+          opt.value = s.id;
+          opt.textContent = s.name || s.id;
+          sourceEl.appendChild(opt);
+          if (i === 0) sourceEl.value = s.id;
+        });
+        if (streams.length === 0) {
+          setStatus("no streams available", "idle");
+          return;
+        }
+        const selected = streams.find(s => s.id === sourceEl.value);
+        if (shouldUpdatePlayers) {
+          updatePlayers(selected);
+        }
+        if (selected) {
+          loadModesForSource(selected.id);
+          refreshStreamState();
+        }
+      } catch (err) {
+        setStatus("failed to load /video/streams", "error");
+      }
+    }
+
+    function updateResolutionOptions() {
+      const current = mjpegSizeEl.value;
+      mjpegSizeEl.innerHTML = "";
+      const optAuto = document.createElement("option");
+      optAuto.value = "";
+      optAuto.textContent = "auto";
+      mjpegSizeEl.appendChild(optAuto);
+      deviceModes.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = `${m.w}x${m.h}`;
+        opt.textContent = `${m.w}x${m.h} \u0040${m.fps}fps`;
+        mjpegSizeEl.appendChild(opt);
+      });
+      if (current && Array.from(mjpegSizeEl.options).some(o => o.value === current)) {
+        mjpegSizeEl.value = current;
+      }
+    }
+
+    function applyMaxFpsForResolution() {
+      const size = mjpegSizeEl.value;
+      if (!size) {
+        mjpegFpsEl.max = "60";
+        setMaxFpsLabel("-");
+        return;
+      }
+      const match = deviceModes.find(m => `${m.w}x${m.h}` === size);
+      if (!match) {
+        mjpegFpsEl.max = "60";
+        setMaxFpsLabel("-");
+        return;
+      }
+      const maxFps = Math.max(1, Math.floor(match.fps || 1));
+      mjpegFpsEl.max = String(maxFps);
+      setMaxFpsLabel(maxFps);
+      if (Number.parseInt(mjpegFpsEl.value, 10) > maxFps) {
+        mjpegFpsEl.value = String(maxFps);
+      }
+    }
+
+    async function loadModesForSource(sourceId, forceRefresh) {
+      deviceModes = [];
+      updateResolutionOptions();
+      setMaxFpsLabel("-");
+      setModeStatus("");
+      if (!sourceId) return;
+      try {
+        const url = forceRefresh
+          ? `/video/modes?id=${encodeURIComponent(sourceId)}&refresh=true`
+          : `/video/modes?id=${encodeURIComponent(sourceId)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data || !data.ok || !Array.isArray(data.modes)) {
+          if (data && data.error === "not_supported") {
+            setModeStatus("режими недоступні на цій ОС");
+          } else if (data && data.error) {
+            setModeStatus(`режими недоступні: ${data.error}`);
+          } else {
+            setModeStatus("режими недоступні");
+          }
+          return;
+        }
+        deviceModes = data.modes
+          .map(m => ({ w: m.width, h: m.height, fps: m.maxFps }))
+          .filter(m => m.w && m.h && m.fps)
+          .sort((a, b) => (a.w * a.h) - (b.w * b.h));
+        updateResolutionOptions();
+        applyMaxFpsForResolution();
+        mjpegSupported = data.supportsMjpeg === true;
+        mjpegSupportKnown = true;
+        const mjpegText = mjpegSupported ? "MJPEG: так" : "MJPEG: ні";
+        setModeStatus(`режими: ${deviceModes.length}${data.cached ? " (cache)" : ""} | ${mjpegText}`);
+        applyOutputSupportState();
+      } catch {
+        setModeStatus("режими недоступні");
+        // ignore
+      }
+    }
+
+    document.getElementById("refresh").addEventListener("click", loadStreams);
+    document.getElementById("load").addEventListener("click", () => {
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      if (stream) {
+        loadModesForSource(stream.id);
+      }
+    });
+
+    function buildWsUrl() {
+      let base = wsUrlEl.value.trim();
+      if (!base) {
+        const proto = location.protocol === "https:" ? "wss://" : "ws://";
+        base = proto + location.host + "/ws/hid";
+      }
+      const token = wsTokenEl.value.trim();
+      if (!token) return base;
+      return base.includes("?") ? `${base}&access_token=${encodeURIComponent(token)}` : `${base}?access_token=${encodeURIComponent(token)}`;
+    }
+
+    function wsSend(payload) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(payload));
+      return true;
+    }
+
+    async function loadItfFromDevices() {
+      try {
+        const res = await fetch("/devices?includeReportDesc=true");
+        const data = await res.json();
+        if (!data || !data.list || !Array.isArray(data.list.interfaces)) return;
+        const mouse = data.list.interfaces.find(i => i.typeName === "mouse");
+        const keyboard = data.list.interfaces.find(i => i.typeName === "keyboard");
+        mouseItf = mouse ? mouse.itf : null;
+        keyboardItf = keyboard ? keyboard.itf : null;
+        setItfState();
+      } catch {
+        setItfState();
+      }
+    }
+
+    function connectWs() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+      const url = buildWsUrl();
+      ws = new WebSocket(url);
+      setWsState("ws: connecting");
+      ws.addEventListener("open", () => {
+        setWsState("ws: open");
+        setHidStatus("ws connected");
+        loadItfFromDevices();
+        startPing();
+      });
+      ws.addEventListener("message", (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg && msg.type === "pong" && msg.id) {
+            const started = pendingPings.get(msg.id);
+            if (started) {
+              pendingPings.delete(msg.id);
+              setPerfIndicator(performance.now() - started);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      });
+      ws.addEventListener("close", () => {
+        setWsState("ws: closed");
+        setHidStatus("ws closed");
+        stopPing();
+        if (autoReconnectEl.checked) {
+          scheduleReconnect();
+        }
+      });
+      ws.addEventListener("error", () => {
+        setWsState("ws: error");
+        setHidStatus("ws error");
+      });
+    }
+
+    function disconnectWs() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      stopPing();
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      setWsState("ws: idle");
+    }
+    function startPing() {
+      stopPing();
+      pingTimer = setInterval(() => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const id = String(++lastPingId);
+        pendingPings.set(id, performance.now());
+        ws.send(JSON.stringify({ type: "ping", id }));
+      }, 1000);
+    }
+    function stopPing() {
+      if (pingTimer) {
+        clearInterval(pingTimer);
+        pingTimer = null;
+      }
+      pendingPings.clear();
+      setPerfIndicator(NaN);
+    }
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectWs();
+      }, 1000);
+    }
+
+    function isCaptureActive() {
+      return captureToggleEl.checked;
+    }
+
+    function getSensitivity() {
+      const val = Number.parseFloat(sensitivityEl.value);
+      if (Number.isFinite(val) && val > 0) return val;
+      return 1.0;
+    }
+
+    function withItf(payload, itf) {
+      if (itf === null || itf === undefined) return payload;
+      return { ...payload, itfSel: itf };
+    }
+
+    function handleMouseMove(dx, dy) {
+      if (!isCaptureActive()) return;
+      const sens = getSensitivity();
+      const payload = withItf({ type: "mouse.move", dx: Math.round(dx * sens), dy: Math.round(dy * sens) }, mouseItf);
+      wsSend(payload);
+    }
+
+    function handleWheel(delta) {
+      if (!isCaptureActive()) return;
+      const payload = withItf({ type: "mouse.wheel", delta: Math.sign(delta) }, mouseItf);
+      wsSend(payload);
+    }
+
+    function handleMouseButton(button, down) {
+      if (!isCaptureActive()) return;
+      const payload = withItf({ type: "mouse.button", button, down }, mouseItf);
+      wsSend(payload);
+    }
+
+    function sendModsCombo(mods, label) {
+      const press = withItf({ type: "keyboard.report", mods, keys: [], applyMapping: true }, keyboardItf);
+      const release = withItf({ type: "keyboard.report", mods: 0, keys: [], applyMapping: true }, keyboardItf);
+      wsSend(press);
+      wsSend(release);
+      setHidStatus(`layout switch: ${label}`);
+      setLayoutState(label);
+    }
+
+    function mapKeyToUsage(key) {
+      const table = {
+        "Enter": 40,
+        "Escape": 41,
+        "Backspace": 42,
+        "Tab": 43,
+        "ArrowRight": 79,
+        "ArrowLeft": 80,
+        "ArrowDown": 81,
+        "ArrowUp": 82,
+        "Delete": 76
+      };
+      return table[key] ?? null;
+    }
+
+    function handleKeydown(ev) {
+      if (!isCaptureActive()) return;
+      updateModsFromEvent(ev);
+      if (ev.ctrlKey && ev.altKey && ev.key === "Enter") {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          requestFullscreenForTarget();
+        }
+        ev.preventDefault();
+        return;
+      }
+      if (ev.ctrlKey && ev.altKey && ev.key === "O") {
+        toggleOsd();
+        ev.preventDefault();
+        return;
+      }
+      if (ev.key === "Escape") {
+        if (escArmed) {
+          if (document.pointerLockElement === liveEl && document.exitPointerLock) {
+            document.exitPointerLock();
+          }
+          escArmed = false;
+          setHidStatus("pointer lock released");
+        } else {
+          escArmed = true;
+          setHidStatus("press Esc again to release pointer lock");
+        }
+        ev.preventDefault();
+        return;
+      }
+      if (ev.altKey && ev.shiftKey) {
+        sendModsCombo(0x06, "Alt+Shift");
+        ev.preventDefault();
+        return;
+      }
+      if (ev.ctrlKey && ev.shiftKey) {
+        sendModsCombo(0x03, "Ctrl+Shift");
+        ev.preventDefault();
+        return;
+      }
+      if (ev.metaKey && ev.code === "Space") {
+        const press = withItf({ type: "keyboard.report", mods: 0x08, keys: [44], applyMapping: true }, keyboardItf);
+        const release = withItf({ type: "keyboard.report", mods: 0, keys: [], applyMapping: true }, keyboardItf);
+        wsSend(press);
+        wsSend(release);
+        setHidStatus("layout switch: Win+Space");
+        setLayoutState("Win+Space");
+        ev.preventDefault();
+        return;
+      }
+      if (ev.metaKey) return;
+      const mode = kbModeEl.value;
+      if (ev.key === "[" || ev.key === "]") {
+        const dir = ev.key === "[" ? -1 : 1;
+        const fps = Number.parseInt(mjpegFpsEl.value, 10) || 10;
+        const next = Math.min(60, Math.max(1, fps + dir));
+        mjpegFpsEl.value = String(next);
+        savePrefs();
+        const stream = streams.find(s => s.id === sourceEl.value);
+        updatePlayers(stream);
+        setHidStatus(`mjpeg fps: ${next}`);
+        ev.preventDefault();
+        return;
+      }
+      const quickFps = { "1": 5, "2": 10, "3": 15, "4": 30, "5": 60 }[ev.key];
+      if (quickFps && ev.altKey) {
+        mjpegFpsEl.value = String(quickFps);
+        savePrefs();
+        const stream = streams.find(s => s.id === sourceEl.value);
+        updatePlayers(stream);
+        setHidStatus(`mjpeg fps: ${quickFps}`);
+        ev.preventDefault();
+        return;
+      }
+      if (mode === "text") {
+        if (ev.key.length === 1 && !ev.altKey) {
+          const code = ev.key.charCodeAt(0);
+          if (code > 127) {
+            setHidStatus("non-ASCII ignored (use keycode mode for UA)");
+            return;
+          }
+          wsSend(withItf({ type: "keyboard.text", text: ev.key }, keyboardItf));
+          setLastKey(ev.key);
+          ev.preventDefault();
+          return;
+        }
+        const usage = mapKeyToUsage(ev.key);
+        if (usage !== null) {
+          wsSend(withItf({ type: "keyboard.press", usage }, keyboardItf));
+          setLastKey(ev.key);
+          ev.preventDefault();
+        }
+        return;
+      }
+      const mapped = mapCodeToUsage(ev.code, ev.shiftKey);
+      if (mapped) {
+        wsSend(withItf({ type: "keyboard.press", usage: mapped.usage, mods: mapped.mods }, keyboardItf));
+        setLastKey(ev.code);
+        ev.preventDefault();
+      }
+    }
+
+    function requestFullscreenForTarget() {
+      if (fullscreenUiEl.checked) {
+        if (liveEl.requestFullscreen) liveEl.requestFullscreen();
+        return;
+      }
+      const target = outputMode === "hls" ? hlsPlayer : outputMode === "flv" ? flvPlayer : mjpegPlayer;
+      if (target && target.requestFullscreen) {
+        target.requestFullscreen();
+      } else if (liveEl.requestFullscreen) {
+        liveEl.requestFullscreen();
+      }
+    }
+
+    wsConnectEl.addEventListener("click", connectWs);
+    wsDisconnectEl.addEventListener("click", disconnectWs);
+    fullscreenToggleEl.addEventListener("click", () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+        return;
+      }
+      requestFullscreenForTarget();
+    });
+    document.addEventListener("fullscreenchange", () => {
+      const active = !!document.fullscreenElement;
+      fullscreenToggleEl.textContent = active ? "Exit fullscreen" : "Fullscreen";
+      liveEl.classList.toggle("fullscreen", active);
+    });
+    captureToggleEl.addEventListener("change", () => {
+      liveEl.classList.toggle("capture", isCaptureActive());
+      overlayEl.textContent = isCaptureActive() ? "capturing input" : "click to focus";
+    });
+
+    liveEl.addEventListener("click", () => {
+      if (!isCaptureActive()) return;
+      if (pointerToggleEl.checked && liveEl.requestPointerLock) {
+        liveEl.requestPointerLock();
+      }
+    });
+    liveEl.addEventListener("mousemove", (ev) => {
+      if (!isCaptureActive()) return;
+      if (document.pointerLockElement === liveEl) {
+        handleMouseMove(ev.movementX, ev.movementY);
+        return;
+      }
+      if (!lastPos) {
+        lastPos = { x: ev.clientX, y: ev.clientY };
+        return;
+      }
+      const dx = ev.clientX - lastPos.x;
+      const dy = ev.clientY - lastPos.y;
+      lastPos = { x: ev.clientX, y: ev.clientY };
+      handleMouseMove(dx, dy);
+    });
+    liveEl.addEventListener("mouseleave", () => {
+      lastPos = null;
+    });
+    liveEl.addEventListener("wheel", (ev) => {
+      handleWheel(ev.deltaY);
+      if (isCaptureActive()) ev.preventDefault();
+    }, { passive: false });
+    liveEl.addEventListener("contextmenu", (ev) => {
+      if (isCaptureActive()) ev.preventDefault();
+    });
+    liveEl.addEventListener("mousedown", (ev) => {
+      if (ev.button === 0) handleMouseButton("left", true);
+      if (ev.button === 1) handleMouseButton("middle", true);
+      if (ev.button === 2) handleMouseButton("right", true);
+      if (ev.button === 3) handleMouseButton("back", true);
+      if (ev.button === 4) handleMouseButton("forward", true);
+    });
+    liveEl.addEventListener("mouseup", (ev) => {
+      if (ev.button === 0) handleMouseButton("left", false);
+      if (ev.button === 1) handleMouseButton("middle", false);
+      if (ev.button === 2) handleMouseButton("right", false);
+      if (ev.button === 3) handleMouseButton("back", false);
+      if (ev.button === 4) handleMouseButton("forward", false);
+    });
+
+    window.addEventListener("keydown", handleKeydown);
+    window.addEventListener("keyup", updateModsFromEvent);
+    outModeHlsEl.addEventListener("change", () => {
+      setOutputModeState("hls", false);
+      saveOutputConfig();
+    });
+    outModeMjpegEl.addEventListener("change", () => {
+      setOutputModeState("mjpeg", false);
+      saveOutputConfig();
+    });
+    outModeMjpegPassEl.addEventListener("change", () => {
+      setOutputModeState("mjpeg-passthrough", true);
+      saveOutputConfig();
+    });
+    outModeFlvEl.addEventListener("change", () => {
+      setOutputModeState("flv", false);
+      saveOutputConfig();
+    });
+    sourceEl.addEventListener("change", () => {
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      loadModesForSource(sourceEl.value);
+      refreshStreamState();
+    });
+    fitModeEl.addEventListener("change", () => {
+      updateFitMode();
+      savePrefs();
+    });
+    fullscreenUiEl.addEventListener("change", savePrefs);
+    rawMjpegEl.addEventListener("change", savePrefs);
+    noUpscaleEl.addEventListener("change", () => {
+      updateScaleMode();
+      savePrefs();
+    });
+    sharpScaleEl.addEventListener("change", () => {
+      updateScaleMode();
+      savePrefs();
+    });
+    mjpegFpsEl.addEventListener("change", () => {
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      setPerfIndicator(NaN);
+      if (outputMode !== "hls") {
+        saveOutputConfig();
+      }
+    });
+    rawMjpegEl.addEventListener("change", () => {
+      applyRawMjpegState();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      savePrefs();
+    });
+    mjpegQualityEl.addEventListener("change", () => {
+      setMjpegQualityLabel();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      savePrefs();
+    });
+    mjpegSizeEl.addEventListener("change", () => {
+      applyMaxFpsForResolution();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      savePrefs();
+      if (outputState.mjpegPassthrough) {
+        saveOutputConfig();
+      }
+    });
+    refreshModesEl.addEventListener("click", () => {
+      const stream = streams.find(s => s.id === sourceEl.value);
+      if (stream) {
+        loadModesForSource(stream.id, true);
+      }
+    });
+    resetMjpegEl.addEventListener("click", () => {
+      mjpegFpsEl.value = "30";
+      setOutputModeState("mjpeg", false);
+      rawMjpegEl.checked = false;
+      mjpegQualityEl.value = "2";
+      mjpegSizeEl.value = "";
+      applyMjpegPassthroughState();
+      applyRawMjpegState();
+      setMjpegQualityLabel();
+      applyMaxFpsForResolution();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+      savePrefs();
+      saveOutputConfig();
+    });
+    streamStopEl.addEventListener("click", () => {
+      stopStreamManual();
+    });
+    streamStartEl.addEventListener("click", () => {
+      startStreamManual();
+    });
+
+    wsUrlEl.value = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/hid";
+    if (!streamDiagTimer) {
+      streamDiagTimer = setInterval(() => {
+        refreshStreamState();
+      }, 2000);
+    }
+    refreshStreamState();
+    setWsState("ws: idle");
+    setItfState();
+    setLastKey("-");
+    setModsState();
+    setLayoutState("unknown");
+    setModeStatus("");
+    setHidStatus("enable capture, then click video to control");
+    setPerfIndicator(NaN);
+    setMjpegQualityLabel();
+    updateResolutionOptions();
+    setMaxFpsLabel("-");
+    applyMjpegPassthroughState();
+    setPassthroughState();
+    applyRawMjpegState();
+    updateScaleMode();
+    updateFitMode();
+
+    function updateDecodeFps() {
+      const now = performance.now();
+      const elapsed = now - decodeStart;
+      if (elapsed < 1000) return;
+      decodeFps = (decodeCount * 1000) / elapsed;
+      decodeCount = 0;
+      decodeStart = now;
+      setPerfIndicator(NaN);
+    }
+
+    function trackMjpegFrames() {
+      mjpegPlayer.addEventListener("load", () => {
+        decodeCount += 1;
+        updateDecodeFps();
+      });
+    }
+
+    function trackVideoFrames() {
+      if (!hlsPlayer) return;
+      const attach = (player) => {
+        if (!player) return;
+        if ("requestVideoFrameCallback" in player) {
+          const handler = () => {
+            decodeCount += 1;
+            updateDecodeFps();
+            player.requestVideoFrameCallback(handler);
+          };
+          player.requestVideoFrameCallback(handler);
+          return;
+        }
+        let lastTime = 0;
+        const tick = () => {
+          if (player.currentTime !== lastTime) {
+            decodeCount += 1;
+            updateDecodeFps();
+            lastTime = player.currentTime;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      };
+      attach(hlsPlayer);
+      attach(flvPlayer);
+      return;
+    }
+
+    trackMjpegFrames();
+    trackVideoFrames();
+
+    function mapCodeToUsage(code, shift) {
+      const map = {
+        KeyA: 4, KeyB: 5, KeyC: 6, KeyD: 7, KeyE: 8, KeyF: 9, KeyG: 10, KeyH: 11,
+        KeyI: 12, KeyJ: 13, KeyK: 14, KeyL: 15, KeyM: 16, KeyN: 17, KeyO: 18,
+        KeyP: 19, KeyQ: 20, KeyR: 21, KeyS: 22, KeyT: 23, KeyU: 24, KeyV: 25,
+        KeyW: 26, KeyX: 27, KeyY: 28, KeyZ: 29,
+        Digit1: 30, Digit2: 31, Digit3: 32, Digit4: 33, Digit5: 34,
+        Digit6: 35, Digit7: 36, Digit8: 37, Digit9: 38, Digit0: 39,
+        Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44,
+        Minus: 45, Equal: 46, BracketLeft: 47, BracketRight: 48, Backslash: 49,
+        Semicolon: 51, Quote: 52, Backquote: 53, Comma: 54, Period: 55, Slash: 56,
+        CapsLock: 57,
+        F1: 58, F2: 59, F3: 60, F4: 61, F5: 62, F6: 63,
+        F7: 64, F8: 65, F9: 66, F10: 67, F11: 68, F12: 69,
+        Insert: 73, Home: 74, PageUp: 75, Delete: 76, End: 77, PageDown: 78,
+        ArrowRight: 79, ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82,
+        NumLock: 83, NumpadDivide: 84, NumpadMultiply: 85,
+        NumpadSubtract: 86, NumpadAdd: 87, NumpadEnter: 88,
+        Numpad1: 89, Numpad2: 90, Numpad3: 91, Numpad4: 92,
+        Numpad5: 93, Numpad6: 94, Numpad7: 95, Numpad8: 96,
+        Numpad9: 97, Numpad0: 98, NumpadDecimal: 99
+      };
+      const usage = map[code];
+      if (!usage) return null;
+      let mods = 0;
+      if (shift) mods |= 0x02;
+      return { usage, mods };
+    }
+
+    function savePrefs() {
+      const data = {
+        wsUrl: wsUrlEl.value,
+        preferMjpeg: preferMjpegEl.checked,
+        noUpscale: noUpscaleEl.checked,
+        sharpScale: sharpScaleEl.checked,
+        fullscreenUi: fullscreenUiEl.checked,
+        fitMode: fitModeEl.value,
+        mjpegFps: mjpegFpsEl.value,
+        rawMjpeg: rawMjpegEl.checked,
+        mjpegQuality: mjpegQualityEl.value,
+        mjpegSize: mjpegSizeEl.value,
+        kbMode: kbModeEl.value,
+        pointerLock: pointerToggleEl.checked,
+        sensitivity: sensitivityEl.value,
+        autoReconnect: autoReconnectEl.checked,
+        flvUseWs: flvUseWsEl.checked,
+        flvUltraLowLatency: flvUltraLowLatencyEl.checked,
+        activeProfile: profileSelectEl.value
+      };
+      localStorage.setItem("hid_video_prefs", JSON.stringify(data));
+    }
+
+    function loadPrefs() {
+      try {
+        const raw = localStorage.getItem("hid_video_prefs");
+        if (!raw) {
+          flvUseWsEl.checked = true;
+          flvUltraLowLatencyEl.checked = false;
+          return;
+        }
+        const data = JSON.parse(raw);
+        if (data.wsUrl) wsUrlEl.value = data.wsUrl;
+        if (typeof data.preferMjpeg === "boolean") preferMjpegEl.checked = data.preferMjpeg;
+        if (typeof data.noUpscale === "boolean") noUpscaleEl.checked = data.noUpscale;
+        if (typeof data.sharpScale === "boolean") sharpScaleEl.checked = data.sharpScale;
+        if (typeof data.fullscreenUi === "boolean") fullscreenUiEl.checked = data.fullscreenUi;
+        if (data.fitMode) fitModeEl.value = data.fitMode;
+        if (data.mjpegFps) mjpegFpsEl.value = data.mjpegFps;
+        if (typeof data.rawMjpeg === "boolean") rawMjpegEl.checked = data.rawMjpeg;
+        if (data.mjpegQuality) mjpegQualityEl.value = data.mjpegQuality;
+        if (data.mjpegSize) mjpegSizeEl.value = data.mjpegSize;
+        if (data.kbMode) kbModeEl.value = data.kbMode;
+        if (typeof data.pointerLock === "boolean") pointerToggleEl.checked = data.pointerLock;
+        if (data.sensitivity) sensitivityEl.value = data.sensitivity;
+        if (typeof data.autoReconnect === "boolean") autoReconnectEl.checked = data.autoReconnect;
+        const isRemote = !["localhost", "127.0.0.1"].includes(location.hostname);
+        if (typeof data.flvUseWs === "boolean") {
+          flvUseWsEl.checked = isRemote ? true : data.flvUseWs;
+        } else {
+          flvUseWsEl.checked = true;
+        }
+        if (typeof data.flvUltraLowLatency === "boolean") {
+          flvUltraLowLatencyEl.checked = data.flvUltraLowLatency;
+        }
+        if (typeof data.activeProfile === "string" && data.activeProfile) {
+          profileSelectEl.value = data.activeProfile;
+          updateProfileLabel(profileSelectEl.value);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    wsUrlEl.addEventListener("change", savePrefs);
+    preferMjpegEl.addEventListener("change", () => {
+      savePrefs();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+    });
+    mjpegFpsEl.addEventListener("change", savePrefs);
+    mjpegQualityEl.addEventListener("change", savePrefs);
+    mjpegSizeEl.addEventListener("change", savePrefs);
+    kbModeEl.addEventListener("change", savePrefs);
+    pointerToggleEl.addEventListener("change", savePrefs);
+    sensitivityEl.addEventListener("change", savePrefs);
+    autoReconnectEl.addEventListener("change", savePrefs);
+    flvUseWsEl.addEventListener("change", () => {
+      savePrefs();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+    });
+    flvUltraLowLatencyEl.addEventListener("change", () => {
+      savePrefs();
+      const stream = streams.find(s => s.id === sourceEl.value);
+      updatePlayers(stream);
+    });
+    profileSelectEl.addEventListener("change", () => {
+      updateProfileLabel(profileSelectEl.value);
+      savePrefs();
+    });
+    profileApplyEl.addEventListener("click", () => {
+      applyProfile();
+    });
+    noUpscaleEl.addEventListener("change", savePrefs);
+    sharpScaleEl.addEventListener("change", savePrefs);
+    fullscreenUiEl.addEventListener("change", savePrefs);
+    fitModeEl.addEventListener("change", savePrefs);
+    switchAltShiftEl.addEventListener("click", () => sendModsCombo(0x06, "Alt+Shift"));
+    switchCtrlShiftEl.addEventListener("click", () => sendModsCombo(0x03, "Ctrl+Shift"));
+    switchWinSpaceEl.addEventListener("click", () => {
+      const press = withItf({ type: "keyboard.report", mods: 0x08, keys: [44], applyMapping: true }, keyboardItf);
+      const release = withItf({ type: "keyboard.report", mods: 0, keys: [], applyMapping: true }, keyboardItf);
+      wsSend(press);
+      wsSend(release);
+      setHidStatus("layout switch: Win+Space");
+      setLayoutState("Win+Space");
+    });
+    resetPrefsEl.addEventListener("click", () => {
+      localStorage.removeItem("hid_video_prefs");
+      location.reload();
+    });
+
+    loadPrefs();
+    applyMjpegPassthroughState();
+    applyRawMjpegState();
+    loadOutputConfig().then(async () => {
+      await loadProfiles();
+      await loadStreams();
+    });
+  </script>
+</body>
+</html>

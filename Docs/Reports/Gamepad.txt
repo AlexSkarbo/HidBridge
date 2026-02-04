@@ -1,0 +1,247 @@
+
+    =========================== USB Port1 ===========================
+
+Connection Status        : 0x01 (Device is connected)
+Port Chain               : 1-1-1
+Properties               : 0x00
+ IsUserConnectable       : no
+ PortIsDebugCapable      : no
+ PortHasMultiCompanions  : no
+ PortConnectorIsTypeC    : no
+ConnectionIndex          : 0x01 (Port 1)
+
+      ========================== Summary =========================
+Vendor ID                : 0x0810 (Personal Communication Systems, Inc.)
+Product ID               : 0x0001
+Manufacturer String      : ---
+Product String           : " USB Gamepad          "
+Serial                   : ---
+USB Version              : 1.0 (1.5 Mbit/s LowSpeed)
+Port maximum Speed       : High-Speed
+Device maximum Speed     : Low-Speed
+Device Connection Speed  : Low-Speed
+Self powered             : no
+Demanded Current         : 500 mA
+Used Endpoints           : 2
+
+      ======================== USB Device ========================
+
+        +++++++++++++++++ Device Information ++++++++++++++++++
+Device Description       : USB-устройство ввода
+Device Path 1            : \\?\USB#VID_0810&PID_0001#7&33f14508&1&1#{a5dcbf10-6530-11d2-901f-00c04fb951ed} (GUID_DEVINTERFACE_USB_DEVICE)
+Device Path 2            : \\?\USB#VID_0810&PID_0001#7&33f14508&1&1#{a6782bce-4376-4de2-8096-70aa9e8fed19}
+Kernel Name              : \Device\USBPDO-15
+Device ID                : USB\VID_0810&PID_0001\7&33F14508&1&1
+Hardware IDs             : USB\VID_0810&PID_0001&REV_0106 USB\VID_0810&PID_0001
+Driver KeyName           : {745a17a0-74d3-11d0-b6fe-00a0c90f57da}\0043 (GUID_DEVCLASS_HIDCLASS)
+Driver                   : \SystemRoot\System32\drivers\hidusb.sys (Version: 10.0.26100.7262  Date: 2025-11-18  Company: Microsoft Corporation)
+Driver Inf               : C:\WINDOWS\inf\input.inf
+Legacy BusType           : PNPBus
+Class                    : HIDClass
+Class GUID               : {745a17a0-74d3-11d0-b6fe-00a0c90f57da} (GUID_DEVCLASS_HIDCLASS)
+Service                  : HidUsb
+Enumerator               : USB
+Location Info            : Port_#0001.Hub_#0004
+Address                  : 1
+Location IDs             : PCIROOT(0)#PCI(0801)#PCI(0004)#USBROOT(0)#USB(1)#USB(1), ACPI(_SB_)#ACPI(PCI0)#ACPI(GP17)#ACPI(XHC1)#ACPI(RHUB)#ACPI(PRT1)#USB(1)
+Container ID             : {7b26f4c0-c45d-11f0-8ee5-010101010000}
+Manufacturer Info        : (Стандартные системные устройства)
+Capabilities             : 0x84 (Removable, SurpriseRemovalOK)
+Status                   : 0x0180600A (DN_DRIVER_LOADED, DN_STARTED, DN_DISABLEABLE, DN_REMOVABLE, DN_NT_ENUMERATOR, DN_NT_DRIVER)
+Problem Code             : 0
+SelectiveSuspendEnabled  : 0
+EnhancedPowerMgmtEnabled : 1
+Power State              : D0 (supported: D0, D2, D3, wake from D0, wake from D2)
+
+        ---------------- Connection Information ---------------
+Connection Index         : 0x01 (Port 1)
+Connection Status        : 0x01 (DeviceConnected)
+Current Config Value     : 0x01 (Configuration 1)
+Device Address           : 0x06 (6)
+Is Hub                   : 0x00 (no)
+Device Bus Speed         : 0x00 (Low-Speed)
+Number of open Pipes     : 0x01 (1 pipe to data endpoints)
+Pipe[0]                  : EndpointID=1  Direction=IN   ScheduleOffset=0  Type=Interrupt  wMaxPacketSize=0x8     bInterval=10  -> 196 Bits/ms = 24500 Bytes/s
+Data (HexDump)           : 01 00 00 00 12 01 00 01 00 00 00 08 10 08 01 00   ................
+                           06 01 00 02 00 01 01 00 00 06 00 01 00 00 00 01   ................
+                           00 00 00 07 05 81 03 08 00 0A 00 00 00 00         ..............
+
+        --------------- Connection Information V2 -------------
+Connection Index         : 0x01 (1)
+Length                   : 0x10 (16 bytes)
+SupportedUsbProtocols    : 0x03
+ Usb110                  : 1 (yes, port supports USB 1.1)
+ Usb200                  : 1 (yes, port supports USB 2.0)
+ Usb300                  : 0 (no, port not supports USB 3.0)
+ ReservedMBZ             : 0x00
+Flags                    : 0x00
+ DevIsOpAtSsOrHigher     : 0 (Device is not operating at SuperSpeed or higher)
+ DevIsSsCapOrHigher      : 0 (Device is not SuperSpeed capable or higher)
+ DevIsOpAtSsPlusOrHigher : 0 (Device is not operating at SuperSpeedPlus or higher)
+ DevIsSsPlusCapOrHigher  : 0 (Device is not SuperSpeedPlus capable or higher)
+ ReservedMBZ             : 0x00
+Data (HexDump)           : 01 00 00 00 10 00 00 00 03 00 00 00 00 00 00 00   ................
+
+    ---------------------- Device Descriptor ----------------------
+bLength                  : 0x12 (18 bytes)
+bDescriptorType          : 0x01 (Device Descriptor)
+bcdUSB                   : 0x100 (USB Version 1.0)
+bDeviceClass             : 0x00 (defined by the interface descriptors)
+bDeviceSubClass          : 0x00
+bDeviceProtocol          : 0x00
+bMaxPacketSize0          : 0x08 (8 bytes)
+idVendor                 : 0x0810 (Personal Communication Systems, Inc.)
+idProduct                : 0x0001
+bcdDevice                : 0x0106
+iManufacturer            : 0x00 (No String Descriptor)
+iProduct                 : 0x02 (String Descriptor 2)
+ Language 0x0409         : " USB Gamepad          "
+iSerialNumber            : 0x00 (No String Descriptor)
+bNumConfigurations       : 0x01 (1 Configuration)
+Data (HexDump)           : 12 01 00 01 00 00 00 08 10 08 01 00 06 01 00 02   ................
+                           00 01                                             ..
+
+    ------------------ Configuration Descriptor -------------------
+bLength                  : 0x09 (9 bytes)
+bDescriptorType          : 0x02 (Configuration Descriptor)
+wTotalLength             : 0x0022 (34 bytes)
+bNumInterfaces           : 0x01 (1 Interface)
+bConfigurationValue      : 0x01 (Configuration 1)
+iConfiguration           : 0x00 (No String Descriptor)
+bmAttributes             : 0x80
+ D7: Bus Powered         : 0x01 (yes)
+ D6: Self Powered        : 0x00 (no)
+ D5: Remote Wakeup       : 0x00 (no)
+ D4..0: Reserved, set 0  : 0x00
+MaxPower                 : 0xFA (500 mA)
+Data (HexDump)           : 09 02 22 00 01 01 00 80 FA 09 04 00 00 01 03 00   ..".............
+                           00 00 09 21 10 01 21 01 22 65 00 07 05 81 03 08   ...!..!."e......
+                           00 0A                                             ..
+
+        ---------------- Interface Descriptor -----------------
+bLength                  : 0x09 (9 bytes)
+bDescriptorType          : 0x04 (Interface Descriptor)
+bInterfaceNumber         : 0x00 (Interface 0)
+bAlternateSetting        : 0x00
+bNumEndpoints            : 0x01 (1 Endpoint)
+bInterfaceClass          : 0x03 (HID - Human Interface Device)
+bInterfaceSubClass       : 0x00 (None)
+bInterfaceProtocol       : 0x00 (None)
+iInterface               : 0x00 (No String Descriptor)
+Data (HexDump)           : 09 04 00 00 01 03 00 00 00                        .........
+
+        ------------------- HID Descriptor --------------------
+bLength                  : 0x09 (9 bytes)
+bDescriptorType          : 0x21 (HID Descriptor)
+bcdHID                   : 0x0110 (HID Version 1.10)
+bCountryCode             : 0x21 (33 = US)
+bNumDescriptors          : 0x01
+Data (HexDump)           : 09 21 10 01 21 01 22 65 00                        .!..!."e.
+Descriptor 1:
+bDescriptorType          : 0x22 (Class=Report)
+wDescriptorLength        : 0x0065 (101 bytes)
+  05 01             Usage Page (Generic Desktop Controls)
+  09 04             Usage (Joystick)
+  A1 01             Collection (Application)
+  85 01               Report ID (0x01)
+  A1 02               Collection (Logical)
+  75 08                 Report Size (8)
+  95 04                 Report Count (4)
+  15 00                 Logical Minimum (0)
+  26 FF 00              Logical Maximum (255)
+  35 00                 Physical Minimum (0)
+  46 FF 00              Physical Maximum (255)
+  09 35                 Usage (Rotate-Z)
+  09 32                 Usage (Direction-Z)
+  09 30                 Usage (Direction-X)
+  09 31                 Usage (Direction-Y)
+  81 02                 Input (Var)
+  75 04                 Report Size (4)
+  95 01                 Report Count (1)
+  25 07                 Logical Maximum (7)
+  46 3B 01              Physical Maximum (315)
+  65 14                 Unit (0x14)
+  09 39                 Usage (Hat Switch)
+  81 42                 Input (Var, NullState)
+  65 00                 Unit (0x00)
+  75 01                 Report Size (1)
+  95 0C                 Report Count (12)
+  25 01                 Logical Maximum (1)
+  45 01                 Physical Maximum (1)
+  05 09                 Usage Page (Buttons)
+  19 01                 Usage Minimum (1)
+  29 0C                 Usage Maximum (12)
+  81 02                 Input (Var)
+  06 00 FF              Usage Page (Vendor Defined)
+  75 01                 Report Size (1)
+  95 08                 Report Count (8)
+  25 01                 Logical Maximum (1)
+  45 01                 Physical Maximum (1)
+  09 01                 Usage (unk)
+  81 02                 Input (Var)
+  C0                  End Collection
+  A1 02               Collection (Logical)
+  75 08                 Report Size (8)
+  95 04                 Report Count (4)
+  46 FF 00              Physical Maximum (255)
+  26 FF 00              Logical Maximum (255)
+  09 02                 Usage (unk)
+  91 02                 Output (Var)
+  C0                  End Collection
+  C0                End Collection
+Data (HexDump)           : 05 01 09 04 A1 01 85 01 A1 02 75 08 95 04 15 00   ..........u.....
+                           26 FF 00 35 00 46 FF 00 09 35 09 32 09 30 09 31   &..5.F...5.2.0.1
+                           81 02 75 04 95 01 25 07 46 3B 01 65 14 09 39 81   ..u...%.F;.e..9.
+                           42 65 00 75 01 95 0C 25 01 45 01 05 09 19 01 29   Be.u...%.E.....)
+                           0C 81 02 06 00 FF 75 01 95 08 25 01 45 01 09 01   ......u...%.E...
+                           81 02 C0 A1 02 75 08 95 04 46 FF 00 26 FF 00 09   .....u...F..&...
+                           02 91 02 C0 C0                                    .....
+
+        ----------------- Endpoint Descriptor -----------------
+bLength                  : 0x07 (7 bytes)
+bDescriptorType          : 0x05 (Endpoint Descriptor)
+bEndpointAddress         : 0x81 (Direction=IN EndpointID=1)
+bmAttributes             : 0x03 (TransferType=Interrupt)
+wMaxPacketSize           : 0x0008
+bInterval                : 0x0A (10 ms)
+Data (HexDump)           : 07 05 81 03 08 00 0A                              .......
+
+      -------------------- String Descriptors -------------------
+             ------ String Descriptor 0 ------
+bLength                  : 0x04 (4 bytes)
+bDescriptorType          : 0x03 (String Descriptor)
+Language ID[0]           : 0x0409 (English - United States)
+Data (HexDump)           : 04 03 09 04                                       ....
+             ------ String Descriptor 2 ------
+bLength                  : 0x2E (46 bytes)
+bDescriptorType          : 0x03 (String Descriptor)
+Language 0x0409          : " USB Gamepad          "  *!*CAUTION  leading space character  *!*CAUTION  trailing space characters
+Data (HexDump)           : 2E 03 20 00 55 00 53 00 42 00 20 00 47 00 61 00   .. .U.S.B. .G.a.
+                           6D 00 65 00 70 00 61 00 64 00 20 00 20 00 20 00   m.e.p.a.d. . . .
+                           20 00 20 00 20 00 20 00 20 00 20 00 20 00          . . . . . . .
+
+        +++++++++++++++++ Device Information ++++++++++++++++++
+Device Description       : HID-совместимый игровой контроллер
+Device Path              : \\?\HID#VID_0810&PID_0001#8&27c28f02&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030} (GUID_DEVINTERFACE_HID)
+Kernel Name              : \Device\0000016f
+Device ID                : HID\VID_0810&PID_0001\8&27C28F02&0&0000
+Hardware IDs             : HID\VID_0810&PID_0001&REV_0106 HID\VID_0810&PID_0001 HID\VID_0810&UP:0001_U:0004 HID_DEVICE_SYSTEM_GAME HID_DEVICE_UP:0001_U:0004 HID_DEVICE
+Driver KeyName           : {745a17a0-74d3-11d0-b6fe-00a0c90f57da}\0044 (GUID_DEVCLASS_HIDCLASS)
+Driver Inf               : C:\WINDOWS\inf\input.inf
+Legacy BusType           : PNPBus
+Class                    : HIDClass
+Class GUID               : {745a17a0-74d3-11d0-b6fe-00a0c90f57da} (GUID_DEVCLASS_HIDCLASS)
+Enumerator               : HID
+Location Info            : -
+Address                  : 1
+Manufacturer Info        : (Стандартные системные устройства)
+Capabilities             : 0xE0 (SilentInstall, RawDeviceOK, SurpriseRemovalOK)
+Status                   : 0x0180200A (DN_DRIVER_LOADED, DN_STARTED, DN_DISABLEABLE, DN_NT_ENUMERATOR, DN_NT_DRIVER)
+Problem Code             : 0
+EnhancedPowerMgmtEnabled : 0
+Power State              : D0 (supported: D0, D2, D3, wake from D0, wake from D2)
+
+             ++++++++++++++ HID Information +++++++++++++++
+Product                  : USB Gamepad
+UsagePage                : 0x01 (Generic Desktop Controls)
+Usage                    : 0x04 (Joystick)

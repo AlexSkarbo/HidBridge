@@ -1,0 +1,408 @@
+@page "/mouse/testButtons"
+@model HidControlServer.Pages.MouseButtonMapModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mouse Button Map</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; color: #1a1a1a; }
+    button, select { margin-right: 8px; }
+    button { border: 1px solid #ccc; background: #fff; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #f7f7f7; }
+    #status { white-space: pre; background: #f4f4f4; padding: 8px; }
+    #hint { color: #555; }
+    .layout { display: grid; grid-template-columns: auto 220px; gap: 24px; align-items: start; justify-content: center; }
+    .mouse-panel { border: 1px solid #ddd; border-radius: 10px; padding: 12px; background: #fafafa; width: 33vw; min-width: 320px; max-width: 520px; }
+    .side-panel { display: flex; flex-direction: column; align-items: flex-end; }
+    .mouse-title { font-size: 13px; color: #666; margin-bottom: 8px; }
+    .mouse-svg { width: 100%; height: auto; display: block; }
+    .mouse-btn { fill: #eaeaea; stroke: #777; stroke-width: 1; }
+    .mouse-btn.active { fill: #cfe9d6; stroke: #2e7d32; }
+    .mouse-outline { fill: #f7f7f7; stroke: #444; stroke-width: 1.5; }
+
+        .mouse-label {
+            font-size: 18px;
+            fill: #787878;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+    .mouse-label.arrow { font-size: 20px; }
+    .mouse-btn:hover { fill: #dce7f7; stroke: #2f5aa8; }
+    .mouse-shadow { fill: #000; opacity: 0.06; }
+    .mouse-arrow { opacity: 0; transition: opacity 0.15s ease; }
+    .mouse-arrow.show { opacity: 1; }
+    .wheel-arrow { font-size: 10px; opacity: 0; transition: opacity 0.15s ease; }
+    .wheel-arrow.show { opacity: 1; }
+    .capture-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; width: 220px; }
+    .cap { border: 2px dashed #999; padding: 12px; text-align: center; user-select: none; cursor: pointer; }
+    .cap.active { border-color: #2e7d32; background: #e8f5e9; }
+    .row { margin: 8px 0; }
+    .btn-icon { margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <h2>Mouse Button Map</h2>
+  <div class="row">
+    <select id="mouseSelect"></select>
+    <button id="refreshDevices"><i class="fa-solid fa-rotate btn-icon"></i>Refresh</button>
+    <button id="reloadMap"><i class="fa-solid fa-rotate-right btn-icon"></i>Reload Mapping</button>
+    <button id="sendMap"><i class="fa-solid fa-paper-plane btn-icon"></i>Send Result</button>
+    <button id="clearMap"><i class="fa-solid fa-broom btn-icon"></i>Clear</button>
+  </div>
+  <div class="row"><b>Status:</b></div>
+  <pre id="status"></pre>
+  <div class="row" id="hint"></div>
+  <div class="layout">
+    <div class="mouse-panel">
+      <div class="mouse-title">Mouse preview</div>
+      <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" id="mouse" stroke-linecap="round" stroke-linejoin="round" aria-label="Mouse" class="mouse-svg" version="1.1" viewBox="0 0 1024 768">
+        <g id="g_mouse" fill="none" stroke="#000" stroke-width="1">
+          <circle id="border" cx="512" cy="384" r="377" stroke="#000" fill="#8882" stroke-dasharray="1 8" stroke-dashoffset="0" stroke-opacity="1" stroke-width="2" />
+          <path id="body" fill="#cbcbcb" d="M700 218a188 188 0 1 0-376 0v332a188 188 0 1 0 376 0z" />
+          <circle id="custom1" cx="397" cy="606" r="45" fill="#eee" class="mouse-btn" data-label="custom1">
+            <title>custom 1</title>
+          </circle>
+          <circle id="custom2" cx="627" cy="606" r="45" fill="#eee" class="mouse-btn" data-label="custom2">
+            <title>custom 2</title>
+          </circle>
+          <circle id="other" cx="512" cy="678" r="45" fill="#eee" class="mouse-btn" data-label="other">
+            <title>other</title>
+          </circle>
+          <circle id="move_arrow" class="mouse-arrow" cx="512" cy="750" r="6" fill="hsl(88,100%,50%)" stroke="hsl(88,100%,27%)" />
+          <path id="left" class="mouse-btn" data-label="left" fill="#eee" d="M508 278v29c0 5-4 9-9 9H337c-5 0-9-4-9-9v-89c0-97 74-177 171-184 5 0 9 4 9 9v78c-19 2-34 18-34 37v75c0 17 11 32 28 37 3 1 6 4 6 8z"><title>left</title></path>
+          <path id="right" class="mouse-btn" data-label="right" fill="#eee" d="M687 316c5 0 9-4 9-9v-89c0-97-74-177-171-184-5 0-9 4-9 9v78c19 2 34 18 34 37v75c0 17-11 32-28 37-3 1-6 4-6 8v29c0 5 4 9 9 9z"><title>right</title></path>
+          <path id="middle" class="mouse-btn" data-label="middle" fill="#eee" d="M482 233a30 30 0 1 0 60 0v-75a30 30 0 1 0-60 0z"><title>middle</title></path>
+          <path id="back" class="mouse-btn" data-label="back" fill="#eee" d="M279 341c0 5 4 9 9 9h19c5 0 9-4 9-9v-76c0-5-4-9-9-9h-10c-10 0-18 8-18 18z"><title>back</title></path>
+          <path id="forward" class="mouse-btn" data-label="forward" fill="#eee" d="M288 358c-5 0-9 4-9 9v67c0 10 8 18 18 18h10c5 0 9-4 9-9v-76c0-5-4-9-9-9z"><title>forward</title></path>
+          <circle id="up_wheel" class="wheel-arrow" cx="512" cy="158" r="6" fill="hsl(88,100%,50%)" stroke="hsl(88,100%,27%)" />
+          <circle id="down_wheel" class="wheel-arrow" cx="512" cy="233" r="6" fill="hsl(88,100%,50%)" stroke="hsl(88,100%,27%)" />
+        </g>
+        <g id="lbls" stroke="none" fill="#787878">
+          <text id="lbl_back" x="298" y="307" class="mouse-label arrow" data-label="back" style="text-align:center" text-anchor="middle">&lt;</text>
+          <text id="lbl_forward" x="298" y="409" class="mouse-label arrow" data-label="forward" style="text-align:center" text-anchor="middle">&gt;</text>
+          <text id="lbl_custom1" x="397" y="610" class="mouse-label" data-label="custom1" style="text-align:center" text-anchor="middle">custom 1</text>
+          <text id="lbl_custom2" x="627" y="610" class="mouse-label" data-label="custom2" style="text-align:center" text-anchor="middle">custom 2</text>
+          <text id="lbl_other" x="512" y="683" class="mouse-label" data-label="other" style="text-align:center" text-anchor="middle">other</text>
+          <text id="lbl_left" x="418" y="180" class="mouse-label" data-label="left" style="text-align:center" text-anchor="middle">left</text>
+          <text id="lbl_right" x="606" y="178" class="mouse-label" data-label="right" style="text-align:center" text-anchor="middle">right</text>
+          <text id="lbl_middle" x="512" y="200" class="mouse-label" data-label="middle" style="text-align:center" text-anchor="middle">M</text>
+        </g>
+      </svg>
+        </div>
+    <div class="side-panel">
+      <div class="row"><b>Capture areas:</b> click inside area with the button you want to bind.</div>
+      <div class="capture-grid" id="captureGrid"></div>
+    </div>
+  </div>
+<script>
+const tokenParam = new URLSearchParams(window.location.search).get("access_token");
+if (tokenParam && tokenParam.trim().length > 0) {
+  localStorage.setItem("hidToken", tokenParam.trim());
+}
+const savedToken = localStorage.getItem("hidToken") || "";
+function buildHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (savedToken) {
+    headers["X-HID-Token"] = savedToken;
+  }
+  return headers;
+}
+async function apiFetch(path, options = {}) {
+  const opts = { ...options };
+  opts.headers = { ...(options.headers || {}), ...buildHeaders() };
+  return fetch(path, opts);
+}
+
+const statusView = document.getElementById("status");
+const hintView = document.getElementById("hint");
+const captureGrid = document.getElementById("captureGrid");
+const mouseSelect = document.getElementById("mouseSelect");
+const mouseSvg = document.getElementById("mouse");
+const moveArrow = document.getElementById("move_arrow");
+const borderCircle = document.getElementById("border");
+const wheelArrowUp = document.getElementById("up_wheel");
+const wheelArrowDown = document.getElementById("down_wheel");
+let mapping = {};
+let deviceInfo = null;
+let mouseList = [];
+let lastMoveTs = 0;
+let moveHideTimer = null;
+let wheelHideTimer = null;
+
+function renderStatus(prefix) {
+  const body = JSON.stringify(mapping, null, 2);
+  statusView.textContent = (prefix ? prefix + "\n" : "") + body;
+}
+
+function buildLabels(count) {
+  if (count <= 3) return ["left","right","middle"];
+  if (count <= 5) return ["left","right","middle","back","forward"];
+  if (count <= 7) return ["left","right","middle","back","forward","custom1","custom2"];
+  return ["left","right","middle","back","forward","custom1","custom2","other"];
+}
+
+function applyMapping(current) {
+  mapping = current || {};
+  for (const el of captureGrid.querySelectorAll(".cap")) {
+    el.classList.remove("active");
+  }
+  for (const el of mouseSvg.querySelectorAll(".mouse-btn")) {
+    el.classList.remove("active");
+  }
+  for (const [label, mask] of Object.entries(mapping)) {
+    const el = captureGrid.querySelector('.cap[data-label="' + label + '"]');
+    if (el && String(mask) === el.dataset.mask) {
+      el.classList.add("active");
+    }
+    const svgEl = mouseSvg.querySelector('.mouse-btn[data-label="' + label + '"]');
+    if (svgEl && el && String(mask) === el.dataset.mask) {
+      svgEl.classList.add("active");
+    }
+  }
+  renderStatus("loaded mapping");
+}
+
+async function loadExistingMapping() {
+  if (!deviceInfo || !deviceInfo.deviceId) return;
+  const res = await apiFetch("/mouse/mapping?deviceId=" + encodeURIComponent(deviceInfo.deviceId));
+  if (res.status === 404) {
+    renderStatus("no saved mapping");
+    return;
+  }
+  if (!res.ok) {
+    renderStatus("failed to load mapping: " + res.status);
+    return;
+  }
+  const data = await res.json();
+  if (data && data.mapping) {
+    applyMapping(data.mapping);
+  }
+}
+
+function buildGrid(info) {
+  const labels = buildLabels(info.buttonsCount);
+  captureGrid.innerHTML = "";
+  for (const el of mouseSvg.querySelectorAll(".mouse-btn")) {
+    el.style.display = "none";
+    el.classList.remove("active");
+  }
+  for (const el of mouseSvg.querySelectorAll(".mouse-label")) {
+    el.style.display = "none";
+  }
+  for (let i = 0; i < labels.length; i++) {
+    const mask = 1 << i;
+    const label = labels[i];
+    const div = document.createElement("div");
+    div.className = "cap";
+    div.dataset.label = label;
+    div.dataset.mask = String(mask);
+    div.textContent = label + " (mask " + mask + ")";
+    captureGrid.appendChild(div);
+    const svgEl = mouseSvg.querySelector('.mouse-btn[data-label="' + label + '"]');
+    if (svgEl) {
+      svgEl.style.display = "block";
+    }
+    const labelEl = mouseSvg.querySelector('.mouse-label[data-label="' + label + '"]');
+    if (labelEl) {
+      labelEl.style.display = "block";
+    }
+  }
+}
+
+function setDeviceByIndex(index) {
+  const info = mouseList[index];
+  if (!info) return;
+  deviceInfo = info;
+  buildGrid(deviceInfo);
+  hintView.textContent = "type=" + deviceInfo.typeName + ", deviceId=" + deviceInfo.deviceId + ", buttons=" + deviceInfo.buttonsCount;
+  renderStatus();
+  if (!deviceInfo.deviceId || !deviceInfo.reportDescHash) {
+    renderStatus("missing device info");
+    return;
+  }
+  loadExistingMapping();
+}
+
+function populateMouseSelect() {
+  mouseSelect.innerHTML = "";
+  const selectedId = deviceInfo ? deviceInfo.deviceId : null;
+  mouseList.forEach((m, idx) => {
+    const opt = document.createElement("option");
+    opt.value = String(idx);
+    const shortHash = m.reportDescHash ? m.reportDescHash.slice(0, 12) : "";
+    const hashLabel = shortHash ? (" hash=" + shortHash) : "";
+    opt.textContent = m.typeName + " itf=" + m.itf + " buttons=" + m.buttonsCount + hashLabel + " " + m.deviceId;
+    mouseSelect.appendChild(opt);
+  });
+  if (mouseList.length > 0) {
+    let idx = 0;
+    if (selectedId) {
+      const found = mouseList.findIndex(x => x.deviceId === selectedId);
+      if (found >= 0) idx = found;
+    }
+    mouseSelect.value = String(idx);
+    setDeviceByIndex(idx);
+  }
+}
+
+async function loadDevices() {
+  hintView.textContent = "loading devices...";
+  const res = await apiFetch("/devices?allowStale=true");
+  const data = await res.json();
+  if (!data.ok || !data.list || !data.list.interfaces) {
+    hintView.textContent = "failed to load devices";
+    return;
+  }
+  mouseList = data.list.interfaces
+    .filter(x => x.typeName && x.typeName.indexOf("mouse") !== -1)
+    .map(x => ({
+      deviceId: x.deviceId || "",
+      typeName: x.typeName || "unknown",
+      itf: x.itf,
+      reportDescHash: x.reportDescHash || "",
+      buttonsCount: x.mouseButtonsCount || 5
+    }));
+  if (mouseList.length === 0 && data.list.interfaces.length > 0) {
+    const itf = data.list.interfaces[0];
+    mouseList = [{
+      deviceId: itf.deviceId || "",
+      typeName: itf.typeName || "unknown",
+      itf: itf.itf,
+      reportDescHash: itf.reportDescHash || "",
+      buttonsCount: itf.mouseButtonsCount || 5
+    }];
+  }
+  if (mouseList.length === 0) {
+    hintView.textContent = "no mouse interface";
+    return;
+  }
+  populateMouseSelect();
+}
+
+async function sendMapping() {
+  if (!mapping || Object.keys(mapping).length === 0) {
+    renderStatus("no mapping");
+    return;
+  }
+  if (!deviceInfo || !deviceInfo.reportDescHash || !deviceInfo.deviceId) {
+    renderStatus("missing device info");
+    return;
+  }
+  const res = await apiFetch("/mouse/mapping", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId: deviceInfo.deviceId,
+      itf: deviceInfo.itf,
+      reportDescHash: deviceInfo.reportDescHash,
+      buttonsCount: deviceInfo.buttonsCount,
+      mapping
+    })
+  });
+  renderStatus("sent: " + res.status);
+}
+
+document.getElementById("sendMap").addEventListener("click", sendMapping);
+document.getElementById("reloadMap").addEventListener("click", loadExistingMapping);
+document.getElementById("clearMap").addEventListener("click", () => {
+  mapping = {};
+  for (const el of captureGrid.querySelectorAll(".cap")) {
+    el.classList.remove("active");
+  }
+  for (const el of mouseSvg.querySelectorAll(".mouse-btn")) {
+    el.classList.remove("active");
+  }
+  renderStatus("cleared");
+});
+
+mouseSelect.addEventListener("change", () => {
+  const idx = parseInt(mouseSelect.value, 10);
+  setDeviceByIndex(idx);
+});
+
+document.addEventListener("contextmenu", (e) => {
+  if (e.target.closest(".cap")) {
+    e.preventDefault();
+  }
+});
+document.addEventListener("auxclick", (e) => {
+  if (e.target.closest(".cap")) {
+    e.preventDefault();
+  }
+});
+captureGrid.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  const el = e.target.closest(".cap");
+  if (!el) return;
+  const label = el.getAttribute("data-label");
+  const mask = el.getAttribute("data-mask");
+  if (!label || !mask) return;
+  mapping[label] = parseInt(mask, 10);
+  el.classList.add("active");
+  const svgEl = mouseSvg.querySelector('.mouse-btn[data-label="' + label + '"]');
+  if (svgEl) {
+    svgEl.classList.add("active");
+  }
+  renderStatus("captured " + label + " -> " + mask);
+});
+
+document.getElementById("refreshDevices").addEventListener("click", loadDevices);
+
+document.addEventListener("mousemove", (e) => {
+  if (!moveArrow) return;
+  const dx = e.movementX || 0;
+  const dy = e.movementY || 0;
+  const mag = Math.hypot(dx, dy);
+  if (mag < 1) return;
+  lastMoveTs = performance.now();
+  const angle = Math.atan2(dy, dx);
+  let cx = 512;
+  let cy = 384;
+  let r = 377;
+  if (borderCircle) {
+    const cxAttr = parseFloat(borderCircle.getAttribute("cx") || "512");
+    const cyAttr = parseFloat(borderCircle.getAttribute("cy") || "384");
+    const rAttr = parseFloat(borderCircle.getAttribute("r") || "377");
+    if (!Number.isNaN(cxAttr)) cx = cxAttr;
+    if (!Number.isNaN(cyAttr)) cy = cyAttr;
+    if (!Number.isNaN(rAttr)) r = rAttr;
+  }
+  const radius = Math.max(r - 10, 10);
+  const x = cx + Math.cos(angle) * radius;
+  const y = cy + Math.sin(angle) * radius;
+  moveArrow.setAttribute("cx", x.toFixed(2));
+  moveArrow.setAttribute("cy", y.toFixed(2));
+  moveArrow.classList.add("show");
+  if (moveHideTimer) clearTimeout(moveHideTimer);
+  moveHideTimer = setTimeout(() => {
+    if (performance.now() - lastMoveTs > 120) {
+      moveArrow.classList.remove("show");
+    }
+  }, 140);
+});
+
+document.addEventListener("wheel", (e) => {
+  if (e.deltaY < 0) {
+    wheelArrowUp.classList.add("show");
+    wheelArrowDown.classList.remove("show");
+  } else if (e.deltaY > 0) {
+    wheelArrowDown.classList.add("show");
+    wheelArrowUp.classList.remove("show");
+  } else {
+    return;
+  }
+  if (wheelHideTimer) clearTimeout(wheelHideTimer);
+  wheelHideTimer = setTimeout(() => {
+    wheelArrowUp.classList.remove("show");
+    wheelArrowDown.classList.remove("show");
+  }, 200);
+});
+
+loadDevices();
+</script>
+</body>
+</html>

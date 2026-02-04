@@ -1,0 +1,16 @@
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: hid_postgis
+    environment:
+      POSTGRES_DB: hidcontrol
+      POSTGRES_USER: hidcontrol
+      POSTGRES_PASSWORD: hidcontrol
+    ports:
+      - "5433:5432"
+    volumes:
+      - hid_postgis_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  hid_postgis_data:

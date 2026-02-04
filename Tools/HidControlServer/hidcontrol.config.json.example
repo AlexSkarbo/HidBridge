@@ -1,0 +1,140 @@
+{
+  "serialPort": "COM6",
+  "serialAuto": false,
+  "serialMatch": "VID_2E8A&PID_000A",
+  "baud": 3000000,
+  "url": "http://127.0.0.1:8080",
+  "bindAll": true,
+  "mouseMappingDb": "hidcontrol.db",
+  "pgConnectionString": "Host=localhost;Port=5433;Database=hidcontrol;Username=hidcontrol;Password=hidcontrol",
+  "migrateSqliteToPg": false,
+  "videoSources": [
+    {
+      "id": "cap-1",
+      "kind": "uvc",
+      "url": "/dev/video0",
+      "name": "USB Capture",
+      "enabled": true
+    }
+  ],
+  "videoProfiles": [
+    {
+      "name": "win-1080-low",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 6000k -maxrate 6000k -bufsize 12000k -vf scale=1920:1080 -r 30",
+      "note": "windows"
+    },
+    {
+      "name": "win-1080-hls",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 4500k -maxrate 4500k -bufsize 9000k -vf scale=1920:1080 -r 30",
+      "note": "windows hls"
+    },
+    {
+      "name": "win-1080-hls-cbr",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 3500k -maxrate 3500k -minrate 3500k -bufsize 3500k -x264-params nal-hrd=cbr:force-cfr=1 -vf scale=1920:1080 -r 30",
+      "note": "windows hls cbr"
+    },
+    {
+      "name": "win-1080-hls-nvenc",
+      "args": "-c:v h264_nvenc -preset p4 -tune ll -rc cbr -b:v 4500k -maxrate 4500k -bufsize 4500k -g 30 -bf 0 -profile:v high -pix_fmt yuv420p -vf scale=1920:1080 -r 30",
+      "note": "windows hls nvenc"
+    },
+    {
+      "name": "win-1080-hls-amf",
+      "args": "-c:v h264_amf -usage lowlatency -rc cbr -b:v 4500k -maxrate 4500k -bufsize 4500k -g 30 -bf 0 -profile:v high -pix_fmt yuv420p -vf scale=1920:1080 -r 30",
+      "note": "windows hls amf"
+    },
+    {
+      "name": "win-720-hls",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 3000k -maxrate 3000k -bufsize 6000k -vf scale=1280:720 -r 30",
+      "note": "windows hls"
+    },
+    {
+      "name": "win-2k-low",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 12000k -maxrate 12000k -bufsize 24000k -vf scale=2560:1440 -r 30",
+      "note": "windows"
+    },
+    {
+      "name": "win-4k-low",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 24000k -maxrate 24000k -bufsize 48000k -vf scale=3840:2160 -r 30",
+      "note": "windows"
+    },
+    {
+      "name": "pi-1080-low",
+      "args": "-c:v h264_v4l2m2m -g 30 -bf 0 -pix_fmt yuv420p -b:v 6000k -maxrate 6000k -bufsize 12000k -vf scale=1920:1080 -r 30",
+      "note": "linux"
+    },
+    {
+      "name": "pi-2k-low",
+      "args": "-c:v h264_v4l2m2m -g 30 -bf 0 -pix_fmt yuv420p -b:v 12000k -maxrate 12000k -bufsize 24000k -vf scale=2560:1440 -r 30",
+      "note": "linux"
+    },
+    {
+      "name": "mac-1080-low",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 30 -bf 0 -pix_fmt yuv420p -b:v 6000k -maxrate 6000k -bufsize 12000k -vf scale=1920:1080 -r 30",
+      "note": "macos"
+    },
+    {
+      "name": "low-latency",
+      "args": "-c:v libx264 -preset ultrafast -tune zerolatency -g 15 -bf 0",
+      "note": "default"
+    }
+  ],
+  "activeVideoProfile": "win-1080-hls-nvenc",
+  "mouseReportLen": 4,
+  "injectQueueCapacity": 256,
+  "injectDropThreshold": 8,
+  "injectTimeoutMs": 200,
+  "injectRetries": 2,
+  "mouseMoveTimeoutMs": 50,
+  "mouseMoveDropIfBusy": true,
+  "mouseMoveAllowZero": false,
+  "mouseWheelTimeoutMs": 50,
+  "mouseWheelDropIfBusy": true,
+  "mouseWheelAllowZero": false,
+  "keyboardInjectTimeoutMs": 200,
+  "keyboardInjectRetries": 2,
+  "masterSecret": "changeme-master-secret",
+  "mouseItfSel": 255,
+  "keyboardItfSel": 254,
+  "mouseTypeName": "mouse",
+  "keyboardTypeName": "keyboard",
+  "devicesAutoMuteLogs": true,
+  "devicesAutoRefreshMs": 2000,
+  "devicesIncludeReportDesc": true,
+  "devicesCachePath": "devices_cache.json",
+  "uartHmacKey": "",
+  "mouseLeftMask": 1,
+  "mouseRightMask": 2,
+  "mouseMiddleMask": 4,
+  "mouseBackMask": 8,
+  "mouseForwardMask": 16,
+  "token": "",
+  "ffmpegPath": "ffmpeg",
+  "ffmpegAutoStart": false,
+  "ffmpegWatchdogEnabled": true,
+  "ffmpegWatchdogIntervalMs": 1000,
+  "ffmpegRestartDelayMs": 1500,
+  "ffmpegMaxRestarts": 10,
+  "ffmpegRestartWindowMs": 60000,
+  "videoRtspPort": 8554,
+  "videoSrtBasePort": 9000,
+  "videoSrtLatencyMs": 50,
+  "videoRtmpPort": 1935,
+  "videoHlsDir": "video_hls",
+  "videoLlHls": true,
+  "videoHlsSegmentSeconds": 1,
+  "videoHlsListSize": 3,
+  "videoHlsDeleteSegments": true,
+  "videoLogDir": "video_logs",
+  "videoCaptureAutoStopFfmpeg": true,
+  "videoCaptureRetryCount": 3,
+  "videoCaptureRetryDelayMs": 500,
+  "videoCaptureLockTimeoutMs": 2000,
+  "videoSecondaryCaptureEnabled": false,
+  "videoFlvBufferBytes": 262144,
+  "videoFlvReadBufferBytes": 65536,
+  "videoMjpegReadBufferBytes": 16384,
+  "videoMjpegMaxFrameBytes": 4194304,
+  "videoModesCacheTtlSeconds": 300,
+  "devicesCacheMaxAgeSeconds": 600
+}

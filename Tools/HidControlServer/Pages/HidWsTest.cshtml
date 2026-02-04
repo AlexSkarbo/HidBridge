@@ -1,0 +1,471 @@
+@page "/hid/ws-test"
+@{
+    Layout = null;
+}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>HID WS Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #101114;
+      --panel: #16181d;
+      --text: #f0f0f0;
+      --muted: #9aa0a6;
+      --accent: #4aa3ff;
+      --border: #2a2e36;
+    }
+    body {
+      font-family: "Fira Code", Consolas, monospace;
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h2 { margin: 0 0 12px; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+    label { color: var(--muted); font-size: 12px; }
+    input[type="text"], input[type="number"] {
+      background: #0e0f12;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      min-width: 160px;
+    }
+    button {
+      background: #0e0f12;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    .status { white-space: pre-wrap; font-size: 12px; color: var(--muted); }
+    .pad { display: grid; gap: 6px; grid-template-columns: repeat(3, 60px); justify-content: center; }
+    .pad button { height: 44px; font-weight: 600; }
+    .capture {
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 140px;
+      background: #0e0f12;
+    }
+    .capture.active { border-color: var(--accent); }
+    .help { font-size: 12px; color: var(--muted); }
+    .viz {
+      position: relative;
+      height: 180px;
+      background: #0e0f12;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .dot {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      transform: translate(-50%, -50%);
+    }
+    .kbd-out {
+      min-height: 140px;
+      padding: 8px;
+      background: #0e0f12;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>HID WS Test</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="row">
+        <label>WS URL</label>
+        <input id="wsUrl" type="text" value="ws://127.0.0.1:8080/ws/hid" />
+      </div>
+      <div class="row">
+        <label>Token</label>
+        <input id="token" type="text" placeholder="access_token" />
+      </div>
+      <div class="row">
+        <label>Mouse itf</label>
+        <input id="mouseItf" type="number" value="0" />
+        <label>Keyboard itf</label>
+        <input id="kbdItf" type="number" value="2" />
+      </div>
+      <div class="row">
+        <button id="connect">Connect</button>
+        <button id="disconnect">Disconnect</button>
+        <button id="ping">Ping</button>
+        <button id="autoItf">Auto itf</button>
+        <button id="visibleTest">Visible test</button>
+        <button id="stressStart">Stress start</button>
+        <button id="stressStop">Stress stop</button>
+        <button id="uartRefresh">UART refresh</button>
+      </div>
+    <div class="status" id="wsStatus">disconnected</div>
+    <div class="status" id="wsCounters">sent=0 ack=0 last=</div>
+    <div class="status" id="uartStatus">uart: n/a</div>
+    <div class="status" id="wsLog"></div>
+    </div>
+
+    <div class="card">
+      <div class="row"><strong>Mouse Move</strong></div>
+      <div class="pad">
+        <button data-dx="0" data-dy="-50">↑</button>
+        <button data-dx="0" data-dy="-50">↑</button>
+        <button data-dx="0" data-dy="-50">↑</button>
+        <button data-dx="-50" data-dy="0">←</button>
+        <button data-dx="0" data-dy="0">·</button>
+        <button data-dx="50" data-dy="0">→</button>
+        <button data-dx="0" data-dy="50">↓</button>
+        <button data-dx="0" data-dy="50">↓</button>
+        <button data-dx="0" data-dy="50">↓</button>
+      </div>
+      <div class="row">
+        <button id="wheelUp">Wheel +</button>
+        <button id="wheelDown">Wheel -</button>
+      </div>
+      <div class="row help">Tip: Click in capture area to send real mouse deltas.</div>
+      <div id="mouseCapture" class="capture">Mouse capture area (click+move)</div>
+    </div>
+
+    <div class="card">
+      <div class="row"><strong>Mouse Buttons</strong></div>
+      <div class="row">
+        <button data-btn="left" data-down="true">Left Down</button>
+        <button data-btn="left" data-down="false">Left Up</button>
+        <button data-btn="right" data-down="true">Right Down</button>
+        <button data-btn="right" data-down="false">Right Up</button>
+        <button data-btn="middle" data-down="true">Middle Down</button>
+        <button data-btn="middle" data-down="false">Middle Up</button>
+      </div>
+      <div class="row">
+        <button id="mask1">Mask=1</button>
+        <button id="mask0">Mask=0</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row"><strong>Keyboard</strong></div>
+      <div class="row">
+        <button data-key="4">A</button>
+        <button data-key="5">B</button>
+        <button data-key="6">C</button>
+        <button data-key="44">Space</button>
+      </div>
+      <div class="row">
+        <input id="textInput" type="text" placeholder="type text" />
+        <button id="sendText">Send Text</button>
+      </div>
+      <div class="row help">Use keyboard: click capture area to send keydown/keyup.</div>
+      <div id="kbdCapture" class="capture">Keyboard capture area</div>
+    </div>
+
+    <div class="card">
+      <div class="row"><strong>Live WS Preview</strong></div>
+      <div class="row muted">Mouse</div>
+      <div id="mouseViz" class="viz">
+        <div id="mouseDot" class="dot"></div>
+      </div>
+      <div class="row muted" id="mousePos">x=0.50 y=0.50</div>
+      <div class="row muted">Keyboard</div>
+      <div id="kbdOut" class="kbd-out"></div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let msgSeq = 0;
+    const pendingById = new Map();
+    const statusEl = document.getElementById("wsStatus");
+    const logEl = document.getElementById("wsLog");
+    const mouseItf = document.getElementById("mouseItf");
+    const kbdItf = document.getElementById("kbdItf");
+    const mouseViz = document.getElementById("mouseViz");
+    const mouseDot = document.getElementById("mouseDot");
+    const mousePosEl = document.getElementById("mousePos");
+    const kbdOut = document.getElementById("kbdOut");
+    let mousePos = { x: 0.5, y: 0.5 };
+    let sentCount = 0;
+    let ackCount = 0;
+    let lastAck = "";
+    let stressRunning = false;
+    const countersEl = document.getElementById("wsCounters");
+    const uartStatusEl = document.getElementById("uartStatus");
+    let lastReportsSent = 0;
+
+    function nextId() {
+      msgSeq += 1;
+      return String(msgSeq);
+    }
+
+    function send(msg) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        statusEl.textContent = "not connected";
+        return;
+      }
+      msg.id = msg.id || nextId();
+      pendingById.set(msg.id, msg);
+      sentCount += 1;
+      updateCounters();
+      logLine("send: " + JSON.stringify(msg));
+      ws.send(JSON.stringify(msg));
+    }
+
+    function logLine(line) {
+      const ts = new Date().toISOString().slice(11, 19);
+      logEl.textContent = ts + " " + line + "\n" + logEl.textContent;
+    }
+
+    document.getElementById("connect").onclick = () => {
+      const base = document.getElementById("wsUrl").value.trim();
+      const token = document.getElementById("token").value.trim();
+      const url = token ? (base + "?access_token=" + encodeURIComponent(token)) : base;
+      ws = new WebSocket(url);
+      statusEl.textContent = "connecting...";
+      ws.onopen = () => statusEl.textContent = "connected";
+      ws.onclose = () => statusEl.textContent = "disconnected";
+      ws.onerror = () => statusEl.textContent = "error";
+      ws.onmessage = (ev) => {
+        statusEl.textContent = "recv: " + ev.data;
+        logLine("recv: " + ev.data);
+        try {
+          const data = JSON.parse(ev.data);
+          const msg = data && data.id ? pendingById.get(data.id) : null;
+          if (data && data.ok && msg) {
+            handleAck(msg);
+            pendingById.delete(data.id);
+          }
+        } catch { }
+      };
+    };
+    document.getElementById("disconnect").onclick = () => {
+      if (ws) ws.close();
+    };
+    document.getElementById("ping").onclick = () => send({ type: "ping" });
+    document.getElementById("autoItf").onclick = () => loadDefaults();
+    document.getElementById("visibleTest").onclick = () => runVisibleTest();
+    document.getElementById("stressStart").onclick = () => startStress();
+    document.getElementById("stressStop").onclick = () => stopStress();
+    document.getElementById("uartRefresh").onclick = () => refreshUart();
+
+    document.querySelectorAll(".pad button[data-dx]").forEach(btn => {
+      btn.onclick = () => {
+        const dx = parseInt(btn.dataset.dx, 10);
+        const dy = parseInt(btn.dataset.dy, 10);
+        send({ type: "mouse.move", dx, dy, itfSel: parseInt(mouseItf.value, 10) });
+      };
+    });
+    document.getElementById("wheelUp").onclick = () => send({ type: "mouse.wheel", delta: 1, itfSel: parseInt(mouseItf.value, 10) });
+    document.getElementById("wheelDown").onclick = () => send({ type: "mouse.wheel", delta: -1, itfSel: parseInt(mouseItf.value, 10) });
+
+    document.querySelectorAll("button[data-btn]").forEach(btn => {
+      btn.onclick = () => {
+        send({
+          type: "mouse.button",
+          button: btn.dataset.btn,
+          down: btn.dataset.down === "true",
+          itfSel: parseInt(mouseItf.value, 10)
+        });
+      };
+    });
+    document.getElementById("mask1").onclick = () => send({ type: "mouse.buttons", mask: 1, itfSel: parseInt(mouseItf.value, 10) });
+    document.getElementById("mask0").onclick = () => send({ type: "mouse.buttons", mask: 0, itfSel: parseInt(mouseItf.value, 10) });
+
+    document.querySelectorAll("button[data-key]").forEach(btn => {
+      btn.onclick = () => {
+        const usage = parseInt(btn.dataset.key, 10);
+        send({ type: "keyboard.press", usage, itfSel: parseInt(kbdItf.value, 10), label: btn.textContent.trim() });
+      };
+    });
+    document.getElementById("sendText").onclick = () => {
+      const text = document.getElementById("textInput").value;
+      send({ type: "keyboard.text", text, itfSel: parseInt(kbdItf.value, 10) });
+    };
+
+    const mouseCapture = document.getElementById("mouseCapture");
+    let lastPos = null;
+    mouseCapture.addEventListener("mousedown", (e) => {
+      mouseCapture.classList.add("active");
+      lastPos = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener("mouseup", () => {
+      mouseCapture.classList.remove("active");
+      lastPos = null;
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!lastPos) return;
+      const dx = e.clientX - lastPos.x;
+      const dy = e.clientY - lastPos.y;
+      if (dx === 0 && dy === 0) return;
+      lastPos = { x: e.clientX, y: e.clientY };
+      send({ type: "mouse.move", dx, dy, itfSel: parseInt(mouseItf.value, 10) });
+    });
+
+    const kbdCapture = document.getElementById("kbdCapture");
+    kbdCapture.addEventListener("mousedown", () => kbdCapture.classList.add("active"));
+    kbdCapture.addEventListener("mouseup", () => kbdCapture.classList.remove("active"));
+    kbdCapture.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      if (!e.code) return;
+      const usage = codeToUsage(e.code);
+      if (usage !== null) {
+        send({ type: "keyboard.down", usage, itfSel: parseInt(kbdItf.value, 10), label: e.key });
+      }
+    });
+    kbdCapture.addEventListener("keyup", (e) => {
+      e.preventDefault();
+      if (!e.code) return;
+      const usage = codeToUsage(e.code);
+      if (usage !== null) {
+        send({ type: "keyboard.up", usage, itfSel: parseInt(kbdItf.value, 10), label: e.key });
+      }
+    });
+    kbdCapture.tabIndex = 0;
+
+    function codeToUsage(code) {
+      const map = {
+        KeyA: 4, KeyB: 5, KeyC: 6, KeyD: 7, KeyE: 8, KeyF: 9,
+        KeyG: 10, KeyH: 11, KeyI: 12, KeyJ: 13, KeyK: 14, KeyL: 15,
+        KeyM: 16, KeyN: 17, KeyO: 18, KeyP: 19, KeyQ: 20, KeyR: 21,
+        KeyS: 22, KeyT: 23, KeyU: 24, KeyV: 25, KeyW: 26, KeyX: 27,
+        KeyY: 28, KeyZ: 29, Digit1: 30, Digit2: 31, Digit3: 32,
+        Digit4: 33, Digit5: 34, Digit6: 35, Digit7: 36, Digit8: 37,
+        Digit9: 38, Digit0: 39, Enter: 40, Escape: 41, Backspace: 42,
+        Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47,
+        BracketRight: 48, Backslash: 49, Semicolon: 51, Quote: 52,
+        Backquote: 53, Comma: 54, Period: 55, Slash: 56
+      };
+      return Object.prototype.hasOwnProperty.call(map, code) ? map[code] : null;
+    }
+
+    async function loadDefaults() {
+      try {
+        const res = await fetch("/devices?allowStale=true");
+        const data = await res.json();
+        if (!data || !data.ok || !data.list || !data.list.interfaces) return;
+        const itfs = data.list.interfaces;
+        const mouse = itfs.find(x => x.typeName === "mouse");
+        const kbd = itfs.find(x => x.typeName === "keyboard");
+        if (mouse && mouse.itf !== undefined) mouseItf.value = mouse.itf;
+        if (kbd && kbd.itf !== undefined) kbdItf.value = kbd.itf;
+      } catch { }
+    }
+
+    loadDefaults();
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function runVisibleTest() {
+      await refreshUart();
+      const itfM = parseInt(mouseItf.value, 10);
+      const itfK = parseInt(kbdItf.value, 10);
+      send({ type: "mouse.move", dx: 200, dy: 0, itfSel: itfM });
+      await sleep(120);
+      send({ type: "mouse.move", dx: 0, dy: 200, itfSel: itfM });
+      await sleep(120);
+      send({ type: "mouse.move", dx: -200, dy: 0, itfSel: itfM });
+      await sleep(120);
+      send({ type: "mouse.move", dx: 0, dy: -200, itfSel: itfM });
+      await sleep(120);
+      send({ type: "keyboard.text", text: "WS_TEST_123 ", itfSel: itfK });
+      await sleep(200);
+      await refreshUart();
+    }
+
+    function clamp01(v) {
+      return Math.max(0, Math.min(1, v));
+    }
+
+    function updateMouseViz(dx, dy) {
+      const rect = mouseViz.getBoundingClientRect();
+      const w = Math.max(1, rect.width);
+      const h = Math.max(1, rect.height);
+      mousePos.x = clamp01(mousePos.x + dx / w);
+      mousePos.y = clamp01(mousePos.y + dy / h);
+      mouseDot.style.left = (mousePos.x * 100) + "%";
+      mouseDot.style.top = (mousePos.y * 100) + "%";
+      mousePosEl.textContent = "x=" + mousePos.x.toFixed(2) + " y=" + mousePos.y.toFixed(2);
+    }
+
+    function appendText(text) {
+      if (!text) return;
+      kbdOut.textContent += text;
+      if (kbdOut.textContent.length > 2000) {
+        kbdOut.textContent = kbdOut.textContent.slice(-2000);
+      }
+    }
+
+    function handleAck(msg) {
+      if (msg.type === "mouse.move") {
+        updateMouseViz(msg.dx || 0, msg.dy || 0);
+      } else if (msg.type === "keyboard.text") {
+        appendText(msg.text || "");
+      } else if (msg.type === "keyboard.press" || msg.type === "keyboard.down") {
+        appendText(msg.label || "[" + msg.usage + "]");
+      }
+      ackCount += 1;
+      lastAck = msg.type || "";
+      updateCounters();
+    }
+
+    function updateCounters() {
+      countersEl.textContent = "sent=" + sentCount + " ack=" + ackCount + " last=" + lastAck;
+    }
+
+    async function refreshUart() {
+      try {
+        const res = await fetch("/stats");
+        const data = await res.json();
+        if (!data || !data.ok || !data.uart) {
+          uartStatusEl.textContent = "uart: n/a";
+          return;
+        }
+        const cur = data.uart.reportsSent || 0;
+        const delta = cur - lastReportsSent;
+        lastReportsSent = cur;
+        uartStatusEl.textContent =
+          "uart: tx=" + data.uart.framesSent +
+          " rx=" + data.uart.framesReceived +
+          " reports=" + cur +
+          " (+" + delta + ")";
+      } catch {
+        uartStatusEl.textContent = "uart: n/a";
+      }
+    }
+
+    async function startStress() {
+      if (stressRunning) return;
+      stressRunning = true;
+      while (stressRunning) {
+        await runVisibleTest();
+        await sleep(250);
+      }
+    }
+
+    function stopStress() {
+      stressRunning = false;
+    }
+  </script>
+</body>
+</html>

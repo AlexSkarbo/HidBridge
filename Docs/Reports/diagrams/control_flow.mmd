@@ -1,0 +1,29 @@
+```mermaid
+sequenceDiagram
+    participant PC as Windows Host
+    participant AD as A_device (TinyUSB)
+    participant BH as B_host (TinyUSB Host)
+    participant HID as Real HID Device
+
+    HID->>BH: tuhhid_mount_cb (descriptor streams)
+    BH-->>AD: PF_DESC_REPORT / DEVICE / CONFIG chunks
+    BH-->>AD: PF_DESC_DONE
+    BH-->>AD: PF_CTRL_DEVICE_RESET
+    AD->>AD: tinyusb_restart()
+    AD->>PC: TinyUSB connect, enumeration begins
+    PC->>AD: GET_DESCRIPTOR (Strings 0..2)
+    AD->>BH: PF_CTRL_STRING_REQ
+    BH->>HID: tuh_descriptor_get_string (optional)
+    BH-->>AD: PF_DESC_STRING / fallback
+    AD-->>PC: String descriptor (or STALL for idx>2)
+    AD->>PC: READY control frame (after tud_mount_cb)
+    PC->>AD: SET_IDLE / GET_REPORT etc.
+    AD->>BH: PF_CTRL_SET_IDLE / GET_REPORT
+    BH->>HID: Forward control transfer
+    BH-->>AD: PF_CTRL_GET_REPORT response / SET_IDLE ack
+    AD-->>PC: HID report data stream (tud_hid_report)
+    HID-->>BH: tuh_hid_report_callback (input data)
+    BH-->>AD: PF_INPUT frames
+
+    Note over AD,BH: PF_UNMOUNT triggers remote_desc_reset() & TinyUSB shutdown
+```

@@ -1,0 +1,8 @@
+# MediaMTX minimal config
+paths:
+  cap-1:
+    source: publisher
+  test-1:
+    source: publisher
+  screen-1:
+    source: publisher
