@@ -252,10 +252,10 @@ public static class HidWsEndpoints
                                 byte modifiers = (byte)GetInt(root, "mods", "modifiers");
                                 byte? itfSelReq = GetByteNullable(root, "itfSel");
 
-                                var result = await keyboardPressUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardPressRequest(usage, modifiers, itfSelReq), ctx.RequestAborted);
-                                if (!result.Ok)
+                                var pressRes = await keyboardPressUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardPressRequest(usage, modifiers, itfSelReq), ctx.RequestAborted);
+                                if (!pressRes.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = result.Error ?? "failed" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = pressRes.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
 
@@ -272,14 +272,14 @@ public static class HidWsEndpoints
                                 if (holdMs > 5000) holdMs = 5000;
 
                                 byte? itfSelReq = GetByteNullable(root, "itfSel");
-                                var result = await keyboardShortcutUseCase.ExecuteAsync(shortcut, holdMs, applyMapping, itfSelReq, ctx.RequestAborted);
-                                if (!result.Ok)
+                                var shortcutRes = await keyboardShortcutUseCase.ExecuteAsync(shortcut, holdMs, applyMapping, itfSelReq, ctx.RequestAborted);
+                                if (!shortcutRes.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = result.Error ?? "failed" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = shortcutRes.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
 
-                                await SendAsync(new { ok = true, type, id = msgId, itfSel = result.ItfSel, shortcut, modifiers = result.Modifiers, keys = result.Keys }, ctx.RequestAborted);
+                                await SendAsync(new { ok = true, type, id = msgId, itfSel = shortcutRes.ItfSel, shortcut, modifiers = shortcutRes.Modifiers, keys = shortcutRes.Keys }, ctx.RequestAborted);
                                 break;
                             }
                             case "keyboard.text":
@@ -292,10 +292,10 @@ public static class HidWsEndpoints
                                     break;
                                 }
                                 byte? itfSelReq = GetByteNullable(root, "itfSel");
-                                var result = await keyboardTextUseCase.ExecuteAsync(text, layout, itfSelReq, ctx.RequestAborted);
-                                if (!result.Ok)
+                                var textRes = await keyboardTextUseCase.ExecuteAsync(text, layout, itfSelReq, ctx.RequestAborted);
+                                if (!textRes.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = result.Error ?? "failed" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = textRes.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
