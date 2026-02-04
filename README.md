@@ -4,6 +4,12 @@ HidBridge is a **dual-MCU HID proxy/bridge** (Pico/RP2040-class) with tooling fo
 
 Repository: `https://github.com/AlexSkarbo/HidBridge.git`
 
+## License
+
+Copyright (c) 2026 Alexander Skarbo.
+
+This project is **proprietary**. No license is granted for use/distribution without a separate written agreement. See `LICENSE`.
+
 At a high level:
 - `B_host` enumerates a USB HID peripheral as a **USB host** and forwards input to `A_device`.
 - `A_device` presents itself to the target PC as a **USB HID device**.
