@@ -173,37 +173,9 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapGet("/streams", (Options opt, VideoSourceStore store) =>
+        group.MapGet("/streams", (GetVideoStreamsUseCase useCase) =>
         {
-            var sources = store.GetAll().Where(s => s.Enabled).ToList();
-            var list = sources.Select(s =>
-            {
-                int index = VideoConfigHelpers.GetVideoSourceIndex(sources, s);
-                string rtspUrl = HidControlServer.Services.VideoUrlService.BuildRtspClientUrl(opt, s.Id);
-                string srtUrl = HidControlServer.Services.VideoUrlService.BuildSrtClientUrl(opt, index);
-                string rtmpUrl = HidControlServer.Services.VideoUrlService.BuildRtmpClientUrl(opt, s.Id);
-                string hlsUrl = HidControlServer.Services.VideoUrlService.BuildHlsUrl(opt, s.Id);
-                string mjpegUrl = $"{HidControlServer.Services.VideoUrlService.GetVideoBaseUrl(opt)}/video/mjpeg/{s.Id}";
-                string flvUrl = $"{HidControlServer.Services.VideoUrlService.GetVideoBaseUrl(opt)}/video/flv/{s.Id}";
-                string snapshotUrl = $"{HidControlServer.Services.VideoUrlService.GetVideoBaseUrl(opt)}/video/snapshot/{s.Id}";
-                string? ffmpegInput = VideoInputService.BuildFfmpegInput(s);
-                return new
-                {
-                    id = s.Id,
-                    name = s.Name,
-                    kind = s.Kind,
-                    url = s.Url,
-                    enabled = s.Enabled,
-                    rtspUrl,
-                    srtUrl,
-                    rtmpUrl,
-                    hlsUrl,
-                    mjpegUrl,
-                    flvUrl,
-                    snapshotUrl,
-                    ffmpegInput
-                };
-            });
+            var list = useCase.Execute();
             return Results.Ok(new { ok = true, streams = list });
         });
 
