@@ -108,8 +108,12 @@ builder.Services.AddSingleton<GetVideoDiagUseCase>();
 // Keyboard use cases (Step 5): keep UART implementation in server adapters.
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IKeyboardControl, KeyboardControlAdapter>();
 builder.Services.AddSingleton<KeyboardPressUseCase>();
+builder.Services.AddSingleton<KeyboardDownUseCase>();
+builder.Services.AddSingleton<KeyboardUpUseCase>();
 builder.Services.AddSingleton<KeyboardTextUseCase>();
 builder.Services.AddSingleton<KeyboardShortcutUseCase>();
+builder.Services.AddSingleton<KeyboardReportUseCase>();
+builder.Services.AddSingleton<KeyboardResetUseCase>();
 
 // Mouse use cases (Step 5): endpoints call application use cases; UART implementation stays in server adapters.
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IMouseControl, MouseControlAdapter>();

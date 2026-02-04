@@ -1,7 +1,9 @@
 using HidControl.Application.Abstractions;
 using HidControl.Application.Models;
 using HidControl.Core;
+using HidControlServer;
 using HidControlServer.Services;
+using System.Collections.Generic;
 
 namespace HidControlServer.Adapters.Application;
 
@@ -14,16 +16,18 @@ public sealed class KeyboardControlAdapter : IKeyboardControl
     private readonly HidUartClient _uart;
     private readonly AppState _appState;
     private readonly KeyboardMappingStore _keyboardMapping;
+    private readonly KeyboardState _keyboardState;
 
     /// <summary>
     /// Creates a new instance.
     /// </summary>
-    public KeyboardControlAdapter(Options opt, HidUartClient uart, AppState appState, KeyboardMappingStore keyboardMapping)
+    public KeyboardControlAdapter(Options opt, HidUartClient uart, AppState appState, KeyboardMappingStore keyboardMapping, KeyboardState keyboardState)
     {
         _opt = opt;
         _uart = uart;
         _appState = appState;
         _keyboardMapping = keyboardMapping;
+        _keyboardState = keyboardState;
     }
 
     /// <inheritdoc />
@@ -207,6 +211,157 @@ public sealed class KeyboardControlAdapter : IKeyboardControl
         await _uart.SendInjectReportAsync(resolved, upReport, _opt.KeyboardInjectTimeoutMs, 0, false, ct);
 
         return new KeyboardShortcutResult(true, null, resolved, finalMods, finalKeys);
+    }
+
+    /// <inheritdoc />
+    public async Task<KeyboardStateChangeResult> KeyDownAsync(byte usage, byte? modifiers, byte? itfSel, CancellationToken ct)
+    {
+        byte resolved = await ResolveKeyboardItfSelAsync(itfSel, ct);
+        if (resolved == 0xFE)
+        {
+            return new KeyboardStateChangeResult(false, "keyboard_itf_unresolved", null, null);
+        }
+
+        byte mapped = InputReportBuilder.ResolveKeyboardUsage(_uart, _keyboardMapping, resolved, usage);
+        if (InputReportBuilder.IsModifierUsage(mapped))
+        {
+            _keyboardState.ModifierDown(InputReportBuilder.ModifierBit(mapped), modifiers);
+        }
+        else
+        {
+            _keyboardState.KeyDown(mapped, modifiers);
+        }
+
+        HidControl.Contracts.KeyboardSnapshot snap = _keyboardState.Snapshot();
+        await ReportLayoutService.EnsureReportLayoutAsync(_uart, resolved, ct);
+        byte[] report = InputReportBuilder.TryBuildKeyboardReport(_uart, resolved, snap.Modifiers, snap.Keys);
+        try
+        {
+            await _uart.SendInjectReportAsync(resolved, report, _opt.KeyboardInjectTimeoutMs, 0, false, ct);
+        }
+        catch (Exception ex)
+        {
+            return new KeyboardStateChangeResult(false, ex.Message, resolved, snap);
+        }
+
+        return new KeyboardStateChangeResult(true, null, resolved, snap);
+    }
+
+    /// <inheritdoc />
+    public async Task<KeyboardStateChangeResult> KeyUpAsync(byte usage, byte? modifiers, byte? itfSel, CancellationToken ct)
+    {
+        byte resolved = await ResolveKeyboardItfSelAsync(itfSel, ct);
+        if (resolved == 0xFE)
+        {
+            return new KeyboardStateChangeResult(false, "keyboard_itf_unresolved", null, null);
+        }
+
+        byte mapped = InputReportBuilder.ResolveKeyboardUsage(_uart, _keyboardMapping, resolved, usage);
+        if (InputReportBuilder.IsModifierUsage(mapped))
+        {
+            _keyboardState.ModifierUp(InputReportBuilder.ModifierBit(mapped), modifiers);
+        }
+        else
+        {
+            _keyboardState.KeyUp(mapped, modifiers);
+        }
+
+        HidControl.Contracts.KeyboardSnapshot snap = _keyboardState.Snapshot();
+        await ReportLayoutService.EnsureReportLayoutAsync(_uart, resolved, ct);
+        byte[] report = InputReportBuilder.TryBuildKeyboardReport(_uart, resolved, snap.Modifiers, snap.Keys);
+        try
+        {
+            await _uart.SendInjectReportAsync(resolved, report, _opt.KeyboardInjectTimeoutMs, 0, false, ct);
+        }
+        catch (Exception ex)
+        {
+            return new KeyboardStateChangeResult(false, ex.Message, resolved, snap);
+        }
+
+        return new KeyboardStateChangeResult(true, null, resolved, snap);
+    }
+
+    /// <inheritdoc />
+    public async Task<KeyboardReportResult> SendReportAsync(byte modifiers, IReadOnlyList<byte> keys, bool applyMapping, byte? itfSel, CancellationToken ct)
+    {
+        byte resolved = await ResolveKeyboardItfSelAsync(itfSel, ct);
+        if (resolved == 0xFE)
+        {
+            return new KeyboardReportResult(false, "keyboard_itf_unresolved", null, 0, Array.Empty<byte>());
+        }
+
+        if (keys.Count > 6)
+        {
+            return new KeyboardReportResult(false, "keys_max_6", resolved, 0, Array.Empty<byte>());
+        }
+
+        await ReportLayoutService.EnsureReportLayoutAsync(_uart, resolved, ct);
+
+        byte finalMods = modifiers;
+        var finalKeys = new List<byte>(Math.Min(6, keys.Count));
+
+        if (applyMapping)
+        {
+            foreach (byte key in keys)
+            {
+                byte mapped = InputReportBuilder.ResolveKeyboardUsage(_uart, _keyboardMapping, resolved, key);
+                if (InputReportBuilder.IsModifierUsage(mapped))
+                {
+                    finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
+                    continue;
+                }
+                if (finalKeys.Contains(mapped)) continue;
+                if (finalKeys.Count >= 6) break;
+                finalKeys.Add(mapped);
+            }
+        }
+        else
+        {
+            foreach (byte key in keys)
+            {
+                if (finalKeys.Contains(key)) continue;
+                if (finalKeys.Count >= 6) break;
+                finalKeys.Add(key);
+            }
+        }
+
+        byte[] report = InputReportBuilder.TryBuildKeyboardReport(_uart, resolved, finalMods, finalKeys);
+        try
+        {
+            await _uart.SendInjectReportAsync(resolved, report, _opt.KeyboardInjectTimeoutMs, 0, false, ct);
+        }
+        catch (Exception ex)
+        {
+            return new KeyboardReportResult(false, ex.Message, resolved, finalMods, finalKeys.ToArray());
+        }
+
+        return new KeyboardReportResult(true, null, resolved, finalMods, finalKeys.ToArray());
+    }
+
+    /// <inheritdoc />
+    public async Task<KeyboardStateChangeResult> ResetAsync(byte? itfSel, CancellationToken ct)
+    {
+        byte resolved = await ResolveKeyboardItfSelAsync(itfSel, ct);
+        if (resolved == 0xFE)
+        {
+            return new KeyboardStateChangeResult(false, "keyboard_itf_unresolved", null, null);
+        }
+
+        _keyboardState.Clear();
+        HidControl.Contracts.KeyboardSnapshot snap = _keyboardState.Snapshot();
+
+        await ReportLayoutService.EnsureReportLayoutAsync(_uart, resolved, ct);
+        byte[] report = InputReportBuilder.TryBuildKeyboardReport(_uart, resolved, 0, Array.Empty<byte>());
+        try
+        {
+            await _uart.SendInjectReportAsync(resolved, report, _opt.KeyboardInjectTimeoutMs, 0, false, ct);
+        }
+        catch (Exception ex)
+        {
+            return new KeyboardStateChangeResult(false, ex.Message, resolved, snap);
+        }
+
+        return new KeyboardStateChangeResult(true, null, resolved, snap);
     }
 
     private Task<byte> ResolveKeyboardItfSelAsync(byte? requestItfSel, CancellationToken ct)
