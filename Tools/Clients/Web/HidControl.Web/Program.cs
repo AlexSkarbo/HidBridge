@@ -316,6 +316,12 @@ app.MapGet("/", () =>
     let pendingCandidates = [];
     const rtcStatus = document.getElementById("rtcStatus");
     const PeerConnectionCtor = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
+    let rtcDebugSeq = 0;
+
+    function rtcLog(kind, payload) {
+      rtcDebugSeq++;
+      show({ webrtc: kind, seq: rtcDebugSeq, payload });
+    }
 
     function setRtcStatus(s) { rtcStatus.textContent = s; }
 
@@ -340,14 +346,17 @@ app.MapGet("/", () =>
 
         if (msg.type === "webrtc.hello") {
           console.log("webrtc hello", msg);
+          rtcLog("hello", msg);
           return;
         }
         if (msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined") {
           console.log("webrtc room", msg);
+          rtcLog("room", msg);
           return;
         }
 
         if (msg.type === "webrtc.signal" && msg.data) {
+          rtcLog("recv", msg);
           const data = msg.data;
           if (!pc) await ensurePc();
 
@@ -409,6 +418,7 @@ app.MapGet("/", () =>
 
     async function sigSend(obj) {
       await waitSigOpen();
+      rtcLog("send", obj);
       sig.send(JSON.stringify(obj));
     }
 
@@ -436,6 +446,7 @@ app.MapGet("/", () =>
       pc.onconnectionstatechange = () => setRtcStatus("pc: " + pc.connectionState);
       pc.oniceconnectionstatechange = () => console.log("ice:", pc.iceConnectionState);
       pc.onsignalingstatechange = () => console.log("signaling:", pc.signalingState);
+      pc.onicegatheringstatechange = () => console.log("gathering:", pc.iceGatheringState);
       pc.ondatachannel = (e) => {
         dc = e.channel;
         wireDc();
