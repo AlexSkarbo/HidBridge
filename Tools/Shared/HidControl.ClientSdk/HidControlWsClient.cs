@@ -198,9 +198,17 @@ public sealed class HidControlWsClient : IAsyncDisposable
     /// <param name="ct">The cancellation token.</param>
     public async Task CloseAsync(CancellationToken ct = default)
     {
-        if (_ws.State == WebSocketState.Open)
+        if (_ws.State is WebSocketState.Open or WebSocketState.CloseReceived)
         {
-            await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", ct).ConfigureAwait(false);
+            try
+            {
+                await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", ct).ConfigureAwait(false);
+            }
+            catch (WebSocketException)
+            {
+                // The server may close/abort the connection without a proper close handshake.
+                // Treat this as "already closed" for our wrapper use cases.
+            }
         }
     }
 
