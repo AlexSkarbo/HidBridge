@@ -272,12 +272,6 @@ static bool TryParseByte(string? s, out byte value)
     return byte.TryParse(t, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out value);
 }
 
-internal sealed record KeyboardShortcutRequest(string Shortcut, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
-internal sealed record KeyboardTextRequest(string? Text, byte? ItfSel = null);
-internal sealed record KeyboardPressApiRequest(string? Usage, string? Mods, byte? ItfSel = null);
-internal sealed record MouseMoveApiRequest(int? Dx, int? Dy, byte? ItfSel = null);
-internal sealed record MouseClickApiRequest(string? Button, byte? ItfSel = null);
-
 static object ParseJsonOrString(string s)
 {
     try
@@ -290,3 +284,9 @@ static object ParseJsonOrString(string s)
         return s;
     }
 }
+
+internal sealed record KeyboardShortcutRequest(string Shortcut, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
+internal sealed record KeyboardTextRequest(string? Text, byte? ItfSel = null);
+internal sealed record KeyboardPressApiRequest(string? Usage, string? Mods, byte? ItfSel = null);
+internal sealed record MouseMoveApiRequest(int? Dx, int? Dy, byte? ItfSel = null);
+internal sealed record MouseClickApiRequest(string? Button, byte? ItfSel = null);
