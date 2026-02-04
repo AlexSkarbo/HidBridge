@@ -20,15 +20,15 @@ public static class VideoProfileService
     /// Ensures a supported encoder is used in profile arguments using pipeline options.
     /// </summary>
     /// <param name="opt">Video pipeline options.</param>
-    /// <param name="profiles">Profile store.</param>
+    /// <param name="profiles">Profiles list.</param>
     /// <param name="profileArgs">Profile arguments.</param>
     /// <returns>Adjusted arguments.</returns>
-    public static string EnsureSupportedEncoder(VideoPipelineOptions opt, VideoProfileStore profiles, string profileArgs)
+    public static string EnsureSupportedEncoder(VideoPipelineOptions opt, IReadOnlyList<VideoProfileConfig> profiles, string profileArgs)
     {
         return EnsureSupportedEncoderInternal(opt.FfmpegPath, profiles, profileArgs);
     }
 
-    private static string EnsureSupportedEncoderInternal(string ffmpegPath, VideoProfileStore profiles, string profileArgs)
+    private static string EnsureSupportedEncoderInternal(string ffmpegPath, IReadOnlyList<VideoProfileConfig> profiles, string profileArgs)
     {
         if (string.IsNullOrWhiteSpace(profileArgs))
         {
@@ -64,7 +64,7 @@ public static class VideoProfileService
             {
                 continue;
             }
-            VideoProfileConfig? match = profiles.GetAll()
+            VideoProfileConfig? match = profiles
                 .FirstOrDefault(p => p.Args.Contains(enc, StringComparison.OrdinalIgnoreCase));
             if (match is not null)
             {

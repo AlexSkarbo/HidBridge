@@ -56,7 +56,7 @@ public sealed class ApplyVideoOutputUseCase
                 Ok: false,
                 State: state,
                 Error: error ?? "invalid_request",
-                Mode: VideoOutputService.ResolveMode(state),
+                Mode: VideoOutputModes.ResolveMode(state),
                 AnyRunningBefore: anyRunningBefore,
                 SourcesEligible: 0,
                 ManualStops: 0,

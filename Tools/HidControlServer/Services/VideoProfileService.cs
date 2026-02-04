@@ -18,7 +18,7 @@ internal static class VideoProfileService
     /// <returns>Adjusted arguments.</returns>
     public static string EnsureSupportedEncoder(Options opt, VideoProfileStore profiles, string profileArgs)
     {
-        return InfraVideoProfileService.EnsureSupportedEncoder(opt.ToVideoPipelineOptions(), profiles, profileArgs);
+        return InfraVideoProfileService.EnsureSupportedEncoder(opt.ToVideoPipelineOptions(), profiles.GetAll(), profileArgs);
     }
 
     /// <summary>
@@ -30,6 +30,6 @@ internal static class VideoProfileService
     /// <returns>Adjusted arguments.</returns>
     public static string EnsureSupportedEncoder(VideoPipelineOptions opt, VideoProfileStore profiles, string profileArgs)
     {
-        return InfraVideoProfileService.EnsureSupportedEncoder(opt, profiles, profileArgs);
+        return InfraVideoProfileService.EnsureSupportedEncoder(opt, profiles.GetAll(), profileArgs);
     }
 }
