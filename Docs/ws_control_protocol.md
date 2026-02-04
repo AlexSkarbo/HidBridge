@@ -136,6 +136,16 @@
 - mouse move/wheel/buttons -> `/mouse/*`
 - keyboard -> `/keyboard/*`
 
+## Shortcut chords
+
+Для “гарячих клавіш” можна відправляти chord рядком:
+
+```json
+{ "type": "keyboard.shortcut", "shortcut": "Ctrl+Alt+Del", "holdMs": 80, "itfSel": 2 }
+```
+
+`shortcut` підтримує `Ctrl/Alt/Shift/Win` + `F1..F24` + букви/цифри та часті назви (`Del`, `Tab`, `Enter`, `Esc`).
+
 ## Gamepad (резерв)
 
 Тип `device=gamepad` зарезервовано, протокол буде розширено окремо.

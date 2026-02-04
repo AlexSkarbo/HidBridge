@@ -1,4 +1,6 @@
 using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 
 namespace HidControl.ClientSdk;
 
@@ -51,11 +53,49 @@ public sealed class HidControlWsClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Sends a binary message.
+    /// Sends a text message (UTF-8).
     /// </summary>
     /// <param name="payload">The payload.</param>
     /// <param name="ct">The cancellation token.</param>
     public async Task SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct = default)
+    {
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _ws.SendAsync(payload, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sends a text message.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="ct">The cancellation token.</param>
+    public Task SendTextAsync(string text, CancellationToken ct = default)
+        => SendAsync(Encoding.UTF8.GetBytes(text), ct);
+
+    /// <summary>
+    /// Sends a JSON message.
+    /// </summary>
+    /// <param name="payload">The payload.</param>
+    /// <param name="json">Serializer options (optional).</param>
+    /// <param name="ct">The cancellation token.</param>
+    public Task SendJsonAsync<T>(T payload, JsonSerializerOptions? json = null, CancellationToken ct = default)
+    {
+        byte[] data = JsonSerializer.SerializeToUtf8Bytes(payload, json);
+        return SendAsync(data, ct);
+    }
+
+    /// <summary>
+    /// Sends a binary message (for endpoints that accept binary frames).
+    /// </summary>
+    /// <param name="payload">The payload.</param>
+    /// <param name="ct">The cancellation token.</param>
+    public async Task SendBinaryAsync(ReadOnlyMemory<byte> payload, CancellationToken ct = default)
     {
         await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
