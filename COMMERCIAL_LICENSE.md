@@ -4,6 +4,7 @@ This repository is released under a **proprietary** license (see `LICENSE`). To 
 
 Licensing contact:
 - GitHub: `@AlexSkarbo` (open an issue or send a message)
+- Email: `alexandr.skarbo@gmail.com`
 
 ## Packages (simple baseline)
 
@@ -45,4 +46,3 @@ Unless explicitly granted in a signed agreement:
 ## Disclaimer
 
 This file is an overview and not a legally binding offer. The binding terms are those in the signed commercial license agreement.
-

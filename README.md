@@ -13,6 +13,7 @@ This project is **proprietary**. No license is granted for use/distribution with
 ## Commercial Licensing
 
 If you want to legally use HidBridge in a product/service, you need a commercial license. See `COMMERCIAL_LICENSE.md`.
+Contact: `alexandr.skarbo@gmail.com`
 
 At a high level:
 - `B_host` enumerates a USB HID peripheral as a **USB host** and forwards input to `A_device`.
