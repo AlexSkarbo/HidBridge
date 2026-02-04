@@ -814,25 +814,10 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, status = result.Status, id = result.Id });
         });
 
-        group.MapGet("/ffmpeg/status", () =>
+        group.MapGet("/ffmpeg/status", (GetFfmpegStatusUseCase useCase) =>
         {
-            var list = appState.FfmpegProcesses.Select(kvp => new
-            {
-                id = kvp.Key,
-                pid = kvp.Value.Id,
-                status = kvp.Value.HasExited ? "exited" : "running",
-                exitCode = kvp.Value.HasExited ? kvp.Value.ExitCode : (int?)null
-            });
-            var states = appState.FfmpegStates.Select(kvp => new
-            {
-                id = kvp.Key,
-                lastStartAt = kvp.Value.LastStartAt,
-                lastExitAt = kvp.Value.LastExitAt,
-                lastExitCode = kvp.Value.LastExitCode,
-                restartCount = kvp.Value.RestartCount,
-                logPath = kvp.Value.LogPath
-            });
-            return Results.Ok(new { ok = true, processes = list, states });
+            var result = useCase.Execute();
+            return Results.Ok(new { ok = result.Ok, processes = result.Processes, states = result.States });
         });
 
         group.MapPost("/test-capture", async (string? id, int? timeoutSec, Options opt, VideoSourceStore store, VideoProfileStore profiles, AppState appState) =>
