@@ -104,6 +104,13 @@ builder.Services.AddSingleton<StartFfmpegUseCase>();
 builder.Services.AddSingleton<StopFfmpegUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoDiagProvider, VideoDiagProviderAdapter>();
 builder.Services.AddSingleton<GetVideoDiagUseCase>();
+
+// Keyboard use cases (Step 5): keep UART implementation in server adapters.
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IKeyboardControl, KeyboardControlAdapter>();
+builder.Services.AddSingleton<KeyboardPressUseCase>();
+builder.Services.AddSingleton<KeyboardTextUseCase>();
+builder.Services.AddSingleton<KeyboardShortcutUseCase>();
+
 builder.Services.AddRazorPages();
 builder.Services.AddEndpointsApiExplorer();
 

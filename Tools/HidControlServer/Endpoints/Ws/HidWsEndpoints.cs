@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text.Json;
+using HidControl.Application.UseCases;
 using HidControlServer;
 using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
@@ -34,6 +35,9 @@ public static class HidWsEndpoints
             var keyboardState = ctx.RequestServices.GetRequiredService<KeyboardState>();
             var mouseMapping = ctx.RequestServices.GetRequiredService<MouseMappingStore>();
             var keyboardMapping = ctx.RequestServices.GetRequiredService<KeyboardMappingStore>();
+            var keyboardPressUseCase = ctx.RequestServices.GetRequiredService<KeyboardPressUseCase>();
+            var keyboardTextUseCase = ctx.RequestServices.GetRequiredService<KeyboardTextUseCase>();
+            var keyboardShortcutUseCase = ctx.RequestServices.GetRequiredService<KeyboardShortcutUseCase>();
             string mouseTypeName = opt.MouseTypeName ?? "mouse";
             string keyboardTypeName = opt.KeyboardTypeName ?? "keyboard";
 
@@ -246,29 +250,15 @@ public static class HidWsEndpoints
                             {
                                 byte usage = (byte)GetInt(root, "usage");
                                 byte modifiers = (byte)GetInt(root, "mods", "modifiers");
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), keyboardTypeName, opt.KeyboardItfSel, 0xFE, ctx.RequestAborted);
-                                if (itfSel == 0xFE)
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+
+                                var result = await keyboardPressUseCase.ExecuteAsync(new HidControl.Contracts.KeyboardPressRequest(usage, modifiers, itfSelReq), ctx.RequestAborted);
+                                if (!result.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "keyboard_itf_unresolved" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = result.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
-                                await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, keyboardMapping, itfSel, usage);
-                                if (InputReportBuilder.IsModifierUsage(mapped))
-                                {
-                                    byte bit = InputReportBuilder.ModifierBit(mapped);
-                                    byte[] downReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers | bit), Array.Empty<byte>());
-                                    byte[] upReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers & ~bit), Array.Empty<byte>());
-                                    await uart.SendInjectReportAsync(itfSel, downReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                    await uart.SendInjectReportAsync(itfSel, upReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                }
-                                else
-                                {
-                                    byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, modifiers, new[] { mapped });
-                                    byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
-                                    await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                    await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                }
+
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;
                             }
@@ -278,98 +268,18 @@ public static class HidWsEndpoints
                                 int holdMs = root.TryGetProperty("holdMs", out var hme) && hme.ValueKind == JsonValueKind.Number ? hme.GetInt32() : 30;
                                 bool applyMapping = !(root.TryGetProperty("applyMapping", out var ame) && ame.ValueKind == JsonValueKind.False);
 
-                                if (string.IsNullOrWhiteSpace(shortcut))
-                                {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "shortcut_required" }, ctx.RequestAborted);
-                                    break;
-                                }
-
                                 if (holdMs < 0) holdMs = 0;
                                 if (holdMs > 5000) holdMs = 5000;
 
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), keyboardTypeName, opt.KeyboardItfSel, 0xFE, ctx.RequestAborted);
-                                if (itfSel == 0xFE)
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                var result = await keyboardShortcutUseCase.ExecuteAsync(shortcut, holdMs, applyMapping, itfSelReq, ctx.RequestAborted);
+                                if (!result.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "keyboard_itf_unresolved" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = result.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
                                 }
 
-                                if (!HidKeyboardShortcuts.TryParseChord(shortcut, out byte parsedMods, out byte[] parsedKeys, out string? parseErr))
-                                {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = parseErr ?? "invalid_shortcut" }, ctx.RequestAborted);
-                                    break;
-                                }
-
-                                byte finalMods = 0;
-                                var finalKeys = new List<byte>(Math.Min(6, parsedKeys.Length));
-
-                                if (applyMapping)
-                                {
-                                    for (int i = 0; i < 8; i++)
-                                    {
-                                        byte bit = (byte)(1 << i);
-                                        if ((parsedMods & bit) == 0) continue;
-                                        byte modUsage = (byte)(0xE0 + i);
-                                        byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, keyboardMapping, itfSel, modUsage);
-                                        if (InputReportBuilder.IsModifierUsage(mapped))
-                                        {
-                                            finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
-                                            continue;
-                                        }
-                                        if (finalKeys.Contains(mapped)) continue;
-                                        finalKeys.Add(mapped);
-                                        if (finalKeys.Count > 6)
-                                        {
-                                            await SendAsync(new { ok = false, type, id = msgId, error = "keys_max_6" }, ctx.RequestAborted);
-                                            goto ShortcutEnd;
-                                        }
-                                    }
-
-                                    foreach (byte keyUsage in parsedKeys)
-                                    {
-                                        byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, keyboardMapping, itfSel, keyUsage);
-                                        if (InputReportBuilder.IsModifierUsage(mapped))
-                                        {
-                                            finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
-                                            continue;
-                                        }
-                                        if (finalKeys.Contains(mapped)) continue;
-                                        finalKeys.Add(mapped);
-                                        if (finalKeys.Count > 6)
-                                        {
-                                            await SendAsync(new { ok = false, type, id = msgId, error = "keys_max_6" }, ctx.RequestAborted);
-                                            goto ShortcutEnd;
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    finalMods = parsedMods;
-                                    foreach (byte keyUsage in parsedKeys)
-                                    {
-                                        if (finalKeys.Contains(keyUsage)) continue;
-                                        finalKeys.Add(keyUsage);
-                                        if (finalKeys.Count > 6)
-                                        {
-                                            await SendAsync(new { ok = false, type, id = msgId, error = "keys_max_6" }, ctx.RequestAborted);
-                                            goto ShortcutEnd;
-                                        }
-                                    }
-                                }
-
-                                await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, finalMods, finalKeys);
-                                byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
-                                await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                if (holdMs > 0)
-                                {
-                                    await Task.Delay(holdMs, ctx.RequestAborted);
-                                }
-                                await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-
-                                await SendAsync(new { ok = true, type, id = msgId, itfSel, shortcut, modifiers = finalMods, keys = finalKeys }, ctx.RequestAborted);
-
-                            ShortcutEnd:
+                                await SendAsync(new { ok = true, type, id = msgId, itfSel = result.ItfSel, shortcut, modifiers = result.Modifiers, keys = result.Keys }, ctx.RequestAborted);
                                 break;
                             }
                             case "keyboard.text":
@@ -381,34 +291,12 @@ public static class HidWsEndpoints
                                     await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                     break;
                                 }
-                                byte itfSel = await ResolveItfSelWithCacheAsync(GetByteNullable(root, "itfSel"), keyboardTypeName, opt.KeyboardItfSel, 0xFE, ctx.RequestAborted);
-                                if (itfSel == 0xFE)
+                                byte? itfSelReq = GetByteNullable(root, "itfSel");
+                                var result = await keyboardTextUseCase.ExecuteAsync(text, layout, itfSelReq, ctx.RequestAborted);
+                                if (!result.Ok)
                                 {
-                                    await SendAsync(new { ok = false, type, id = msgId, error = "keyboard_itf_unresolved" }, ctx.RequestAborted);
+                                    await SendAsync(new { ok = false, type, id = msgId, error = result.Error ?? "failed" }, ctx.RequestAborted);
                                     break;
-                                }
-                                await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ctx.RequestAborted);
-                                foreach (char ch in text)
-                                {
-                                    if (!HidReports.TryMapTextToHidKey(ch, layout, out byte modifiers, out byte usage))
-                                    {
-                                        await SendAsync(new { ok = false, type, id = msgId, error = $"unsupported_char_{(int)ch:X4}" }, ctx.RequestAborted);
-                                        return;
-                                    }
-                                    byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, keyboardMapping, itfSel, usage);
-                                    if (InputReportBuilder.IsModifierUsage(mapped))
-                                    {
-                                        byte bit = InputReportBuilder.ModifierBit(mapped);
-                                        byte[] downReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers | bit), Array.Empty<byte>());
-                                        byte[] upReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers & ~bit), Array.Empty<byte>());
-                                        await uart.SendInjectReportAsync(itfSel, downReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                        await uart.SendInjectReportAsync(itfSel, upReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                        continue;
-                                    }
-                                    byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, modifiers, new[] { mapped });
-                                    byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
-                                    await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
-                                    await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ctx.RequestAborted);
                                 }
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;

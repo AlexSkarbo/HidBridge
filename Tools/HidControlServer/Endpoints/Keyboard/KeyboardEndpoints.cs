@@ -1,5 +1,6 @@
 using HidControlServer;
 using HidControlServer.Services;
+using HidControl.Application.UseCases;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
@@ -18,39 +19,12 @@ public static class KeyboardEndpoints
     {
         var group = app.MapGroup("/keyboard");
 
-        group.MapPost("/press", async (KeyboardPressRequest req, Options opt, HidUartClient uart, KeyboardMappingStore mappingStore, CancellationToken ct) =>
+        group.MapPost("/press", async (KeyboardPressRequest req, KeyboardPressUseCase useCase, CancellationToken ct) =>
         {
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.KeyboardTypeName, opt.KeyboardItfSel, uart, ct);
-            if (itfSel == 0xFE) return Results.BadRequest(new { ok = false, error = "keyboard_itf_unresolved" });
-            await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ct);
-            byte usage = InputReportBuilder.ResolveKeyboardUsage(uart, mappingStore, itfSel, req.Usage);
-            byte modifiers = req.Modifiers ?? 0;
-            if (InputReportBuilder.IsModifierUsage(usage))
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
             {
-                byte bit = InputReportBuilder.ModifierBit(usage);
-                byte[] downReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers | bit), Array.Empty<byte>());
-                byte[] upReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers & ~bit), Array.Empty<byte>());
-                try
-                {
-                    await uart.SendInjectReportAsync(itfSel, downReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                    await uart.SendInjectReportAsync(itfSel, upReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                }
-                catch (Exception ex)
-                {
-                    return Results.BadRequest(new { ok = false, error = ex.Message });
-                }
-                return Results.Ok(new { ok = true });
-            }
-            byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, modifiers, new[] { usage });
-            byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
-            try
-            {
-                await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { ok = false, error = ex.Message });
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
         });
@@ -111,52 +85,21 @@ public static class KeyboardEndpoints
             return Results.Ok(new { ok = true });
         });
 
-        static async Task<IResult> HandleType(KeyboardTypeRequest req, Options opt, HidUartClient uart, KeyboardMappingStore mappingStore, CancellationToken ct)
+        static async Task<IResult> HandleType(KeyboardTypeRequest req, KeyboardTextUseCase useCase, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(req.Text))
             {
                 return Results.Ok(new { ok = true });
             }
 
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.KeyboardTypeName, opt.KeyboardItfSel, uart, ct);
-            if (itfSel == 0xFE) return Results.BadRequest(new { ok = false, error = "keyboard_itf_unresolved" });
-            await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ct);
-            foreach (char ch in req.Text)
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
             {
-                // REST endpoint supports the same layouts as WS; keep default as ASCII for safety.
-                if (!HidReports.TryMapTextToHidKey(ch, layout: null, out byte modifiers, out byte usage))
+                if (result.UnsupportedChar is int ch)
                 {
-                    return Results.BadRequest(new { ok = false, error = $"Unsupported char: U+{(int)ch:X4}" });
+                    return Results.BadRequest(new { ok = false, error = $"Unsupported char: U+{ch:X4}" });
                 }
-
-                byte mappedUsage = InputReportBuilder.ResolveKeyboardUsage(uart, mappingStore, itfSel, usage);
-                if (InputReportBuilder.IsModifierUsage(mappedUsage))
-                {
-                    byte bit = InputReportBuilder.ModifierBit(mappedUsage);
-                    byte[] downReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers | bit), Array.Empty<byte>());
-                    byte[] upReportMod = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, (byte)(modifiers & ~bit), Array.Empty<byte>());
-                    try
-                    {
-                        await uart.SendInjectReportAsync(itfSel, downReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                        await uart.SendInjectReportAsync(itfSel, upReportMod, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        return Results.BadRequest(new { ok = false, error = ex.Message });
-                    }
-                    continue;
-                }
-                byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, modifiers, new[] { mappedUsage });
-                byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
-                try
-                {
-                    await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                    await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                }
-                catch (Exception ex)
-                {
-                    return Results.BadRequest(new { ok = false, error = ex.Message });
-                }
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
 
             return Results.Ok(new { ok = true });
@@ -165,110 +108,26 @@ public static class KeyboardEndpoints
         group.MapPost("/type", HandleType);
         group.MapPost("/text", HandleType);
 
-        group.MapPost("/shortcut", async (KeyboardShortcutRequest req, Options opt, HidUartClient uart, KeyboardMappingStore mappingStore, CancellationToken ct) =>
+        group.MapPost("/shortcut", async (KeyboardShortcutRequest req, KeyboardShortcutUseCase useCase, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Shortcut))
             {
                 return Results.BadRequest(new { ok = false, error = "shortcut is required" });
             }
 
-            byte itfSel = await InterfaceSelector.ResolveItfSelAsync(req.ItfSel, opt.KeyboardTypeName, opt.KeyboardItfSel, uart, ct);
-            if (itfSel == 0xFE)
+            var result = await useCase.ExecuteAsync(req, ct);
+            if (!result.Ok)
             {
-                return Results.BadRequest(new { ok = false, error = "keyboard_itf_unresolved" });
-            }
-
-            if (!HidKeyboardShortcuts.TryParseChord(req.Shortcut, out byte parsedMods, out byte[] parsedKeys, out string? parseErr))
-            {
-                return Results.BadRequest(new { ok = false, error = parseErr ?? "invalid shortcut" });
-            }
-
-            bool applyMapping = req.ApplyMapping ?? true;
-            byte finalMods = 0;
-            var finalKeys = new List<byte>(Math.Min(6, parsedKeys.Length));
-
-            if (applyMapping)
-            {
-                // Map modifier bits as individual usages (0xE0..0xE7) through the per-device mapping store.
-                for (int i = 0; i < 8; i++)
-                {
-                    byte bit = (byte)(1 << i);
-                    if ((parsedMods & bit) == 0) continue;
-                    byte usage = (byte)(0xE0 + i);
-                    byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, mappingStore, itfSel, usage);
-                    if (InputReportBuilder.IsModifierUsage(mapped))
-                    {
-                        finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
-                        continue;
-                    }
-                    if (!finalKeys.Contains(mapped))
-                    {
-                        finalKeys.Add(mapped);
-                        if (finalKeys.Count > 6)
-                        {
-                            return Results.BadRequest(new { ok = false, error = "too many non-modifier keys (max 6)" });
-                        }
-                    }
-                }
-
-                foreach (byte usage in parsedKeys)
-                {
-                    byte mapped = InputReportBuilder.ResolveKeyboardUsage(uart, mappingStore, itfSel, usage);
-                    if (InputReportBuilder.IsModifierUsage(mapped))
-                    {
-                        finalMods = (byte)(finalMods | InputReportBuilder.ModifierBit(mapped));
-                        continue;
-                    }
-                    if (finalKeys.Contains(mapped)) continue;
-                    finalKeys.Add(mapped);
-                    if (finalKeys.Count > 6)
-                    {
-                        return Results.BadRequest(new { ok = false, error = "too many non-modifier keys (max 6)" });
-                    }
-                }
-            }
-            else
-            {
-                finalMods = parsedMods;
-                foreach (byte usage in parsedKeys)
-                {
-                    if (finalKeys.Contains(usage)) continue;
-                    finalKeys.Add(usage);
-                    if (finalKeys.Count > 6)
-                    {
-                        return Results.BadRequest(new { ok = false, error = "too many non-modifier keys (max 6)" });
-                    }
-                }
-            }
-
-            int holdMs = req.HoldMs ?? 30;
-            if (holdMs < 0) holdMs = 0;
-            if (holdMs > 5000) holdMs = 5000;
-
-            await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ct);
-            byte[] downReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, finalMods, finalKeys);
-            byte[] upReport = InputReportBuilder.TryBuildKeyboardReport(uart, itfSel, 0, Array.Empty<byte>());
-            try
-            {
-                await uart.SendInjectReportAsync(itfSel, downReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-                if (holdMs > 0)
-                {
-                    await Task.Delay(holdMs, ct);
-                }
-                await uart.SendInjectReportAsync(itfSel, upReport, opt.KeyboardInjectTimeoutMs, 0, false, ct);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { ok = false, error = ex.Message });
+                return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
 
             return Results.Ok(new
             {
                 ok = true,
-                itfSel,
+                itfSel = result.ItfSel,
                 shortcut = req.Shortcut,
-                modifiers = finalMods,
-                keys = finalKeys
+                modifiers = result.Modifiers,
+                keys = result.Keys
             });
         });
 
