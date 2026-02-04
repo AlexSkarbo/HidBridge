@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Linq;
 
 namespace HidControl.ClientSdk;
 
@@ -93,6 +94,94 @@ public static class HidWsHidExtensions
             id,
             text,
             layout,
+            itfSel
+        };
+        return ws.SendJsonAsync(msg, DefaultJson, ct);
+    }
+
+    /// <summary>
+    /// Sends a keyboard down event (stateful) to the server over `/ws/hid`.
+    /// </summary>
+    /// <param name="ws">WS client.</param>
+    /// <param name="usage">HID usage (0..255).</param>
+    /// <param name="mods">Optional modifiers override (boot mask).</param>
+    /// <param name="itfSel">Keyboard interface selector (optional).</param>
+    /// <param name="id">Message id (optional).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public static Task SendKeyboardDownAsync(
+        this HidControlWsClient ws,
+        byte usage,
+        byte? mods = null,
+        byte? itfSel = null,
+        string? id = null,
+        CancellationToken ct = default)
+    {
+        var msg = new
+        {
+            type = "keyboard.down",
+            id,
+            usage,
+            mods,
+            itfSel
+        };
+        return ws.SendJsonAsync(msg, DefaultJson, ct);
+    }
+
+    /// <summary>
+    /// Sends a keyboard up event (stateful) to the server over `/ws/hid`.
+    /// </summary>
+    /// <param name="ws">WS client.</param>
+    /// <param name="usage">HID usage (0..255).</param>
+    /// <param name="mods">Optional modifiers override (boot mask).</param>
+    /// <param name="itfSel">Keyboard interface selector (optional).</param>
+    /// <param name="id">Message id (optional).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public static Task SendKeyboardUpAsync(
+        this HidControlWsClient ws,
+        byte usage,
+        byte? mods = null,
+        byte? itfSel = null,
+        string? id = null,
+        CancellationToken ct = default)
+    {
+        var msg = new
+        {
+            type = "keyboard.up",
+            id,
+            usage,
+            mods,
+            itfSel
+        };
+        return ws.SendJsonAsync(msg, DefaultJson, ct);
+    }
+
+    /// <summary>
+    /// Sends a raw keyboard report (modifiers + up to 6 keys) to the server over `/ws/hid`.
+    /// </summary>
+    /// <param name="ws">WS client.</param>
+    /// <param name="mods">Modifier bitmask (boot mask).</param>
+    /// <param name="keys">Key usages (0..255). Max 6.</param>
+    /// <param name="applyMapping">True to apply per-device mapping.</param>
+    /// <param name="itfSel">Keyboard interface selector (optional).</param>
+    /// <param name="id">Message id (optional).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public static Task SendKeyboardReportAsync(
+        this HidControlWsClient ws,
+        byte mods,
+        IReadOnlyList<byte> keys,
+        bool applyMapping = true,
+        byte? itfSel = null,
+        string? id = null,
+        CancellationToken ct = default)
+    {
+        int[] keyInts = keys.Select(b => (int)b).ToArray();
+        var msg = new
+        {
+            type = "keyboard.report",
+            id,
+            mods,
+            keys = keyInts,
+            applyMapping,
             itfSel
         };
         return ws.SendJsonAsync(msg, DefaultJson, ct);

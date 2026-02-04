@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Linq;
 using HidControl.ClientSdk;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -79,6 +80,20 @@ app.MapGet("/", () =>
       <input id="shortcut" style="min-width: 260px" value="Ctrl+Alt+Del" />
       <input id="holdMs" type="number" value="80" style="width: 90px" />
       <button id="sendShortcut">Send</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Shortcut Capture (Browser)</h3>
+    <div class="row muted">
+      Some OS-reserved shortcuts (like <code>Alt+Tab</code>, <code>Win+R</code>) may not be capturable in a browser. Use the buttons/manual chord above.
+    </div>
+    <div class="row">
+      <input id="capture" style="min-width: 320px" placeholder="click here and press keys (Ctrl+Shift+X)" />
+      <input id="capMods" style="width: 120px" value="0" />
+      <input id="capKeys" style="min-width: 260px" value="[]" />
+      <input id="capHoldMs" type="number" value="80" style="width: 90px" />
+      <button id="sendCaptured">Send Captured</button>
     </div>
   </div>
 
@@ -171,6 +186,74 @@ app.MapGet("/", () =>
         await post("/api/mouse/click", { button });
       });
     }
+
+    // Basic `KeyboardEvent.code` -> USB HID Keyboard usage mapping.
+    // Values are decimal usages (0..255).
+    const codeToUsage = {
+      "KeyA": 4, "KeyB": 5, "KeyC": 6, "KeyD": 7, "KeyE": 8, "KeyF": 9, "KeyG": 10, "KeyH": 11, "KeyI": 12, "KeyJ": 13, "KeyK": 14, "KeyL": 15,
+      "KeyM": 16, "KeyN": 17, "KeyO": 18, "KeyP": 19, "KeyQ": 20, "KeyR": 21, "KeyS": 22, "KeyT": 23, "KeyU": 24, "KeyV": 25, "KeyW": 26, "KeyX": 27,
+      "KeyY": 28, "KeyZ": 29,
+      "Digit1": 30, "Digit2": 31, "Digit3": 32, "Digit4": 33, "Digit5": 34, "Digit6": 35, "Digit7": 36, "Digit8": 37, "Digit9": 38, "Digit0": 39,
+      "Enter": 40, "Escape": 41, "Backspace": 42, "Tab": 43, "Space": 44,
+      "Minus": 45, "Equal": 46, "BracketLeft": 47, "BracketRight": 48, "Backslash": 49,
+      "Semicolon": 51, "Quote": 52, "Backquote": 53, "Comma": 54, "Period": 55, "Slash": 56,
+      "CapsLock": 57,
+      "F1": 58, "F2": 59, "F3": 60, "F4": 61, "F5": 62, "F6": 63, "F7": 64, "F8": 65, "F9": 66, "F10": 67, "F11": 68, "F12": 69,
+      "PrintScreen": 70, "ScrollLock": 71, "Pause": 72,
+      "Insert": 73, "Home": 74, "PageUp": 75, "Delete": 76, "End": 77, "PageDown": 78,
+      "ArrowRight": 79, "ArrowLeft": 80, "ArrowDown": 81, "ArrowUp": 82,
+      "NumLock": 83,
+      "NumpadDivide": 84, "NumpadMultiply": 85, "NumpadSubtract": 86, "NumpadAdd": 87, "NumpadEnter": 88,
+      "Numpad1": 89, "Numpad2": 90, "Numpad3": 91, "Numpad4": 92, "Numpad5": 93, "Numpad6": 94, "Numpad7": 95, "Numpad8": 96, "Numpad9": 97, "Numpad0": 98,
+      "NumpadDecimal": 99,
+      "ContextMenu": 101
+    };
+
+    function modsFromEvent(e) {
+      // Boot modifier mask: Ctrl=0x01, Shift=0x02, Alt=0x04, Win/Meta=0x08 (left variants).
+      return (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    }
+
+    const pressedCodes = new Set();
+    let lastCaptured = { mods: 0, keys: [] };
+
+    function recomputeCaptured(e) {
+      const mods = modsFromEvent(e);
+      const keys = [];
+      for (const code of pressedCodes.values()) {
+        const usage = codeToUsage[code];
+        if (usage === undefined) continue;
+        // Ignore pure modifiers (we only use the modifier mask).
+        if (usage >= 224 && usage <= 231) continue;
+        if (!keys.includes(usage)) keys.push(usage);
+        if (keys.length >= 6) break;
+      }
+      lastCaptured = { mods, keys };
+      document.getElementById("capMods").value = String(mods);
+      document.getElementById("capKeys").value = JSON.stringify(keys);
+    }
+
+    const capture = document.getElementById("capture");
+    capture.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) pressedCodes.add(e.code);
+      recomputeCaptured(e);
+    });
+    capture.addEventListener("keyup", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pressedCodes.delete(e.code);
+      recomputeCaptured(e);
+    });
+    capture.addEventListener("blur", () => {
+      pressedCodes.clear();
+    });
+
+    document.getElementById("sendCaptured").onclick = async () => {
+      const holdMs = Number.parseInt(document.getElementById("capHoldMs").value, 10) || 80;
+      await post("/api/keyboard/chord", { mods: lastCaptured.mods, keys: lastCaptured.keys, holdMs });
+    };
   </script>
 </body>
 </html>
@@ -216,6 +299,57 @@ app.MapPost("/api/keyboard/press", async (KeyboardPressApiRequest req, Cancellat
         ws.SendKeyboardPressAsync(usage, mods: mods, itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
 
     return Results.Text(resp, "application/json");
+});
+
+app.MapPost("/api/keyboard/chord", async (KeyboardChordRequest req, CancellationToken ct) =>
+{
+    byte mods = req.Mods ?? 0;
+    int holdMs = req.HoldMs ?? 80;
+    int[] keys = req.Keys ?? Array.Empty<int>();
+    if (keys.Length > 6)
+    {
+        return Results.BadRequest(new { ok = false, error = "keys max length is 6" });
+    }
+    foreach (int k in keys)
+    {
+        if (k < 0 || k > 255)
+        {
+            return Results.BadRequest(new { ok = false, error = "keys must be 0..255" });
+        }
+    }
+
+    Uri baseUri = new Uri(serverUrl);
+    Uri wsUri = ToWsUri(baseUri, "/ws/hid");
+
+    await using var ws = new HidControlWsClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        ws.SetRequestHeader("X-HID-Token", token!);
+    }
+
+    await ws.ConnectAsync(wsUri, ct);
+
+    var keyBytes = keys.Select(k => (byte)k).ToArray();
+    string downId = Guid.NewGuid().ToString("N");
+    await ws.SendKeyboardReportAsync(mods, keyBytes, applyMapping: req.ApplyMapping ?? true, itfSel: req.ItfSel, id: downId, ct: ct);
+    string downResp = await ws.ReceiveTextOnceAsync(ct) ?? "{\"ok\":false,\"error\":\"no_response\"}";
+
+    if (holdMs > 0)
+    {
+        await Task.Delay(holdMs, ct);
+    }
+
+    string upId = Guid.NewGuid().ToString("N");
+    await ws.SendKeyboardReportAsync(0, Array.Empty<byte>(), applyMapping: req.ApplyMapping ?? true, itfSel: req.ItfSel, id: upId, ct: ct);
+    string upResp = await ws.ReceiveTextOnceAsync(ct) ?? "{\"ok\":false,\"error\":\"no_response\"}";
+
+    await ws.CloseAsync(ct);
+
+    return Results.Json(new
+    {
+        down = ParseJsonOrString(downResp),
+        up = ParseJsonOrString(upResp)
+    });
 });
 
 app.MapPost("/api/mouse/move", async (MouseMoveApiRequest req, CancellationToken ct) =>
@@ -294,5 +428,6 @@ static object ParseJsonOrString(string s)
 internal sealed record KeyboardShortcutRequest(string Shortcut, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
 internal sealed record KeyboardTextRequest(string? Text, string? Layout = null, byte? ItfSel = null);
 internal sealed record KeyboardPressApiRequest(string? Usage, string? Mods, byte? ItfSel = null);
+internal sealed record KeyboardChordRequest(byte? Mods, int[]? Keys, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
 internal sealed record MouseMoveApiRequest(int? Dx, int? Dy, byte? ItfSel = null);
 internal sealed record MouseClickApiRequest(string? Button, byte? ItfSel = null);
