@@ -1,6 +1,10 @@
-# HidBridge (v0.9.9)
+# HIDden Bridge (HidBridge)
 
-HidBridge is a **dual-MCU HID proxy/bridge** (Pico/RP2040-class) with tooling for **remote HID injection** and **low-latency video** (remote KVM-style workflows).
+Hidden Bridge for HID (remote KVM-style control).
+
+HidBridge is a **dual-MCU HID proxy/bridge** (Pico/RP2040-class) with tooling for **remote HID injection** and **low-latency video**.
+
+Key idea: the controlled device can remain "agentless" (no software installed) because input is injected over USB HID.
 
 Repository: `https://github.com/AlexSkarbo/HidBridge.git`
 
