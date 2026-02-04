@@ -88,6 +88,9 @@ builder.Services.AddSingleton<HidControl.UseCases.Video.IVideoConfigStore, HidCo
 builder.Services.AddSingleton<HidControl.UseCases.Video.VideoConfigService>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoProfileStore, VideoProfileStoreAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoConfigSaver, VideoConfigSaverAdapter>();
+builder.Services.AddSingleton<GetVideoSourcesUseCase>();
+builder.Services.AddSingleton<SetVideoSourcesUseCase>();
+builder.Services.AddSingleton<UpsertVideoSourceUseCase>();
 builder.Services.AddSingleton<GetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetActiveVideoProfileUseCase>();

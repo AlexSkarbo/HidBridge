@@ -25,4 +25,16 @@ public sealed class VideoSourceStoreAdapter : IVideoSourceStore
     /// </summary>
     /// <returns>Sources list.</returns>
     public IReadOnlyList<VideoSourceConfig> GetAll() => _store.GetAll();
+
+    /// <summary>
+    /// Replaces all sources.
+    /// </summary>
+    /// <param name="sources">Sources.</param>
+    public void ReplaceAll(IReadOnlyList<VideoSourceConfig> sources) => _store.ReplaceAll(sources);
+
+    /// <summary>
+    /// Inserts or updates a source.
+    /// </summary>
+    /// <param name="source">Source.</param>
+    public void Upsert(VideoSourceConfig source) => _store.Upsert(source);
 }

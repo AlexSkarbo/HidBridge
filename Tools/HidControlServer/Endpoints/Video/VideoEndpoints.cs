@@ -34,23 +34,21 @@ public static class VideoEndpoints
         var ffmpegService = app.Services.GetRequiredService<VideoFfmpegService>();
         var configService = app.Services.GetRequiredService<HidControl.UseCases.Video.VideoConfigService>();
 
-        group.MapGet("/sources", (VideoSourceStore store) =>
+        group.MapGet("/sources", (GetVideoSourcesUseCase useCase) =>
         {
-            return Results.Ok(new { ok = true, sources = store.GetAll() });
+            return Results.Ok(new { ok = true, sources = useCase.Execute() });
         });
 
-        group.MapPost("/sources", (VideoSourcesRequest req, VideoSourceStore store) =>
+        group.MapPost("/sources", (VideoSourcesRequest req, SetVideoSourcesUseCase useCase) =>
         {
-            store.ReplaceAll(req.Sources ?? new List<VideoSourceConfig>());
-            var save = configService.SaveSources(store.GetAll());
-            return Results.Ok(new { ok = true, configSaved = save.Saved, configPath = save.Path, configError = save.Error });
+            var result = useCase.Execute(req);
+            return Results.Ok(new { ok = result.Ok, configSaved = result.ConfigSaved, configPath = result.ConfigPath, configError = result.ConfigError });
         });
 
-        group.MapPost("/sources/upsert", (VideoSourceConfig req, VideoSourceStore store) =>
+        group.MapPost("/sources/upsert", (VideoSourceConfig req, UpsertVideoSourceUseCase useCase) =>
         {
-            store.Upsert(req);
-            var save = configService.SaveSources(store.GetAll());
-            return Results.Ok(new { ok = true, configSaved = save.Saved, configPath = save.Path, configError = save.Error });
+            var result = useCase.Execute(req);
+            return Results.Ok(new { ok = result.Ok, configSaved = result.ConfigSaved, configPath = result.ConfigPath, configError = result.ConfigError });
         });
 
         group.MapGet("/profiles", (GetVideoProfilesUseCase useCase) =>
