@@ -65,6 +65,10 @@ Keyboard:
 irm -Method Post -Uri http://127.0.0.1:8080/keyboard/text -ContentType "application/json" -Body '{"text":"TEST ","itfSel":2}'
 ```
 
+Note:
+- `/keyboard/text` is **ASCII-only** by default.
+- For non-ASCII text (Cyrillic/CJK/etc.) without installing anything on the controlled device, see: `Docs/text_input_i18n.md`.
+
 ## Troubleshooting
 
 - `/uart/ping` timeout: wrong COM port, bad wiring, or wrong baud.

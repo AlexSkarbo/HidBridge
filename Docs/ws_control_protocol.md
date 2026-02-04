@@ -146,6 +146,24 @@
 
 `shortcut` підтримує `Ctrl/Alt/Shift/Win` + `F1..F24` + букви/цифри та часті назви (`Del`, `Tab`, `Enter`, `Esc`).
 
+## Text input & I18N (HID-only)
+
+`keyboard.text` by default supports **ASCII only**. Anything outside ASCII returns:
+
+```json
+{ "ok": false, "type": "keyboard.text", "id": "8", "error": "unsupported_char_041E" }
+```
+
+For best-effort non-ASCII typing, clients may include an optional `layout` field:
+
+```json
+{ "type": "keyboard.text", "text": "Привіт", "layout": "uk", "itfSel": 2 }
+```
+
+Important: this is **layout-dependent**. The controlled device must have that OS keyboard layout configured and currently active.
+
+Details and extension strategy: `Docs/text_input_i18n.md`.
+
 ## Gamepad (резерв)
 
 Тип `device=gamepad` зарезервовано, протокол буде розширено окремо.
