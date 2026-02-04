@@ -103,3 +103,5 @@ app.MapGet("/sdk/ping", () =>
 });
 
 app.Run();
+
+internal sealed record KeyboardShortcutRequest(string Shortcut, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
