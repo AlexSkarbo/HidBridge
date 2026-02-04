@@ -315,6 +315,7 @@ app.MapGet("/", () =>
     let dc = null;
     let pendingCandidates = [];
     const rtcStatus = document.getElementById("rtcStatus");
+    const PeerConnectionCtor = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
 
     function setRtcStatus(s) { rtcStatus.textContent = s; }
 
@@ -413,7 +414,20 @@ app.MapGet("/", () =>
 
     async function ensurePc() {
       if (pc) return pc;
-      pc = new RTCPeerConnection({ iceServers: getIceServers() });
+      if (typeof PeerConnectionCtor !== "function") {
+        const detail = {
+          ok: false,
+          error: "webrtc_not_supported",
+          rtcpType: typeof window.RTCPeerConnection,
+          proto: location.protocol,
+          ua: navigator.userAgent
+        };
+        setRtcStatus("WebRTC not supported in this browser/context");
+        show(detail);
+        throw new Error("webrtc_not_supported");
+      }
+
+      pc = new PeerConnectionCtor({ iceServers: getIceServers() });
       pc.onicecandidate = (e) => {
         if (!e.candidate) return;
         const cand = (typeof e.candidate.toJSON === "function") ? e.candidate.toJSON() : e.candidate;
