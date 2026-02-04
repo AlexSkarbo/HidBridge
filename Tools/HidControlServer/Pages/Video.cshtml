@@ -2257,6 +2257,15 @@
       return table[key] ?? null;
     }
 
+    function modsFromEvent(ev) {
+      let mods = 0;
+      if (ev.ctrlKey) mods |= 0x01;
+      if (ev.shiftKey) mods |= 0x02;
+      if (ev.altKey) mods |= 0x04;
+      if (ev.metaKey) mods |= 0x08;
+      return mods;
+    }
+
     function handleKeydown(ev) {
       if (!isCaptureActive()) return;
       updateModsFromEvent(ev);
@@ -2308,7 +2317,6 @@
         ev.preventDefault();
         return;
       }
-      if (ev.metaKey) return;
       const mode = kbModeEl.value;
       if (ev.key === "[" || ev.key === "]") {
         const dir = ev.key === "[" ? -1 : 1;
@@ -2333,7 +2341,9 @@
         return;
       }
       if (mode === "text") {
-        if (ev.key.length === 1 && !ev.altKey) {
+        // In text mode we only send plain ASCII when no chord modifiers are held.
+        // Ctrl/Alt/Win combos must go through keycode mode, otherwise we'd just type the character.
+        if (ev.key.length === 1 && !ev.altKey && !ev.ctrlKey && !ev.metaKey) {
           const code = ev.key.charCodeAt(0);
           if (code > 127) {
             setHidStatus("non-ASCII ignored (use keycode mode for UA)");
@@ -2352,7 +2362,7 @@
         }
         return;
       }
-      const mapped = mapCodeToUsage(ev.code, ev.shiftKey);
+      const mapped = mapCodeToUsage(ev.code, modsFromEvent(ev));
       if (mapped) {
         wsSend(withItf({ type: "keyboard.press", usage: mapped.usage, mods: mapped.mods }, keyboardItf));
         setLastKey(ev.code);
@@ -2606,7 +2616,7 @@
     trackMjpegFrames();
     trackVideoFrames();
 
-    function mapCodeToUsage(code, shift) {
+    function mapCodeToUsage(code, modsMask) {
       const map = {
         KeyA: 4, KeyB: 5, KeyC: 6, KeyD: 7, KeyE: 8, KeyF: 9, KeyG: 10, KeyH: 11,
         KeyI: 12, KeyJ: 13, KeyK: 14, KeyL: 15, KeyM: 16, KeyN: 17, KeyO: 18,
@@ -2630,9 +2640,7 @@
       };
       const usage = map[code];
       if (!usage) return null;
-      let mods = 0;
-      if (shift) mods |= 0x02;
-      return { usage, mods };
+      return { usage, mods: modsMask ?? 0 };
     }
 
     function savePrefs() {

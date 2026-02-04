@@ -328,7 +328,8 @@
       if (!e.code) return;
       const usage = codeToUsage(e.code);
       if (usage !== null) {
-        send({ type: "keyboard.down", usage, itfSel: parseInt(kbdItf.value, 10), label: e.key });
+        const mods = modsFromEvent(e);
+        send({ type: "keyboard.down", usage, mods, itfSel: parseInt(kbdItf.value, 10), label: e.key });
       }
     });
     kbdCapture.addEventListener("keyup", (e) => {
@@ -336,10 +337,20 @@
       if (!e.code) return;
       const usage = codeToUsage(e.code);
       if (usage !== null) {
-        send({ type: "keyboard.up", usage, itfSel: parseInt(kbdItf.value, 10), label: e.key });
+        const mods = modsFromEvent(e);
+        send({ type: "keyboard.up", usage, mods, itfSel: parseInt(kbdItf.value, 10), label: e.key });
       }
     });
     kbdCapture.tabIndex = 0;
+
+    function modsFromEvent(e) {
+      let mods = 0;
+      if (e.ctrlKey) mods |= 0x01;
+      if (e.shiftKey) mods |= 0x02;
+      if (e.altKey) mods |= 0x04;
+      if (e.metaKey) mods |= 0x08;
+      return mods;
+    }
 
     function codeToUsage(code) {
       const map = {
@@ -352,7 +363,9 @@
         Digit9: 38, Digit0: 39, Enter: 40, Escape: 41, Backspace: 42,
         Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47,
         BracketRight: 48, Backslash: 49, Semicolon: 51, Quote: 52,
-        Backquote: 53, Comma: 54, Period: 55, Slash: 56
+        Backquote: 53, Comma: 54, Period: 55, Slash: 56,
+        ControlLeft: 224, ShiftLeft: 225, AltLeft: 226, MetaLeft: 227,
+        ControlRight: 228, ShiftRight: 229, AltRight: 230, MetaRight: 231
       };
       return Object.prototype.hasOwnProperty.call(map, code) ? map[code] : null;
     }
