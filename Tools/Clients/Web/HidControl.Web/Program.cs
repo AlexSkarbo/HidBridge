@@ -86,6 +86,11 @@ app.MapGet("/", () =>
     <h3>Keyboard</h3>
     <div class="row">
       <input id="text" style="min-width: 260px" placeholder="text (ASCII)" />
+      <select id="textLayout">
+        <option value="ascii" selected>ASCII</option>
+        <option value="uk">UA (layout-dependent)</option>
+        <option value="ru">RU (layout-dependent)</option>
+      </select>
       <button id="sendText">Send Text</button>
     </div>
     <div class="row">
@@ -144,7 +149,8 @@ app.MapGet("/", () =>
 
     document.getElementById("sendText").onclick = async () => {
       const text = document.getElementById("text").value;
-      await post("/api/keyboard/text", { text });
+      const layout = document.getElementById("textLayout").value;
+      await post("/api/keyboard/text", { text, layout });
     };
 
     document.getElementById("sendPress").onclick = async () => {
@@ -189,7 +195,7 @@ app.MapPost("/api/keyboard/text", async (KeyboardTextRequest req, CancellationTo
 {
     Uri baseUri = new Uri(serverUrl);
     string resp = await SendWsOnceAsync(baseUri, token, (ws, c) =>
-        ws.SendKeyboardTextAsync(req.Text ?? "", itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
+        ws.SendKeyboardTextAsync(req.Text ?? "", layout: req.Layout, itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
 
     return Results.Text(resp, "application/json");
 });
@@ -286,7 +292,7 @@ static object ParseJsonOrString(string s)
 }
 
 internal sealed record KeyboardShortcutRequest(string Shortcut, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
-internal sealed record KeyboardTextRequest(string? Text, byte? ItfSel = null);
+internal sealed record KeyboardTextRequest(string? Text, string? Layout = null, byte? ItfSel = null);
 internal sealed record KeyboardPressApiRequest(string? Usage, string? Mods, byte? ItfSel = null);
 internal sealed record MouseMoveApiRequest(int? Dx, int? Dy, byte? ItfSel = null);
 internal sealed record MouseClickApiRequest(string? Button, byte? ItfSel = null);

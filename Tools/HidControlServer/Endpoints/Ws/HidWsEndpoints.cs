@@ -375,6 +375,7 @@ public static class HidWsEndpoints
                             case "keyboard.text":
                             {
                                 string text = root.TryGetProperty("text", out var te) ? (te.GetString() ?? "") : "";
+                                string? layout = root.TryGetProperty("layout", out var lo) ? lo.GetString() : null;
                                 if (string.IsNullOrEmpty(text))
                                 {
                                     await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
@@ -389,7 +390,7 @@ public static class HidWsEndpoints
                                 await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ctx.RequestAborted);
                                 foreach (char ch in text)
                                 {
-                                    if (!HidReports.TryMapAsciiToHidKey(ch, out byte modifiers, out byte usage))
+                                    if (!HidReports.TryMapTextToHidKey(ch, layout, out byte modifiers, out byte usage))
                                     {
                                         await SendAsync(new { ok = false, type, id = msgId, error = $"unsupported_char_{(int)ch:X4}" }, ctx.RequestAborted);
                                         return;

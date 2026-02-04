@@ -133,7 +133,7 @@ public static class UartEndpoints
                     string text = payload.TryGetProperty("text", out var textProp) ? (textProp.GetString() ?? string.Empty) : string.Empty;
                     foreach (char ch in text)
                     {
-                        if (!HidReports.TryMapAsciiToHidKey(ch, out byte modifiers, out byte usage))
+                        if (!HidReports.TryMapTextToHidKey(ch, layout: null, out byte modifiers, out byte usage))
                         {
                             await SendNackAsync(seq, "bad_payload");
                             return false;

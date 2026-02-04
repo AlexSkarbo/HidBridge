@@ -82,6 +82,7 @@ public static class HidWsHidExtensions
     public static Task SendKeyboardTextAsync(
         this HidControlWsClient ws,
         string text,
+        string? layout = null,
         byte? itfSel = null,
         string? id = null,
         CancellationToken ct = default)
@@ -91,6 +92,7 @@ public static class HidWsHidExtensions
             type = "keyboard.text",
             id,
             text,
+            layout,
             itfSel
         };
         return ws.SendJsonAsync(msg, DefaultJson, ct);

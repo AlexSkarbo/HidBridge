@@ -7,6 +7,44 @@ namespace HidControl.Core;
 public static class HidReports
 {
     /// <summary>
+    /// Tries to map a character into a HID key press for a given keyboard layout.
+    /// Notes:
+    /// - HID usages represent physical keys; for non-ASCII layouts (ru/uk) the target OS must have that layout active.
+    /// - Layout values: "ascii" (default), "ru", "uk".
+    /// </summary>
+    /// <param name="ch">Input character.</param>
+    /// <param name="layout">Layout name.</param>
+    /// <param name="modifiers">Modifier bitmask (Shift=0x02).</param>
+    /// <param name="usage">HID usage (0..255).</param>
+    /// <returns>True if mapped.</returns>
+    public static bool TryMapTextToHidKey(char ch, string? layout, out byte modifiers, out byte usage)
+    {
+        // Always allow ASCII mapping regardless of requested layout.
+        if (TryMapAsciiToHidKey(ch, out modifiers, out usage))
+        {
+            return true;
+        }
+
+        string lay = string.IsNullOrWhiteSpace(layout) ? "ascii" : layout.Trim().ToLowerInvariant();
+        switch (lay)
+        {
+            case "ru":
+            case "ru-ru":
+            case "russian":
+                return TryMapRussianToHidKey(ch, out modifiers, out usage);
+            case "uk":
+            case "uk-ua":
+            case "ua":
+            case "ukrainian":
+                return TryMapUkrainianToHidKey(ch, out modifiers, out usage);
+            default:
+                modifiers = 0;
+                usage = 0;
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Builds mouse from layout.
     /// </summary>
     /// <param name="layout">The layout.</param>
@@ -340,6 +378,123 @@ public static class HidReports
         }
 
         return false;
+    }
+
+    private static bool TryMapRussianToHidKey(char ch, out byte modifiers, out byte usage)
+    {
+        const byte Shift = 0x02;
+        bool isUpper = char.IsUpper(ch);
+        char c = char.ToLowerInvariant(ch);
+
+        // Standard RU layout (JCUKEN) mapped onto US physical keys (HID usages).
+        // q w e r t y u i o p [ ] ` ; ' , . /
+        usage = c switch
+        {
+            'ё' => 0x35, // `~
+            'й' => 0x14, // Q
+            'ц' => 0x1A, // W
+            'у' => 0x08, // E
+            'к' => 0x15, // R
+            'е' => 0x17, // T
+            'н' => 0x1C, // Y
+            'г' => 0x18, // U
+            'ш' => 0x0C, // I
+            'щ' => 0x12, // O
+            'з' => 0x13, // P
+            'х' => 0x2F, // [
+            'ъ' => 0x30, // ]
+
+            'ф' => 0x04, // A
+            'ы' => 0x16, // S
+            'в' => 0x07, // D
+            'а' => 0x09, // F
+            'п' => 0x0A, // G
+            'р' => 0x0B, // H
+            'о' => 0x0D, // J
+            'л' => 0x0E, // K
+            'д' => 0x0F, // L
+            'ж' => 0x33, // ;
+            'э' => 0x34, // '
+
+            'я' => 0x1D, // Z
+            'ч' => 0x1B, // X
+            'с' => 0x06, // C
+            'м' => 0x19, // V
+            'и' => 0x05, // B
+            'т' => 0x11, // N
+            'ь' => 0x10, // M
+            'б' => 0x36, // ,
+            'ю' => 0x37, // .
+
+            _ => (byte)0
+        };
+
+        if (usage == 0)
+        {
+            modifiers = 0;
+            return false;
+        }
+
+        modifiers = isUpper ? Shift : (byte)0;
+        return true;
+    }
+
+    private static bool TryMapUkrainianToHidKey(char ch, out byte modifiers, out byte usage)
+    {
+        const byte Shift = 0x02;
+        bool isUpper = char.IsUpper(ch);
+        char c = char.ToLowerInvariant(ch);
+
+        // Standard UA layout (similar to RU, with extra letters).
+        usage = c switch
+        {
+            'ґ' => 0x35, // `~
+            'й' => 0x14, // Q
+            'ц' => 0x1A, // W
+            'у' => 0x08, // E
+            'к' => 0x15, // R
+            'е' => 0x17, // T
+            'н' => 0x1C, // Y
+            'г' => 0x18, // U
+            'ш' => 0x0C, // I
+            'щ' => 0x12, // O
+            'з' => 0x13, // P
+            'х' => 0x2F, // [
+            'ї' => 0x30, // ]
+
+            'ф' => 0x04, // A
+            'і' => 0x16, // S
+            'в' => 0x07, // D
+            'а' => 0x09, // F
+            'п' => 0x0A, // G
+            'р' => 0x0B, // H
+            'о' => 0x0D, // J
+            'л' => 0x0E, // K
+            'д' => 0x0F, // L
+            'ж' => 0x33, // ;
+            'є' => 0x34, // '
+
+            'я' => 0x1D, // Z
+            'ч' => 0x1B, // X
+            'с' => 0x06, // C
+            'м' => 0x19, // V
+            'и' => 0x05, // B
+            'т' => 0x11, // N
+            'ь' => 0x10, // M
+            'б' => 0x36, // ,
+            'ю' => 0x37, // .
+
+            _ => (byte)0
+        };
+
+        if (usage == 0)
+        {
+            modifiers = 0;
+            return false;
+        }
+
+        modifiers = isUpper ? Shift : (byte)0;
+        return true;
     }
 
     /// <summary>

@@ -123,7 +123,8 @@ public static class KeyboardEndpoints
             await ReportLayoutService.EnsureReportLayoutAsync(uart, itfSel, ct);
             foreach (char ch in req.Text)
             {
-                if (!HidReports.TryMapAsciiToHidKey(ch, out byte modifiers, out byte usage))
+                // REST endpoint supports the same layouts as WS; keep default as ASCII for safety.
+                if (!HidReports.TryMapTextToHidKey(ch, layout: null, out byte modifiers, out byte usage))
                 {
                     return Results.BadRequest(new { ok = false, error = $"Unsupported char: U+{(int)ch:X4}" });
                 }
