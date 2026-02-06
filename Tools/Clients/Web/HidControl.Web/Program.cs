@@ -394,6 +394,7 @@ app.MapGet("/", () =>
 	        const s = rtcStatus.textContent;
 	        if (s === "datachannel: open") return true;
 	        if (s === "no_local_candidates") return false;
+	        if (s && (s.startsWith("error:") || s === "room_full" || s === "disconnected")) return false;
 	        await new Promise(r => setTimeout(r, 50));
 	      }
 	      return false;

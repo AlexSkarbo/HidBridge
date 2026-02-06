@@ -69,6 +69,12 @@
         const msg = safeJsonParse(ev.data);
         if (!msg || !msg.type) return;
 
+        if (msg.type === "webrtc.error") {
+          log(msg.type, msg);
+          setStatus("error: " + (msg.error || "unknown"));
+          return;
+        }
+
         if (msg.type === "webrtc.hello" || msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined") {
           log(msg.type, msg);
           return;

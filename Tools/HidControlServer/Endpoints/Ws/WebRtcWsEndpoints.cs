@@ -14,6 +14,8 @@ namespace HidControlServer.Endpoints.Ws;
 public static class WebRtcWsEndpoints
 {
     private static readonly ConcurrentDictionary<string, RoomState> Rooms = new(StringComparer.OrdinalIgnoreCase);
+    private const string ControlRoomId = "control";
+    private const int ControlRoomMaxPeers = 2;
 
     /// <summary>
     /// Maps the WebRTC signaling endpoint at <c>/ws/webrtc</c>.
@@ -82,6 +84,23 @@ public static class WebRtcWsEndpoints
 
                         roomId = normalized;
                         RoomState room = Rooms.GetOrAdd(roomId, _ => new RoomState());
+
+                        // For the default control room, enforce a single controller + a single helper.
+                        if (string.Equals(roomId, ControlRoomId, StringComparison.OrdinalIgnoreCase) &&
+                            room.Clients.Count >= ControlRoomMaxPeers)
+                        {
+                            await client.SendJsonAsync(new
+                            {
+                                ok = false,
+                                type = "webrtc.error",
+                                error = "room_full",
+                                room = roomId,
+                                peers = room.Clients.Count
+                            }, ctx.RequestAborted);
+                            roomId = null;
+                            continue;
+                        }
+
                         room.Clients[clientId] = client;
 
                         await client.SendJsonAsync(new
@@ -107,13 +126,11 @@ public static class WebRtcWsEndpoints
 
                     if (string.Equals(mType, "signal", StringComparison.OrdinalIgnoreCase))
                     {
-                        string effectiveRoom = roomId ?? mRoom;
-                        if (!TryNormalizeRoomId(effectiveRoom, out string normalized, out string? err))
+                        if (roomId is null)
                         {
-                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = err ?? "bad_room" }, ctx.RequestAborted);
+                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = "not_joined" }, ctx.RequestAborted);
                             continue;
                         }
-                        roomId = normalized;
 
                         await BroadcastAsync(roomId, clientId, new
                         {
