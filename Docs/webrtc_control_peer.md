@@ -33,7 +33,9 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 ## Notes
 
 - STUN is required for many environments. Default: `stun:stun.l.google.com:19302`.
-- TURN support is not included in this MVP step.
+- Some Chromium-based browsers (Edge/Opera) may produce **0 ICE candidates** in hardened environments.
+  - In that case, STUN-only cannot work and you need a TURN relay.
+  - See `Docs/turn_setup.md` (coturn + TURN REST ephemeral credentials).
 - `WebRtcControlPeer` requires Go 1.21+ (some Pion transport dependencies require `sync/atomic.Bool`).
 
 ## Optional Auto-Start (Server)

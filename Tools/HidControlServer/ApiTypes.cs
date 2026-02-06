@@ -125,6 +125,10 @@ public static class Hex
 /// <param name="WebRtcControlPeerAutoStart">WebRtcControlPeerAutoStart.</param>
 /// <param name="WebRtcControlPeerRoom">WebRtcControlPeerRoom.</param>
 /// <param name="WebRtcControlPeerStun">WebRtcControlPeerStun.</param>
+/// <param name="WebRtcTurnUrls">WebRtcTurnUrls.</param>
+/// <param name="WebRtcTurnSharedSecret">WebRtcTurnSharedSecret.</param>
+/// <param name="WebRtcTurnTtlSeconds">WebRtcTurnTtlSeconds.</param>
+/// <param name="WebRtcTurnUsername">WebRtcTurnUsername.</param>
 public sealed record Options(
     string SerialPort,
     bool SerialAuto,
@@ -199,7 +203,11 @@ public sealed record Options(
     int ServerEventLogMaxEntries,
     bool WebRtcControlPeerAutoStart,
     string WebRtcControlPeerRoom,
-    string WebRtcControlPeerStun)
+    string WebRtcControlPeerStun,
+    IReadOnlyList<string> WebRtcTurnUrls,
+    string WebRtcTurnSharedSecret,
+    int WebRtcTurnTtlSeconds,
+    string WebRtcTurnUsername)
 {
     /// <summary>
     /// Maps server options to minimal video options DTO.
@@ -516,7 +524,11 @@ public sealed record Options(
         int? ServerEventLogMaxEntries,
         bool? WebRtcControlPeerAutoStart,
         string? WebRtcControlPeerRoom,
-        string? WebRtcControlPeerStun);
+        string? WebRtcControlPeerStun,
+        List<string>? WebRtcTurnUrls,
+        string? WebRtcTurnSharedSecret,
+        int? WebRtcTurnTtlSeconds,
+        string? WebRtcTurnUsername);
 
     /// <summary>
     /// Parses parse.
@@ -747,6 +759,10 @@ public sealed record Options(
         bool webRtcControlPeerAutoStart = cfg?.WebRtcControlPeerAutoStart ?? false;
         string webRtcControlPeerRoom = cfg?.WebRtcControlPeerRoom ?? "control";
         string webRtcControlPeerStun = cfg?.WebRtcControlPeerStun ?? "stun:stun.l.google.com:19302";
+        IReadOnlyList<string> webRtcTurnUrls = cfg?.WebRtcTurnUrls ?? new List<string>();
+        string webRtcTurnSharedSecret = cfg?.WebRtcTurnSharedSecret ?? string.Empty;
+        int webRtcTurnTtlSeconds = cfg?.WebRtcTurnTtlSeconds ?? 3600;
+        string webRtcTurnUsername = cfg?.WebRtcTurnUsername ?? "hidbridge";
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1200,7 +1216,11 @@ public sealed record Options(
             serverEventLogMaxEntries,
             webRtcControlPeerAutoStart,
             webRtcControlPeerRoom,
-            webRtcControlPeerStun);
+            webRtcControlPeerStun,
+            webRtcTurnUrls,
+            webRtcTurnSharedSecret,
+            webRtcTurnTtlSeconds,
+            webRtcTurnUsername);
     }
 }
 

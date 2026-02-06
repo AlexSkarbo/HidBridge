@@ -122,7 +122,7 @@ func main() {
 			continue
 		}
 
-		peer.handleSignal(ctx, env.Data)
+		peer.handleSignal(ctx, env.From, env.Data)
 	}
 }
 
@@ -133,6 +133,10 @@ type peerState struct {
 
 	pcMu sync.Mutex
 	pc   *webrtc.PeerConnection
+	// activePeerId is the signaling "from" peer that we're currently paired with.
+	// This tool maintains a single PeerConnection; without pairing, multiple browser tabs
+	// joining the same room would fight over the session and break existing connections.
+	activePeerId string
 }
 
 func newPeerState(stun, room string, sigWS *websocket.Conn, sendToHid func(string) (string, error)) *peerState {
@@ -141,6 +145,7 @@ func newPeerState(stun, room string, sigWS *websocket.Conn, sendToHid func(strin
 		sigWS:     sigWS,
 		sendToHid: sendToHid,
 		pc:        nil,
+		activePeerId: "",
 	}
 }
 
@@ -181,6 +186,7 @@ func (p *peerState) ensurePC(ctx context.Context, stun string) (*webrtc.PeerConn
 			p.pcMu.Lock()
 			defer p.pcMu.Unlock()
 			p.pc = nil
+			p.activePeerId = ""
 		}
 	})
 
@@ -209,7 +215,7 @@ func (p *peerState) ensurePC(ctx context.Context, stun string) (*webrtc.PeerConn
 	return pc, nil
 }
 
-func (p *peerState) handleSignal(ctx context.Context, data json.RawMessage) {
+func (p *peerState) handleSignal(ctx context.Context, from string, data json.RawMessage) {
 	// Determine if it's offer/answer/candidate.
 	var kind struct {
 		Kind string `json:"kind"`
@@ -220,12 +226,19 @@ func (p *peerState) handleSignal(ctx context.Context, data json.RawMessage) {
 
 	switch kind.Kind {
 	case "offer":
+		if !p.tryAdoptPeer(from) {
+			log.Printf("ignoring offer from %q (active=%q)", from, p.getActivePeerId())
+			return
+		}
 		var offer sdpPayload
 		if err := json.Unmarshal(data, &offer); err != nil {
 			return
 		}
 		p.onOffer(ctx, offer.SDP)
 	case "candidate":
+		if !p.isActivePeer(from) {
+			return
+		}
 		var cand candidatePayload
 		if err := json.Unmarshal(data, &cand); err != nil {
 			return
@@ -237,6 +250,39 @@ func (p *peerState) handleSignal(ctx context.Context, data json.RawMessage) {
 	default:
 		// ignore
 	}
+}
+
+func (p *peerState) getActivePeerId() string {
+	p.pcMu.Lock()
+	defer p.pcMu.Unlock()
+	return p.activePeerId
+}
+
+func (p *peerState) isActivePeer(from string) bool {
+	p.pcMu.Lock()
+	defer p.pcMu.Unlock()
+	if p.activePeerId == "" {
+		return false
+	}
+	return p.activePeerId == from
+}
+
+// tryAdoptPeer sets activePeerId if it's not set yet.
+// Returns true if "from" is now the active peer (either adopted or already active).
+func (p *peerState) tryAdoptPeer(from string) bool {
+	if strings.TrimSpace(from) == "" {
+		// If signaling doesn't provide a "from", pairing can't work. Fail closed to avoid
+		// destabilizing an existing session.
+		return false
+	}
+
+	p.pcMu.Lock()
+	defer p.pcMu.Unlock()
+	if p.activePeerId == "" {
+		p.activePeerId = from
+		return true
+	}
+	return p.activePeerId == from
 }
 
 func (p *peerState) onOffer(ctx context.Context, offer webrtc.SessionDescription) {
@@ -323,4 +369,3 @@ func envOr(name, fallback string) string {
 	}
 	return v
 }
-

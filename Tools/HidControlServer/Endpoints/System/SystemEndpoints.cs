@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using HidControlServer;
 using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
@@ -112,6 +114,45 @@ public static class SystemEndpoints
         {
             var items = ServerEventLog.GetRecent(limit);
             return Results.Ok(new { ok = true, items });
+        });
+
+        // WebRTC ICE servers for browser clients. Useful for TURN REST ephemeral credentials.
+        //
+        // Note: This endpoint is under `/status/*` so it can be accessed when token auth is enabled
+        // (same auth rules as `/ws/*`).
+        app.MapGet("/status/webrtc/ice", (Options opt) =>
+        {
+            var iceServers = new List<object>();
+            if (!string.IsNullOrWhiteSpace(opt.WebRtcControlPeerStun))
+            {
+                iceServers.Add(new { urls = new[] { opt.WebRtcControlPeerStun } });
+            }
+
+            // TURN REST credentials (coturn: --use-auth-secret --static-auth-secret=...).
+            if (opt.WebRtcTurnUrls.Count > 0 && !string.IsNullOrWhiteSpace(opt.WebRtcTurnSharedSecret))
+            {
+                int ttl = Math.Clamp(opt.WebRtcTurnTtlSeconds, 60, 24 * 60 * 60);
+                long expires = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ttl;
+                string userPart = string.IsNullOrWhiteSpace(opt.WebRtcTurnUsername) ? "hidbridge" : opt.WebRtcTurnUsername.Trim();
+                string username = $"{expires}:{userPart}";
+
+                byte[] key = Encoding.UTF8.GetBytes(opt.WebRtcTurnSharedSecret);
+                byte[] msg = Encoding.UTF8.GetBytes(username);
+                using var hmac = new HMACSHA1(key);
+                string credential = Convert.ToBase64String(hmac.ComputeHash(msg));
+
+                iceServers.Add(new
+                {
+                    urls = opt.WebRtcTurnUrls,
+                    username,
+                    credential,
+                    credentialType = "password"
+                });
+
+                return Results.Ok(new { ok = true, ttlSeconds = ttl, iceServers });
+            }
+
+            return Results.Ok(new { ok = true, iceServers });
         });
 
         app.MapGet("/serial/ports", () =>

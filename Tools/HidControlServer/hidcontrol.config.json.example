@@ -136,5 +136,17 @@
   "videoMjpegReadBufferBytes": 16384,
   "videoMjpegMaxFrameBytes": 4194304,
   "videoModesCacheTtlSeconds": 300,
-  "devicesCacheMaxAgeSeconds": 600
+  "devicesCacheMaxAgeSeconds": 600,
+
+  "webRtcControlPeerAutoStart": false,
+  "webRtcControlPeerRoom": "control",
+  "webRtcControlPeerStun": "stun:stun.l.google.com:19302",
+
+  "webRtcTurnUrls": [
+    "turn:localhost:3478?transport=udp",
+    "turn:localhost:3478?transport=tcp"
+  ],
+  "webRtcTurnSharedSecret": "REPLACE_WITH_STRONG_SECRET",
+  "webRtcTurnTtlSeconds": 3600,
+  "webRtcTurnUsername": "hidbridge"
 }

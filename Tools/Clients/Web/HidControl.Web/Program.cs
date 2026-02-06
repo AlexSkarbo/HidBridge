@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Linq;
 using HidControl.ClientSdk;
 using System.Net.WebSockets;
+using System.Net.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,10 @@ app.UseStaticFiles();
 
 string serverUrl = Environment.GetEnvironmentVariable("HIDBRIDGE_SERVER_URL") ?? "http://127.0.0.1:8080";
 string? token = Environment.GetEnvironmentVariable("HIDBRIDGE_TOKEN");
+
+// Suppress noisy 404s in dev-tools scenarios.
+app.MapGet("/favicon.ico", () => Results.Text("", "image/x-icon"));
+app.MapGet("/_vs/browserLink", () => Results.Text("", "application/javascript"));
 
 static Uri ToWsUri(Uri httpBase, string path)
 {
@@ -163,29 +168,31 @@ app.MapGet("/", () =>
     </div>
   </div>
 
-  <div class="card">
-    <h3>WebRTC Signaling Demo (DataChannel)</h3>
-    <div class="row muted">
-      This uses a minimal signaling relay: browser &harr; <code>HidControl.Web</code> &harr; <code>HidControlServer</code> (<code>/ws/webrtc</code>).
-      For browser-to-browser tests: open this page in <b>two tabs</b>, use the same room, then click <b>Call</b> in one tab.
-      For browser-to-server control tests: run <code>Tools/WebRtcControlPeer</code> and then click <b>Call</b> in a single tab.
-    </div>
-    <div class="row">
-      <input id="rtcRoom" style="min-width: 220px" value="demo" />
-      <button id="rtcJoin">Join</button>
-      <button id="rtcCall">Call</button>
-      <button id="rtcHangup">Hangup</button>
-    </div>
-    <div class="row">
-      <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
-    </div>
-    <div class="row">
-      <input id="rtcSend" style="min-width: 520px" value='{"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' placeholder='JSON to forward to /ws/hid, e.g. {"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' />
-      <button id="rtcSendBtn">Send</button>
-    </div>
-    <div class="row muted" id="rtcStatus">disconnected</div>
-    <pre id="rtcOut">webrtc: ready</pre>
-  </div>
+	  <div class="card">
+	    <h3>WebRTC Signaling Demo (DataChannel)</h3>
+	    <div class="row muted">
+	      This uses a minimal signaling relay: browser &harr; <code>HidControl.Web</code> &harr; <code>HidControlServer</code> (<code>/ws/webrtc</code>).
+	      For browser-to-browser tests: open this page in <b>two tabs</b>, use the same room, then click <b>Call</b> in one tab.
+	      For browser-to-server control tests: run <code>Tools/WebRtcControlPeer</code> and then click <b>Call</b> in a single tab.
+	    </div>
+	    <div class="row">
+	      <input id="rtcRoom" style="min-width: 220px" value="control" />
+	      <button id="rtcConnect">Connect</button>
+	      <button id="rtcJoin" title="Debug: join without calling">Join</button>
+	      <button id="rtcCall" title="Debug: call (create datachannel + offer)">Call</button>
+	      <button id="rtcHangup">Hangup</button>
+	    </div>
+	    <div class="row">
+	      <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
+	      <label class="muted"><input id="rtcRelayOnly" type="checkbox" /> Force TURN relay</label>
+	    </div>
+	    <div class="row">
+	      <input id="rtcSend" style="min-width: 520px" value='{"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' placeholder='JSON to forward to /ws/hid, e.g. {"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' />
+	      <button id="rtcSendBtn" disabled>Send</button>
+	    </div>
+	    <div class="row muted" id="rtcStatus">disconnected</div>
+	    <pre id="rtcOut">webrtc: ready</pre>
+	  </div>
 
 	  <pre id="out">ready</pre>
 
@@ -314,251 +321,17 @@ app.MapGet("/", () =>
       await post("/api/keyboard/chord", { mods: lastCaptured.mods, keys: lastCaptured.keys, holdMs });
     };
 
-    // Legacy inline WebRTC demo (kept for reference). Do not execute.
-    if (false) {
-    let sig = null;
-    let pc = null;
-    let dc = null;
-    let pendingCandidates = [];
-    const rtcStatus = document.getElementById("rtcStatus");
-    const PeerConnectionCtor = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
-    let rtcDebugSeq = 0;
-
-    function rtcLog(kind, payload) {
-      rtcDebugSeq++;
-      const line = JSON.stringify({ webrtc: kind, seq: rtcDebugSeq, payload });
-      const lines = rtcOut.textContent.split("\n");
-      lines.push(line);
-      while (lines.length > 60) lines.shift();
-      rtcOut.textContent = lines.join("\n");
-    }
-
-    function setRtcStatus(s) { rtcStatus.textContent = s; }
-
-    function getIceServers() {
-      const t = document.getElementById("rtcIce").value.trim();
-      if (!t) return [{ urls: "stun:stun.l.google.com:19302" }];
-      try { return JSON.parse(t); } catch { return []; }
-    }
-
-    function ensureSig() {
-      if (sig && (sig.readyState === WebSocket.OPEN || sig.readyState === WebSocket.CONNECTING)) return sig;
-
-      const proto = location.protocol === "https:" ? "wss://" : "ws://";
-      sig = new WebSocket(proto + location.host + "/ws/webrtc");
-      sig.onopen = () => setRtcStatus("signaling: open");
-      sig.onclose = () => setRtcStatus("signaling: closed");
-      sig.onerror = () => setRtcStatus("signaling: error");
-      sig.onmessage = async (ev) => {
-        let msg = null;
-        try { msg = JSON.parse(ev.data); } catch { return; }
-        if (!msg || !msg.type) return;
-
-        if (msg.type === "webrtc.hello") {
-          console.log("webrtc hello", msg);
-          rtcLog("hello", msg);
-          return;
-        }
-        if (msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined") {
-          console.log("webrtc room", msg);
-          rtcLog("room", msg);
-          return;
-        }
-
-        if (msg.type === "webrtc.signal" && msg.data) {
-          rtcLog("recv", msg);
-          const data = msg.data;
-          if (!pc) await ensurePc();
-
-          if (data.kind === "offer") {
-            await pc.setRemoteDescription(data.sdp);
-            // Apply any ICE candidates that arrived before the offer.
-            for (const c of pendingCandidates) {
-              try { await pc.addIceCandidate(c); } catch { /* ignore */ }
-            }
-            pendingCandidates = [];
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            await sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "answer", sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
-            return;
-          }
-          if (data.kind === "answer") {
-            await pc.setRemoteDescription(data.sdp);
-            // Apply any ICE candidates that arrived before the answer.
-            for (const c of pendingCandidates) {
-              try { await pc.addIceCandidate(c); } catch { /* ignore */ }
-            }
-            pendingCandidates = [];
-            return;
-          }
-          if (data.kind === "candidate") {
-            if (data.candidate) {
-              // Firefox uses empty-string candidates to signal end-of-candidates. Ignore those.
-              if (data.candidate.candidate === "") {
-                rtcLog("candidate.eoc_recv", data.candidate);
-                return;
-              }
-              // Some browsers deliver candidates before remote description is set.
-              if (!pc.remoteDescription || !pc.remoteDescription.type) {
-                pendingCandidates.push(data.candidate);
-              } else {
-                try { await pc.addIceCandidate(data.candidate); } catch { /* ignore */ }
-              }
-            }
-            return;
-          }
-        }
-      };
-      return sig;
-    }
-
-    async function waitSigOpen() {
-      const s = ensureSig();
-      if (s.readyState === WebSocket.OPEN) return;
-      if (s.readyState !== WebSocket.CONNECTING) throw new Error("signaling_not_open");
-      await new Promise((resolve, reject) => {
-        const onOpen = () => { cleanup(); resolve(); };
-        const onErr = () => { cleanup(); reject(new Error("signaling_error")); };
-        const onClose = () => { cleanup(); reject(new Error("signaling_closed")); };
-        function cleanup() {
-          s.removeEventListener("open", onOpen);
-          s.removeEventListener("error", onErr);
-          s.removeEventListener("close", onClose);
-        }
-        s.addEventListener("open", onOpen);
-        s.addEventListener("error", onErr);
-        s.addEventListener("close", onClose);
-      });
-    }
-
-    async function sigSend(obj) {
-      await waitSigOpen();
-      rtcLog("send", obj);
-      sig.send(JSON.stringify(obj));
-    }
-
-    async function ensurePc() {
-      if (pc) return pc;
-      if (typeof PeerConnectionCtor !== "function") {
-        const detail = {
-          ok: false,
-          error: "webrtc_not_supported",
-          rtcpType: typeof window.RTCPeerConnection,
-          proto: location.protocol,
-          ua: navigator.userAgent
-        };
-        setRtcStatus("WebRTC not supported in this browser/context");
-        show(detail);
-        throw new Error("webrtc_not_supported");
-      }
-
-      pc = new PeerConnectionCtor({ iceServers: getIceServers() });
-      pc.onicecandidate = (e) => {
-        if (!e.candidate) return;
-        const cand = (typeof e.candidate.toJSON === "function") ? e.candidate.toJSON() : e.candidate;
-        // Empty-string candidate = end-of-candidates (common in Firefox). Don't forward it as a real candidate.
-        if (cand && cand.candidate === "") {
-          rtcLog("candidate.eoc_local", cand);
-          return;
-        }
-        sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "candidate", candidate: cand } }).catch(() => {});
-      };
-      pc.onconnectionstatechange = () => {
-        setRtcStatus("pc: " + pc.connectionState);
-        rtcLog("pc.connectionState", pc.connectionState);
-      };
-      pc.oniceconnectionstatechange = () => console.log("ice:", pc.iceConnectionState);
-      pc.onsignalingstatechange = () => console.log("signaling:", pc.signalingState);
-      pc.onicegatheringstatechange = () => console.log("gathering:", pc.iceGatheringState);
-      pc.oniceconnectionstatechange = () => {
-        console.log("ice:", pc.iceConnectionState);
-        rtcLog("pc.iceConnectionState", pc.iceConnectionState);
-      };
-      pc.onsignalingstatechange = () => {
-        console.log("signaling:", pc.signalingState);
-        rtcLog("pc.signalingState", pc.signalingState);
-      };
-      pc.onicegatheringstatechange = () => {
-        console.log("gathering:", pc.iceGatheringState);
-        rtcLog("pc.iceGatheringState", pc.iceGatheringState);
-      };
-      pc.ondatachannel = (e) => {
-        dc = e.channel;
-        wireDc();
-      };
-      return pc;
-    }
-
-    function wireDc() {
-      if (!dc) return;
-      dc.onopen = () => setRtcStatus("datachannel: open");
-      dc.onclose = () => setRtcStatus("datachannel: closed");
-      dc.onerror = () => setRtcStatus("datachannel: error");
-      dc.onmessage = (e) => show({ webrtc: "message", data: e.data });
-    }
-
-    document.getElementById("rtcJoin").addEventListener("click", async () => {
-      const room = document.getElementById("rtcRoom").value.trim() || "demo";
-      rtcLog("ui.join_click", { room });
-      try {
-        await ensurePc();
-        await sigSend({ type: "join", room });
-        setRtcStatus("joined room: " + room);
-      } catch (e) {
-        rtcLog("ui.join_error", { room, error: String(e) });
-      }
-    });
-
-    document.getElementById("rtcCall").addEventListener("click", async () => {
-      const room = document.getElementById("rtcRoom").value.trim() || "demo";
-      rtcLog("ui.call_click", { room });
-      try {
-        const p = await ensurePc();
-        await sigSend({ type: "join", room });
-
-        dc = p.createDataChannel("data");
-        wireDc();
-
-        const offer = await p.createOffer();
-        await p.setLocalDescription(offer);
-        await sigSend({ type: "signal", room, data: { kind: "offer", sdp: { type: p.localDescription.type, sdp: p.localDescription.sdp } } });
-        setRtcStatus("calling...");
-      } catch (e) {
-        rtcLog("ui.call_error", { room, error: String(e) });
-      }
-    });
-
-    document.getElementById("rtcHangup").addEventListener("click", async () => {
-      rtcLog("ui.hangup_click", {});
-      try { if (sig && sig.readyState === WebSocket.OPEN) sig.send(JSON.stringify({ type: "leave" })); } catch {}
-      try { if (dc) dc.close(); } catch {}
-      try { if (pc) pc.close(); } catch {}
-      try { if (sig) sig.close(); } catch {}
-      sig = null; pc = null; dc = null;
-      pendingCandidates = [];
-      setRtcStatus("disconnected");
-    });
-
-    document.getElementById("rtcSendBtn").addEventListener("click", async () => {
-      const text = document.getElementById("rtcSend").value;
-      rtcLog("ui.send_click", { hasDc: !!dc, dcState: dc ? dc.readyState : null });
-      if (!dc || dc.readyState !== "open") {
-        show({ ok: false, error: "datachannel_not_open" });
-        return;
-      }
-      // The control peer forwards DataChannel messages to `/ws/hid`, which expects JSON.
-      try { JSON.parse(text); } catch {
-        show({ ok: false, error: "expected_json", hint: "{\"type\":\"keyboard.shortcut\",\"shortcut\":\"Ctrl+C\",\"holdMs\":80}" });
-        return;
-      }
-      dc.send(text);
-      show({ ok: true, sent: ParseJsonOrString(text) });
-    });
-    }
+    
 
     // --- WebRTC signaling demo (module) ---
-    const rtcStatus = document.getElementById("rtcStatus");
-    function setRtcStatus(s) { rtcStatus.textContent = s; }
+	    const rtcStatus = document.getElementById("rtcStatus");
+	    const rtcSendBtn = document.getElementById("rtcSendBtn");
+	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
+	    function setRtcStatus(s) {
+	      rtcStatus.textContent = s;
+	      const open = (s === "datachannel: open");
+	      rtcSendBtn.disabled = !open;
+	    }
 
     function getIceServers() {
       const t = document.getElementById("rtcIce").value.trim();
@@ -574,35 +347,108 @@ app.MapGet("/", () =>
       rtcOut.textContent = lines.join("\n");
     }
 
-    let webrtcClient = null;
-    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
-    function resetWebRtcClient() {
-      if (webrtcClient) {
-        try { webrtcClient.hangup(); } catch {}
-      }
-      webrtcClient = window.hidbridge.webrtcControl.createClient({
-        room: getRoom(),
-        iceServers: getIceServers(),
-        onLog: rtcLog,
-        onStatus: setRtcStatus,
-        onMessage: (data) => show({ webrtc: "message", data })
-      });
-    }
+	    let webrtcClient = null;
+	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
+	    function resetWebRtcClient() {
+	      if (webrtcClient) {
+	        try { webrtcClient.hangup(); } catch {}
+	      }
+	      if (!window.hidbridge || !window.hidbridge.webrtcControl || typeof window.hidbridge.webrtcControl.createClient !== "function") {
+	        const err = { ok: false, error: "webrtc_module_missing" };
+	        rtcLog(err);
+	        show(err);
+	        webrtcClient = null;
+	        return;
+	      }
+	      // Ensure we start from a clean UI state.
+	      setRtcStatus("disconnected");
+	      webrtcClient = window.hidbridge.webrtcControl.createClient({
+	        room: getRoom(),
+	        iceServers: getIceServers(),
+	        iceTransportPolicy: rtcRelayOnly.checked ? "relay" : "all",
+	        onLog: rtcLog,
+	        onStatus: setRtcStatus,
+	        onMessage: (data) => show({ webrtc: "message", data })
+	      });
+	    }
     resetWebRtcClient();
 
-    document.getElementById("rtcJoin").addEventListener("click", async () => {
-      resetWebRtcClient();
-      await webrtcClient.join();
-    });
+	    // Try to auto-load ICE servers from the server (TURN REST) if available.
+	    (async () => {
+	      try {
+	        const res = await fetch("/api/webrtc/ice");
+	        if (!res.ok) return;
+	        const j = await res.json();
+	        if (j && j.ok && Array.isArray(j.iceServers) && j.iceServers.length > 0) {
+	          document.getElementById("rtcIce").value = JSON.stringify(j.iceServers);
+	          // If TURN is configured, default to relay-only for browsers that don't provide host/srflx candidates.
+	          const hasTurn = j.iceServers.some(s => Array.isArray(s.urls) && s.urls.some(u => (u || "").startsWith("turn:") || (u || "").startsWith("turns:")));
+	          if (hasTurn) rtcRelayOnly.checked = true;
+	        }
+	      } catch {}
+	    })();
 
-    document.getElementById("rtcCall").addEventListener("click", async () => {
-      resetWebRtcClient();
-      await webrtcClient.call();
-    });
+	    async function connectWithTimeout(timeoutMs) {
+	      const start = Date.now();
+	      while (Date.now() - start < timeoutMs) {
+	        const s = rtcStatus.textContent;
+	        if (s === "datachannel: open") return true;
+	        if (s === "no_local_candidates") return false;
+	        await new Promise(r => setTimeout(r, 50));
+	      }
+	      return false;
+	    }
 
-    document.getElementById("rtcHangup").addEventListener("click", async () => {
-      if (webrtcClient) webrtcClient.hangup();
-    });
+	    document.getElementById("rtcConnect").addEventListener("click", async () => {
+	      resetWebRtcClient();
+	      if (!webrtcClient) return;
+	      try {
+	        await webrtcClient.call();
+	        const ok = await connectWithTimeout(15000);
+	        if (!ok) {
+	          rtcLog({ webrtc: "ui.connect_timeout", room: getRoom(), debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
+	          if (rtcStatus.textContent === "no_local_candidates") {
+	            show({
+	              ok: false,
+	              error: "no_local_candidates",
+	              hint: "This browser produced 0 ICE candidates. Try Chrome/Firefox or configure TURN in ICE servers JSON."
+	            });
+	          } else {
+	            show({ ok: false, error: "connect_timeout", debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
+	          }
+	        }
+	      } catch (e) {
+	        rtcLog({ webrtc: "ui.connect_error", error: String(e) });
+	        show({ ok: false, error: String(e) });
+	      }
+	    });
+
+		    document.getElementById("rtcJoin").addEventListener("click", async () => {
+		      resetWebRtcClient();
+		      if (!webrtcClient) return;
+		      try {
+		        await webrtcClient.join();
+		      } catch (e) {
+		        rtcLog({ webrtc: "ui.join_error", error: String(e) });
+		        show({ ok: false, error: String(e) });
+	      }
+	    });
+
+		    document.getElementById("rtcCall").addEventListener("click", async () => {
+		      resetWebRtcClient();
+		      if (!webrtcClient) return;
+		      try {
+		        await webrtcClient.call();
+		      } catch (e) {
+		        rtcLog({ webrtc: "ui.call_error", error: String(e) });
+		        show({ ok: false, error: String(e) });
+	      }
+	    });
+
+	    document.getElementById("rtcHangup").addEventListener("click", async () => {
+	      if (webrtcClient) webrtcClient.hangup();
+	      setRtcStatus("disconnected");
+	    });
 
     document.getElementById("rtcSendBtn").addEventListener("click", async () => {
       const text = document.getElementById("rtcSend").value;
@@ -635,6 +481,20 @@ app.MapPost("/api/shortcut", async (KeyboardShortcutRequest req, CancellationTok
         ws.SendKeyboardShortcutAsync(req.Shortcut, itfSel: req.ItfSel, holdMs: req.HoldMs ?? 80, applyMapping: req.ApplyMapping ?? true, id: Guid.NewGuid().ToString("N"), ct: c), ct);
 
     return Results.Text(resp, "application/json");
+});
+
+app.MapGet("/api/webrtc/ice", async (CancellationToken ct) =>
+{
+    // Fetch ICE servers from HidControlServer (may include TURN REST ephemeral credentials).
+    using var http = new HttpClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        http.DefaultRequestHeaders.Add("X-HID-Token", token);
+    }
+
+    string url = serverUrl.TrimEnd('/') + "/status/webrtc/ice";
+    string json = await http.GetStringAsync(url, ct);
+    return Results.Text(json, "application/json");
 });
 
 app.MapPost("/api/keyboard/text", async (KeyboardTextRequest req, CancellationToken ct) =>
