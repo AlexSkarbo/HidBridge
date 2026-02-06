@@ -122,6 +122,9 @@ public static class Hex
 /// <param name="VideoModesCacheTtlSeconds">VideoModesCacheTtlSeconds.</param>
 /// <param name="DevicesCacheMaxAgeSeconds">DevicesCacheMaxAgeSeconds.</param>
 /// <param name="ServerEventLogMaxEntries">ServerEventLogMaxEntries.</param>
+/// <param name="WebRtcControlPeerAutoStart">WebRtcControlPeerAutoStart.</param>
+/// <param name="WebRtcControlPeerRoom">WebRtcControlPeerRoom.</param>
+/// <param name="WebRtcControlPeerStun">WebRtcControlPeerStun.</param>
 public sealed record Options(
     string SerialPort,
     bool SerialAuto,
@@ -193,7 +196,10 @@ public sealed record Options(
     int VideoMjpegMaxFrameBytes,
     int VideoModesCacheTtlSeconds,
     int DevicesCacheMaxAgeSeconds,
-    int ServerEventLogMaxEntries)
+    int ServerEventLogMaxEntries,
+    bool WebRtcControlPeerAutoStart,
+    string WebRtcControlPeerRoom,
+    string WebRtcControlPeerStun)
 {
     /// <summary>
     /// Maps server options to minimal video options DTO.
@@ -507,7 +513,10 @@ public sealed record Options(
         int? VideoMjpegMaxFrameBytes,
         int? VideoModesCacheTtlSeconds,
         int? DevicesCacheMaxAgeSeconds,
-        int? ServerEventLogMaxEntries);
+        int? ServerEventLogMaxEntries,
+        bool? WebRtcControlPeerAutoStart,
+        string? WebRtcControlPeerRoom,
+        string? WebRtcControlPeerStun);
 
     /// <summary>
     /// Parses parse.
@@ -735,6 +744,9 @@ public sealed record Options(
         int videoModesCacheTtlSeconds = cfg?.VideoModesCacheTtlSeconds ?? 300;
         int devicesCacheMaxAgeSeconds = cfg?.DevicesCacheMaxAgeSeconds ?? 600;
         int serverEventLogMaxEntries = cfg?.ServerEventLogMaxEntries ?? 200;
+        bool webRtcControlPeerAutoStart = cfg?.WebRtcControlPeerAutoStart ?? false;
+        string webRtcControlPeerRoom = cfg?.WebRtcControlPeerRoom ?? "control";
+        string webRtcControlPeerStun = cfg?.WebRtcControlPeerStun ?? "stun:stun.l.google.com:19302";
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1160,7 +1172,35 @@ public sealed record Options(
         /// <param name="devicesCacheMaxAgeSeconds">The devicesCacheMaxAgeSeconds.</param>
         /// <param name="serverEventLogMaxEntries">The serverEventLogMaxEntries.</param>
         /// <returns>Result.</returns>
-        return new Options(serialPort, serialAuto, serialMatch, baud, url, bindAll, mouseMappingDb, pgConnectionString, migrateSqliteToPg, videoSources, videoProfiles, activeVideoProfile, mouseReportLen, injectQueueCapacity, injectDropThreshold, injectTimeoutMs, injectRetries, mouseMoveTimeoutMs, mouseMoveDropIfBusy, mouseMoveAllowZero, mouseWheelTimeoutMs, mouseWheelDropIfBusy, mouseWheelAllowZero, keyboardInjectTimeoutMs, keyboardInjectRetries, masterSecret, mouseItfSel, keyboardItfSel, mouseTypeName, keyboardTypeName, devicesAutoMuteLogs, devicesAutoRefreshMs, devicesIncludeReportDesc, devicesCachePath, uartHmacKey, mouseLeftMask, mouseRightMask, mouseMiddleMask, mouseBackMask, mouseForwardMask, token, ffmpegPath, ffmpegAutoStart, ffmpegWatchdogEnabled, ffmpegWatchdogIntervalMs, ffmpegRestartDelayMs, ffmpegMaxRestarts, ffmpegRestartWindowMs, videoRtspPort, videoSrtBasePort, videoSrtLatencyMs, videoRtmpPort, videoHlsDir, videoLlHls, videoHlsSegmentSeconds, videoHlsListSize, videoHlsDeleteSegments, videoLogDir, videoCaptureAutoStopFfmpeg, videoCaptureRetryCount, videoCaptureRetryDelayMs, videoCaptureLockTimeoutMs, videoSecondaryCaptureEnabled, videoKillOrphanFfmpeg, videoFlvBufferBytes, videoFlvReadBufferBytes, videoMjpegReadBufferBytes, videoMjpegMaxFrameBytes, videoModesCacheTtlSeconds, devicesCacheMaxAgeSeconds, serverEventLogMaxEntries);
+        return new Options(
+            serialPort, serialAuto, serialMatch, baud, url, bindAll,
+            mouseMappingDb, pgConnectionString, migrateSqliteToPg,
+            videoSources, videoProfiles, activeVideoProfile,
+            mouseReportLen, injectQueueCapacity, injectDropThreshold, injectTimeoutMs, injectRetries,
+            mouseMoveTimeoutMs, mouseMoveDropIfBusy, mouseMoveAllowZero,
+            mouseWheelTimeoutMs, mouseWheelDropIfBusy, mouseWheelAllowZero,
+            keyboardInjectTimeoutMs, keyboardInjectRetries,
+            masterSecret, mouseItfSel, keyboardItfSel, mouseTypeName, keyboardTypeName,
+            devicesAutoMuteLogs, devicesAutoRefreshMs, devicesIncludeReportDesc, devicesCachePath,
+            uartHmacKey,
+            mouseLeftMask, mouseRightMask, mouseMiddleMask, mouseBackMask, mouseForwardMask,
+            token,
+            ffmpegPath, ffmpegAutoStart,
+            ffmpegWatchdogEnabled, ffmpegWatchdogIntervalMs, ffmpegRestartDelayMs, ffmpegMaxRestarts, ffmpegRestartWindowMs,
+            videoRtspPort, videoSrtBasePort, videoSrtLatencyMs, videoRtmpPort,
+            videoHlsDir, videoLlHls, videoHlsSegmentSeconds, videoHlsListSize, videoHlsDeleteSegments,
+            videoLogDir,
+            videoCaptureAutoStopFfmpeg, videoCaptureRetryCount, videoCaptureRetryDelayMs, videoCaptureLockTimeoutMs,
+            videoSecondaryCaptureEnabled,
+            videoKillOrphanFfmpeg,
+            videoFlvBufferBytes, videoFlvReadBufferBytes,
+            videoMjpegReadBufferBytes, videoMjpegMaxFrameBytes,
+            videoModesCacheTtlSeconds,
+            devicesCacheMaxAgeSeconds,
+            serverEventLogMaxEntries,
+            webRtcControlPeerAutoStart,
+            webRtcControlPeerRoom,
+            webRtcControlPeerStun);
     }
 }
 

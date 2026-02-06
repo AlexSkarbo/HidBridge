@@ -30,7 +30,14 @@ cd Tools/WebRtcControlPeer
 export HIDBRIDGE_SERVER_URL="http://127.0.0.1:8080"
 export HIDBRIDGE_TOKEN=""
 export HIDBRIDGE_WEBRTC_ROOM="control"
+export HIDBRIDGE_STUN="stun:stun.l.google.com:19302"
 go run .
+```
+
+Or use:
+
+```bash
+./run.sh "http://127.0.0.1:8080" "" "control"
 ```
 
 ## Test With Web UI

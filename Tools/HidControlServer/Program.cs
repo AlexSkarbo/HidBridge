@@ -75,6 +75,7 @@ builder.Services.AddSingleton(new MouseMappingStore(options.PgConnectionString))
 builder.Services.AddSingleton(new KeyboardMappingStore(options.PgConnectionString));
 builder.Services.AddSingleton(new VideoSourceStore(options.VideoSources));
 builder.Services.AddSingleton(new VideoProfileStore(options.VideoProfiles, options.ActiveVideoProfile));
+builder.Services.AddSingleton<WebRtcControlPeerSupervisor>();
 builder.Services.AddSingleton<HidControl.UseCases.Video.IVideoRuntime, HidControlServer.Adapters.Video.VideoRuntimeAdapter>();
 builder.Services.AddSingleton<HidControl.UseCases.Video.VideoRuntimeService>();
 builder.Services.AddSingleton<HidControl.UseCases.Video.IVideoRuntimeState, HidControlServer.Adapters.Video.VideoRuntimeStateAdapter>();
@@ -160,6 +161,11 @@ app.Lifetime.ApplicationStopping.Register(() =>
 {
     var client = app.Services.GetRequiredService<HidUartClient>();
     client.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    try
+    {
+        app.Services.GetRequiredService<WebRtcControlPeerSupervisor>().Stop();
+    }
+    catch { }
     foreach (var kvp in appState.FfmpegProcesses)
     {
         try { kvp.Value.Kill(true); } catch { }

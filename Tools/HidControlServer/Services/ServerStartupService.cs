@@ -35,6 +35,10 @@ internal static class ServerStartupService
         }
         DeviceCacheService.LoadDevicesCache(opt, appState);
         VideoStartupService.InitializeDefaultVideoOutput(opt, videoSources, appState, outputService);
+
+        // Optional WebRTC control helper auto-start (runs next to the server).
+        app.Services.GetRequiredService<WebRtcControlPeerSupervisor>().StartIfEnabled();
+
         if (opt.FfmpegAutoStart)
         {
             _ = Task.Run(() =>

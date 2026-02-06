@@ -35,3 +35,15 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 - STUN is required for many environments. Default: `stun:stun.l.google.com:19302`.
 - TURN support is not included in this MVP step.
 - `WebRtcControlPeer` requires Go 1.21+ (some Pion transport dependencies require `sync/atomic.Bool`).
+
+## Optional Auto-Start (Server)
+
+`HidControlServer` can auto-start the helper on boot when enabled in config:
+
+```json
+{
+  "webRtcControlPeerAutoStart": true,
+  "webRtcControlPeerRoom": "control",
+  "webRtcControlPeerStun": "stun:stun.l.google.com:19302"
+}
+```
