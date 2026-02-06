@@ -175,7 +175,7 @@ app.MapGet("/", () =>
       <button id="rtcHangup">Hangup</button>
     </div>
     <div class="row">
-      <input id="rtcIce" style="min-width: 420px" placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
+      <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
     </div>
     <div class="row">
       <input id="rtcSend" style="min-width: 320px" placeholder="message over data channel" />
@@ -333,7 +333,7 @@ app.MapGet("/", () =>
 
     function getIceServers() {
       const t = document.getElementById("rtcIce").value.trim();
-      if (!t) return [];
+      if (!t) return [{ urls: "stun:stun.l.google.com:19302" }];
       try { return JSON.parse(t); } catch { return []; }
     }
 
@@ -389,6 +389,11 @@ app.MapGet("/", () =>
           }
           if (data.kind === "candidate") {
             if (data.candidate) {
+              // Firefox uses empty-string candidates to signal end-of-candidates. Ignore those.
+              if (data.candidate.candidate === "") {
+                rtcLog("candidate.eoc_recv", data.candidate);
+                return;
+              }
               // Some browsers deliver candidates before remote description is set.
               if (!pc.remoteDescription || !pc.remoteDescription.type) {
                 pendingCandidates.push(data.candidate);
@@ -447,6 +452,11 @@ app.MapGet("/", () =>
       pc.onicecandidate = (e) => {
         if (!e.candidate) return;
         const cand = (typeof e.candidate.toJSON === "function") ? e.candidate.toJSON() : e.candidate;
+        // Empty-string candidate = end-of-candidates (common in Firefox). Don't forward it as a real candidate.
+        if (cand && cand.candidate === "") {
+          rtcLog("candidate.eoc_local", cand);
+          return;
+        }
         sigSend({ type: "signal", room: document.getElementById("rtcRoom").value, data: { kind: "candidate", candidate: cand } }).catch(() => {});
       };
       pc.onconnectionstatechange = () => {
