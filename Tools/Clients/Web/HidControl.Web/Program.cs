@@ -314,7 +314,8 @@ app.MapGet("/", () =>
       await post("/api/keyboard/chord", { mods: lastCaptured.mods, keys: lastCaptured.keys, holdMs });
     };
 
-    /* --- WebRTC signaling demo (legacy; moved to /webrtcControl.js) ---
+    // Legacy inline WebRTC demo (kept for reference). Do not execute.
+    if (false) {
     let sig = null;
     let pc = null;
     let dc = null;
@@ -553,7 +554,7 @@ app.MapGet("/", () =>
       dc.send(text);
       show({ ok: true, sent: ParseJsonOrString(text) });
     });
-    */
+    }
 
     // --- WebRTC signaling demo (module) ---
     const rtcStatus = document.getElementById("rtcStatus");
