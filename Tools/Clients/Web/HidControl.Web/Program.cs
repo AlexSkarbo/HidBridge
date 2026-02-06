@@ -166,7 +166,8 @@ app.MapGet("/", () =>
     <h3>WebRTC Signaling Demo (DataChannel)</h3>
     <div class="row muted">
       This uses a minimal signaling relay: browser &harr; <code>HidControl.Web</code> &harr; <code>HidControlServer</code> (<code>/ws/webrtc</code>).
-      Open this page in <b>two tabs</b>, use the same room, then click <b>Call</b> in one tab.
+      For browser-to-browser tests: open this page in <b>two tabs</b>, use the same room, then click <b>Call</b> in one tab.
+      For browser-to-server control tests: run <code>Tools/WebRtcControlPeer</code> and then click <b>Call</b> in a single tab.
     </div>
     <div class="row">
       <input id="rtcRoom" style="min-width: 220px" value="demo" />
