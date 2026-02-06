@@ -9,7 +9,7 @@ It allows us to use WebRTC for control-plane (keyboard/mouse) **without adding a
 
 ## Prereqs
 
-- Go 1.21+
+- Go 1.18+
 - HidControlServer running and reachable
 - If `HidControlServer` is configured with `Token`, provide it via `HIDBRIDGE_TOKEN`
 
@@ -42,4 +42,3 @@ go run .
    - click `Call`
    - wait for `datachannel: open`
    - click `Send` (it should forward to `/ws/hid` and return the server response)
-
