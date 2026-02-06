@@ -9,7 +9,7 @@ It allows us to use WebRTC for control-plane (keyboard/mouse) **without adding a
 
 ## Prereqs
 
-- Go 1.18+
+- Go 1.21+ (required due to dependencies using `sync/atomic.Bool`)
 - HidControlServer running and reachable
 - If `HidControlServer` is configured with `Token`, provide it via `HIDBRIDGE_TOKEN`
 
