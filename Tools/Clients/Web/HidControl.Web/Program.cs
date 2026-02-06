@@ -381,9 +381,13 @@ app.MapGet("/", () =>
 	        const j = await res.json();
 	        if (j && j.ok && Array.isArray(j.iceServers) && j.iceServers.length > 0) {
 	          document.getElementById("rtcIce").value = JSON.stringify(j.iceServers);
-	          // If TURN is configured, default to relay-only for browsers that don't provide host/srflx candidates.
+	          // If TURN is configured, we *optionally* force relay-only. Some browsers (Edge/Opera in hardened
+	          // environments) produce 0 candidates unless TURN is used. Chrome/Firefox usually work fine with "all".
 	          const hasTurn = j.iceServers.some(s => Array.isArray(s.urls) && s.urls.some(u => (u || "").startsWith("turn:") || (u || "").startsWith("turns:")));
-	          if (hasTurn) rtcRelayOnly.checked = true;
+	          const ua = navigator.userAgent || "";
+	          const isEdge = ua.includes("Edg/");
+	          const isOpera = ua.includes("OPR/") || ua.includes("Opera");
+	          if (hasTurn && (isEdge || isOpera)) rtcRelayOnly.checked = true;
 	        }
 	      } catch {}
 	    })();
