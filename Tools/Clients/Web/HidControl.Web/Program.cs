@@ -179,7 +179,7 @@ app.MapGet("/", () =>
       <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
     </div>
     <div class="row">
-      <input id="rtcSend" style="min-width: 320px" placeholder="message over data channel" />
+      <input id="rtcSend" style="min-width: 520px" value='{"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' placeholder='JSON to forward to /ws/hid, e.g. {"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' />
       <button id="rtcSendBtn">Send</button>
     </div>
     <div class="row muted" id="rtcStatus">disconnected</div>
@@ -543,8 +543,13 @@ app.MapGet("/", () =>
         show({ ok: false, error: "datachannel_not_open" });
         return;
       }
+      // The control peer forwards DataChannel messages to `/ws/hid`, which expects JSON.
+      try { JSON.parse(text); } catch {
+        show({ ok: false, error: "expected_json", hint: "{\"type\":\"keyboard.shortcut\",\"shortcut\":\"Ctrl+C\",\"holdMs\":80}" });
+        return;
+      }
       dc.send(text);
-      show({ ok: true, sent: text });
+      show({ ok: true, sent: ParseJsonOrString(text) });
     });
   </script>
 </body>
