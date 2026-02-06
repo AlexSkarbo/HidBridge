@@ -181,7 +181,9 @@ func (p *peerState) ensurePC(ctx context.Context, stun string) (*webrtc.PeerConn
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		log.Printf("pc state: %s", s.String())
-		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
+		// For MVP: aggressively release the session when the browser disconnects so another browser
+		// can connect to the same room without waiting for timeouts.
+		if s == webrtc.PeerConnectionStateDisconnected || s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
 			// Allow new sessions after failure.
 			p.pcMu.Lock()
 			defer p.pcMu.Unlock()

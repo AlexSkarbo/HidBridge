@@ -46,6 +46,7 @@
     let lastIceGatheringState = null;
     let lastConnectionState = null;
     let joined = false;
+    let joinWaiter = null; // { resolve, reject, timerId }
     let seq = 0;
 
     function log(kind, payload) {
@@ -71,12 +72,25 @@
 
         if (msg.type === "webrtc.error") {
           log(msg.type, msg);
+          if (joinWaiter) {
+            joinWaiter.reject(new Error(msg.error || "webrtc_error"));
+            clearTimeout(joinWaiter.timerId);
+            joinWaiter = null;
+          }
           setStatus("error: " + (msg.error || "unknown"));
           return;
         }
 
         if (msg.type === "webrtc.hello" || msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined") {
           log(msg.type, msg);
+          if (msg.type === "webrtc.joined" && msg.room === room) {
+            joined = true;
+            if (joinWaiter) {
+              joinWaiter.resolve(true);
+              clearTimeout(joinWaiter.timerId);
+              joinWaiter = null;
+            }
+          }
           return;
         }
 
@@ -235,9 +249,24 @@
     async function join() {
       await ensurePc();
       if (joined) return;
+      if (joinWaiter) {
+        await joinWaiter.promise;
+        return;
+      }
+      joinWaiter = {};
+      joinWaiter.promise = new Promise((resolve, reject) => {
+        joinWaiter.resolve = resolve;
+        joinWaiter.reject = reject;
+      });
+      // Fail fast if server doesn't respond (or WS closes) so UI doesn't sit in "calling..." forever.
+      joinWaiter.timerId = setTimeout(() => {
+        if (!joinWaiter) return;
+        joinWaiter.reject(new Error("join_timeout"));
+        joinWaiter = null;
+      }, 3000);
       await wsSend({ type: "join", room });
-      joined = true;
       setStatus("joined room: " + room);
+      await joinWaiter.promise;
     }
 
     async function call() {
@@ -284,6 +313,11 @@
       lastIceGatheringState = null;
       lastConnectionState = null;
       joined = false;
+      if (joinWaiter) {
+        try { joinWaiter.reject(new Error("disconnected")); } catch { }
+        clearTimeout(joinWaiter.timerId);
+        joinWaiter = null;
+      }
       setStatus("disconnected");
     }
 
