@@ -7,6 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var app = builder.Build();
 app.UseWebSockets();
+app.UseStaticFiles();
 
 string serverUrl = Environment.GetEnvironmentVariable("HIDBRIDGE_SERVER_URL") ?? "http://127.0.0.1:8080";
 string? token = Environment.GetEnvironmentVariable("HIDBRIDGE_TOKEN");
@@ -186,11 +187,12 @@ app.MapGet("/", () =>
     <pre id="rtcOut">webrtc: ready</pre>
   </div>
 
-  <pre id="out">ready</pre>
+	  <pre id="out">ready</pre>
 
-  <script>
-    const out = document.getElementById("out");
-    const rtcOut = document.getElementById("rtcOut");
+	  <script src="/webrtcControl.js"></script>
+	  <script>
+	    const out = document.getElementById("out");
+	    const rtcOut = document.getElementById("rtcOut");
 
     function show(x) {
       out.textContent = typeof x === "string" ? x : JSON.stringify(x, null, 2);
@@ -312,7 +314,7 @@ app.MapGet("/", () =>
       await post("/api/keyboard/chord", { mods: lastCaptured.mods, keys: lastCaptured.keys, holdMs });
     };
 
-    // --- WebRTC signaling demo ---
+    /* --- WebRTC signaling demo (legacy; moved to /webrtcControl.js) ---
     let sig = null;
     let pc = null;
     let dc = null;
@@ -550,6 +552,69 @@ app.MapGet("/", () =>
       }
       dc.send(text);
       show({ ok: true, sent: ParseJsonOrString(text) });
+    });
+    */
+
+    // --- WebRTC signaling demo (module) ---
+    const rtcStatus = document.getElementById("rtcStatus");
+    function setRtcStatus(s) { rtcStatus.textContent = s; }
+
+    function getIceServers() {
+      const t = document.getElementById("rtcIce").value.trim();
+      if (!t) return [{ urls: "stun:stun.l.google.com:19302" }];
+      try { return JSON.parse(t); } catch { return []; }
+    }
+
+    function rtcLog(entry) {
+      const line = JSON.stringify(entry);
+      const lines = rtcOut.textContent.split("\n");
+      lines.push(line);
+      while (lines.length > 60) lines.shift();
+      rtcOut.textContent = lines.join("\n");
+    }
+
+    let webrtcClient = null;
+    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
+    function resetWebRtcClient() {
+      if (webrtcClient) {
+        try { webrtcClient.hangup(); } catch {}
+      }
+      webrtcClient = window.hidbridge.webrtcControl.createClient({
+        room: getRoom(),
+        iceServers: getIceServers(),
+        onLog: rtcLog,
+        onStatus: setRtcStatus,
+        onMessage: (data) => show({ webrtc: "message", data })
+      });
+    }
+    resetWebRtcClient();
+
+    document.getElementById("rtcJoin").addEventListener("click", async () => {
+      resetWebRtcClient();
+      await webrtcClient.join();
+    });
+
+    document.getElementById("rtcCall").addEventListener("click", async () => {
+      resetWebRtcClient();
+      await webrtcClient.call();
+    });
+
+    document.getElementById("rtcHangup").addEventListener("click", async () => {
+      if (webrtcClient) webrtcClient.hangup();
+    });
+
+    document.getElementById("rtcSendBtn").addEventListener("click", async () => {
+      const text = document.getElementById("rtcSend").value;
+      try { JSON.parse(text); } catch {
+        show({ ok: false, error: "expected_json", hint: "{\"type\":\"keyboard.shortcut\",\"shortcut\":\"Ctrl+C\",\"holdMs\":80}" });
+        return;
+      }
+      try {
+        webrtcClient.send(text);
+        show({ ok: true, sent: ParseJsonOrString(text) });
+      } catch (e) {
+        show({ ok: false, error: String(e) });
+      }
     });
   </script>
 </body>
