@@ -45,6 +45,7 @@
     let localCandidateCount = 0;
     let lastIceGatheringState = null;
     let lastConnectionState = null;
+    let lastJoinedPeers = null;
     let joined = false;
     let joinWaiter = null; // { resolve, reject, timerId }
     let seq = 0;
@@ -85,6 +86,7 @@
           log(msg.type, msg);
           if (msg.type === "webrtc.joined" && msg.room === room) {
             joined = true;
+            if (typeof msg.peers === "number") lastJoinedPeers = msg.peers;
             if (joinWaiter) {
               joinWaiter.resolve(true);
               clearTimeout(joinWaiter.timerId);
@@ -297,6 +299,7 @@
         localCandidateCount,
         lastIceGatheringState,
         lastConnectionState,
+        lastJoinedPeers,
         dcState: dc ? dc.readyState : null
       };
     }
@@ -312,6 +315,7 @@
       localCandidateCount = 0;
       lastIceGatheringState = null;
       lastConnectionState = null;
+      lastJoinedPeers = null;
       joined = false;
       if (joinWaiter) {
         try { joinWaiter.reject(new Error("disconnected")); } catch { }

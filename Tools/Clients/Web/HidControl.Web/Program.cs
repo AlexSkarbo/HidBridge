@@ -181,6 +181,9 @@ app.MapGet("/", () =>
 	      4) Click <b>Hangup</b> when done.
 	      If you see <code>room_full</code>: someone is already controlling that room (close the other tab or generate a new room).
 	    </div>
+	    <div class="row muted">
+	      Note: the server-side helper listens on room <code>control</code> by default. If you generate a new room id, you must start <code>Tools/WebRtcControlPeer</code> with the same room (or switch back to <code>control</code>).
+	    </div>
 	    <div class="row">
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
@@ -390,6 +393,7 @@ app.MapGet("/", () =>
 	      document.getElementById("rtcRoom").value = genRoomId();
 	      resetWebRtcClient();
 	      rtcLog({ webrtc: "ui.room_generated", room: getRoom() });
+	      rtcLog({ webrtc: "ui.note", note: "Generated room has no server-side peer by default. For server control use room 'control', or start WebRtcControlPeer with this room." });
 	    });
 
 	    // Try to auto-load ICE servers from the server (TURN REST) if available.
@@ -418,6 +422,10 @@ app.MapGet("/", () =>
 	        if (s === "datachannel: open") return true;
 	        if (s === "no_local_candidates") return false;
 	        if (s && (s.startsWith("error:") || s === "room_full" || s === "disconnected")) return false;
+	        if (webrtcClient && webrtcClient.getDebug) {
+	          const d = webrtcClient.getDebug();
+	          if (d && d.lastJoinedPeers === 1) return false;
+	        }
 	        await new Promise(r => setTimeout(r, 50));
 	      }
 	      return false;
@@ -431,6 +439,16 @@ app.MapGet("/", () =>
 	        const ok = await connectWithTimeout(15000);
 	        if (!ok) {
 	          rtcLog({ webrtc: "ui.connect_timeout", room: getRoom(), debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
+	          const dbg = webrtcClient.getDebug ? webrtcClient.getDebug() : null;
+	          if (dbg && dbg.lastJoinedPeers === 1) {
+	            show({
+	              ok: false,
+	              error: "no_peer_in_room",
+	              hint: "No peer is present in this room. Use room 'control' (server helper) or start WebRtcControlPeer with the same room.",
+	              room: getRoom()
+	            });
+	            return;
+	          }
 	          if (rtcStatus.textContent === "no_local_candidates") {
 	            show({
 	              ok: false,
