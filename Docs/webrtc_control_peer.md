@@ -25,13 +25,15 @@ cd Tools/WebRtcControlPeer
 ```
 
 Then in the browser demo use room `control` and click:
-- `Join`
-- `Call`
+- `Connect` (recommended)
 
 When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 
 ## Notes
 
+- **Rooms / concurrency (MVP):** the default room `control` allows **only 1 controller** at a time (plus the helper).
+  - If another tab/browser tries to join, it will get `room_full`.
+  - To run multiple independent sessions, use different room ids (the web UI has a `Generate` button).
 - STUN is required for many environments. Default: `stun:stun.l.google.com:19302`.
 - Some Chromium-based browsers (Edge/Opera) may produce **0 ICE candidates** in hardened environments.
   - In that case, STUN-only cannot work and you need a TURN relay.

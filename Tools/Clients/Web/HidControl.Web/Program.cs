@@ -169,18 +169,26 @@ app.MapGet("/", () =>
   </div>
 
 	  <div class="card">
-	    <h3>WebRTC Signaling Demo (DataChannel)</h3>
+	    <h3>WebRTC Control (MVP)</h3>
 	    <div class="row muted">
-	      This uses a minimal signaling relay: browser &harr; <code>HidControl.Web</code> &harr; <code>HidControlServer</code> (<code>/ws/webrtc</code>).
-	      For browser-to-browser tests: open this page in <b>two tabs</b>, use the same room, then click <b>Call</b> in one tab.
-	      For browser-to-server control tests: run <code>Tools/WebRtcControlPeer</code> and then click <b>Call</b> in a single tab.
+	      WebRTC DataChannel for control messages (keyboard/mouse JSON) using a minimal signaling relay: browser &harr; <code>HidControl.Web</code> &harr; <code>HidControlServer</code> (<code>/ws/webrtc</code>).
+	    </div>
+	    <div class="row muted">
+	      Quick guide:
+	      1) Pick a <b>Room</b> (use <b>Generate</b> for a unique one).
+	      2) Click <b>Connect</b>.
+	      3) When status becomes <code>datachannel: open</code>, click <b>Send</b>.
+	      4) Click <b>Hangup</b> when done.
+	      If you see <code>room_full</code>: someone is already controlling that room (close the other tab or generate a new room).
 	    </div>
 	    <div class="row">
-	      <input id="rtcRoom" style="min-width: 220px" value="control" />
+	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
+	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
 	      <button id="rtcConnect">Connect</button>
+	      <button id="rtcHangup">Hangup</button>
+	      <span class="muted">Debug:</span>
 	      <button id="rtcJoin" title="Debug: join without calling">Join</button>
 	      <button id="rtcCall" title="Debug: call (create datachannel + offer)">Call</button>
-	      <button id="rtcHangup">Hangup</button>
 	    </div>
 	    <div class="row">
 	      <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
@@ -349,6 +357,11 @@ app.MapGet("/", () =>
 
 	    let webrtcClient = null;
 	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
+	    function genRoomId() {
+	      // Friendly, URL-safe room id (letters/digits only).
+	      const s = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+	      return "r" + s.replace(/[^a-z0-9]/gi, "").slice(0, 10);
+	    }
 	    function resetWebRtcClient() {
 	      if (webrtcClient) {
 	        try { webrtcClient.hangup(); } catch {}
@@ -371,7 +384,13 @@ app.MapGet("/", () =>
 	        onMessage: (data) => show({ webrtc: "message", data })
 	      });
 	    }
-    resetWebRtcClient();
+	    resetWebRtcClient();
+
+	    document.getElementById("rtcGenRoom").addEventListener("click", () => {
+	      document.getElementById("rtcRoom").value = genRoomId();
+	      resetWebRtcClient();
+	      rtcLog({ webrtc: "ui.room_generated", room: getRoom() });
+	    });
 
 	    // Try to auto-load ICE servers from the server (TURN REST) if available.
 	    (async () => {
