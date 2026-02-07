@@ -185,7 +185,7 @@ public static class SystemEndpoints
             return Results.Ok(new { ok = true, rooms });
         });
 
-        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, WebRtcControlPeerSupervisor sup) =>
+        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, WebRtcControlPeerSupervisor sup, HidUartClient uart) =>
         {
             string? roomId = null;
             try
@@ -198,7 +198,7 @@ public static class SystemEndpoints
             }
             catch { }
 
-            roomId = string.IsNullOrWhiteSpace(roomId) ? GenerateRoomId() : roomId.Trim();
+            roomId = string.IsNullOrWhiteSpace(roomId) ? GenerateRoomId(uart.GetDeviceIdHex()) : roomId.Trim();
             if (!TryNormalizeRoomIdForApi(roomId, out string normalized, out string? err))
             {
                 return Results.Ok(new { ok = false, error = err ?? "bad_room" });
@@ -320,13 +320,25 @@ public static class SystemEndpoints
         });
     }
 
-    private static string GenerateRoomId()
+    private static string GenerateRoomId(string? deviceIdHex)
     {
         const string alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-        var bytes = new byte[10];
+        var bytes = new byte[6];
         RandomNumberGenerator.Fill(bytes);
-        var sb = new StringBuilder(11);
-        sb.Append('r');
+        var sb = new StringBuilder(64);
+        sb.Append("hb-");
+        if (!string.IsNullOrWhiteSpace(deviceIdHex))
+        {
+            // Keep it short but hardware-tied (hex is already URL safe).
+            string d = deviceIdHex.Trim().ToLowerInvariant();
+            if (d.Length > 8) d = d.Substring(0, 8);
+            sb.Append(d);
+        }
+        else
+        {
+            sb.Append("unknown");
+        }
+        sb.Append('-');
         foreach (byte b in bytes)
         {
             sb.Append(alphabet[b % alphabet.Length]);

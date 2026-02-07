@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HidControlServer.Endpoints.Ws;
 
 namespace HidControlServer.Services;
 
@@ -10,8 +11,9 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     private readonly Options _opt;
     private readonly object _lock = new();
     private readonly Dictionary<string, ProcState> _procs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Timer _cleanupTimer;
 
-    private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc);
+    private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc, DateTimeOffset? IdleSinceUtc);
 
     /// <summary>
     /// Creates an instance.
@@ -20,6 +22,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     public WebRtcControlPeerSupervisor(Options opt)
     {
         _opt = opt;
+        _cleanupTimer = new Timer(_ => CleanupTick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(Math.Max(1, _opt.WebRtcRoomsCleanupIntervalSeconds)));
     }
 
     /// <summary>
@@ -74,6 +77,12 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
 
         lock (_lock)
         {
+            int max = _opt.WebRtcRoomsMaxHelpers;
+            if (max > 0 && !_procs.ContainsKey(room) && _procs.Count >= max)
+            {
+                return (false, false, null, "max_helpers_reached");
+            }
+
             if (_procs.TryGetValue(room, out var existing))
             {
                 if (!existing.Process.HasExited)
@@ -125,7 +134,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     return (false, false, null, "start_failed");
                 }
 
-                _procs[room] = new ProcState(p, DateTimeOffset.UtcNow);
+                _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, idleSinceUtc: null);
                 ServerEventLog.Log("webrtc.peer", "autostart_started", new
                 {
                     serverUrl,
@@ -199,10 +208,75 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     room = kvp.Key,
                     pid = p.HasExited ? (int?)null : p.Id,
                     hasExited = p.HasExited,
-                    startedAtUtc = kvp.Value.StartedAtUtc
+                    startedAtUtc = kvp.Value.StartedAtUtc,
+                    idleSinceUtc = kvp.Value.IdleSinceUtc
                 });
             }
             return list;
+        }
+    }
+
+    private void CleanupTick()
+    {
+        int idleStop = _opt.WebRtcRoomIdleStopSeconds;
+        if (idleStop <= 0)
+        {
+            return;
+        }
+
+        // "control" should be stable; don't auto-stop it.
+        var peers = WebRtcWsEndpoints.GetRoomPeerCountsSnapshot();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        lock (_lock)
+        {
+            foreach (var room in _procs.Keys.ToArray())
+            {
+                if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!_procs.TryGetValue(room, out var st))
+                {
+                    continue;
+                }
+
+                var proc = st.Process;
+                if (proc.HasExited)
+                {
+                    try { proc.Dispose(); } catch { }
+                    _procs.Remove(room);
+                    continue;
+                }
+
+                int count = peers.TryGetValue(room, out int c) ? c : 0;
+                if (count <= 1)
+                {
+                    // Idle: only helper is present (or room is missing).
+                    if (st.IdleSinceUtc is null)
+                    {
+                        _procs[room] = st with { IdleSinceUtc = now };
+                        continue;
+                    }
+
+                    if ((now - st.IdleSinceUtc.Value).TotalSeconds >= idleStop)
+                    {
+                        try { proc.Kill(entireProcessTree: true); } catch { }
+                        try { proc.Dispose(); } catch { }
+                        _procs.Remove(room);
+                        ServerEventLog.Log("webrtc.peer", "autostop_idle", new { room, peers = count, idleSeconds = idleStop });
+                    }
+                }
+                else
+                {
+                    // Active: reset idle timer.
+                    if (st.IdleSinceUtc is not null)
+                    {
+                        _procs[room] = st with { IdleSinceUtc = null };
+                    }
+                }
+            }
         }
     }
 
@@ -298,6 +372,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        try { _cleanupTimer.Dispose(); } catch { }
         Stop();
     }
 }

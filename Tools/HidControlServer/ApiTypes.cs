@@ -125,6 +125,9 @@ public static class Hex
 /// <param name="WebRtcControlPeerAutoStart">WebRtcControlPeerAutoStart.</param>
 /// <param name="WebRtcControlPeerRoom">WebRtcControlPeerRoom.</param>
 /// <param name="WebRtcControlPeerStun">WebRtcControlPeerStun.</param>
+/// <param name="WebRtcRoomsCleanupIntervalSeconds">WebRtcRoomsCleanupIntervalSeconds.</param>
+/// <param name="WebRtcRoomIdleStopSeconds">WebRtcRoomIdleStopSeconds.</param>
+/// <param name="WebRtcRoomsMaxHelpers">WebRtcRoomsMaxHelpers.</param>
 /// <param name="WebRtcTurnUrls">WebRtcTurnUrls.</param>
 /// <param name="WebRtcTurnSharedSecret">WebRtcTurnSharedSecret.</param>
 /// <param name="WebRtcTurnTtlSeconds">WebRtcTurnTtlSeconds.</param>
@@ -204,6 +207,9 @@ public sealed record Options(
     bool WebRtcControlPeerAutoStart,
     string WebRtcControlPeerRoom,
     string WebRtcControlPeerStun,
+    int WebRtcRoomsCleanupIntervalSeconds,
+    int WebRtcRoomIdleStopSeconds,
+    int WebRtcRoomsMaxHelpers,
     IReadOnlyList<string> WebRtcTurnUrls,
     string WebRtcTurnSharedSecret,
     int WebRtcTurnTtlSeconds,
@@ -525,6 +531,9 @@ public sealed record Options(
         bool? WebRtcControlPeerAutoStart,
         string? WebRtcControlPeerRoom,
         string? WebRtcControlPeerStun,
+        int? WebRtcRoomsCleanupIntervalSeconds,
+        int? WebRtcRoomIdleStopSeconds,
+        int? WebRtcRoomsMaxHelpers,
         List<string>? WebRtcTurnUrls,
         string? WebRtcTurnSharedSecret,
         int? WebRtcTurnTtlSeconds,
@@ -759,6 +768,9 @@ public sealed record Options(
         bool webRtcControlPeerAutoStart = cfg?.WebRtcControlPeerAutoStart ?? false;
         string webRtcControlPeerRoom = cfg?.WebRtcControlPeerRoom ?? "control";
         string webRtcControlPeerStun = cfg?.WebRtcControlPeerStun ?? "stun:stun.l.google.com:19302";
+        int webRtcRoomsCleanupIntervalSeconds = cfg?.WebRtcRoomsCleanupIntervalSeconds ?? 5;
+        int webRtcRoomIdleStopSeconds = cfg?.WebRtcRoomIdleStopSeconds ?? 30;
+        int webRtcRoomsMaxHelpers = cfg?.WebRtcRoomsMaxHelpers ?? 5;
         IReadOnlyList<string> webRtcTurnUrls = cfg?.WebRtcTurnUrls ?? new List<string>();
         string webRtcTurnSharedSecret = cfg?.WebRtcTurnSharedSecret ?? string.Empty;
         int webRtcTurnTtlSeconds = cfg?.WebRtcTurnTtlSeconds ?? 3600;
@@ -1217,6 +1229,9 @@ public sealed record Options(
             webRtcControlPeerAutoStart,
             webRtcControlPeerRoom,
             webRtcControlPeerStun,
+            webRtcRoomsCleanupIntervalSeconds,
+            webRtcRoomIdleStopSeconds,
+            webRtcRoomsMaxHelpers,
             webRtcTurnUrls,
             webRtcTurnSharedSecret,
             webRtcTurnTtlSeconds,

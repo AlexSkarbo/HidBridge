@@ -142,6 +142,10 @@
   "webRtcControlPeerRoom": "control",
   "webRtcControlPeerStun": "stun:stun.l.google.com:19302",
 
+  "webRtcRoomsCleanupIntervalSeconds": 5,
+  "webRtcRoomIdleStopSeconds": 30,
+  "webRtcRoomsMaxHelpers": 5,
+
   "webRtcTurnUrls": [
     "turn:localhost:3478?transport=udp",
     "turn:localhost:3478?transport=tcp"
