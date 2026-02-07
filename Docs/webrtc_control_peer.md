@@ -36,6 +36,13 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
   - To run multiple independent sessions, use different room ids.
     - `HidControl.Web` can create a room on the server (and start a helper for it) via `Generate`.
     - You can also create rooms via REST: `POST /status/webrtc/rooms` (returns `room`, `pid`).
+- **Room name generation (server):**
+  - When you call `POST /status/webrtc/rooms` without a `room` value, the server generates a room id:
+    - `hb-<deviceId>-<rand>`
+    - If the UART device id is not known yet, it uses `hb-unknown-<rand>`.
+  - `<deviceId>` is derived from `HidUartClient.GetDeviceIdHex()` and is currently tied to the UART-connected HID bridge MCU (typically `B_host`).
+  - `<rand>` is a short random base36 suffix to avoid collisions.
+  - Current implementation keeps `<deviceId>` short (first 8 hex chars) so room ids remain user-friendly.
 - STUN is required for many environments. Default: `stun:stun.l.google.com:19302`.
 - Some Chromium-based browsers (Edge/Opera) may produce **0 ICE candidates** in hardened environments.
   - In that case, STUN-only cannot work and you need a TURN relay.
