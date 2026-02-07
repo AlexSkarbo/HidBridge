@@ -8,8 +8,10 @@ namespace HidControlServer.Services;
 public sealed class WebRtcControlPeerSupervisor : IDisposable
 {
     private readonly Options _opt;
-    private Process? _process;
     private readonly object _lock = new();
+    private readonly Dictionary<string, ProcState> _procs = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc);
 
     /// <summary>
     /// Creates an instance.
@@ -30,62 +32,8 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
             return;
         }
 
-        lock (_lock)
-        {
-            if (_process is not null && !_process.HasExited)
-            {
-                return;
-            }
-
-            if (!TryFindToolDir(out string toolDir, out string toolHint))
-            {
-                ServerEventLog.Log("webrtc.peer", "autostart_skipped", new { reason = "tool_not_found", hint = toolHint });
-                return;
-            }
-
-            string serverUrl = BuildLocalServerUrl(_opt.Url);
-            string room = string.IsNullOrWhiteSpace(_opt.WebRtcControlPeerRoom) ? "control" : _opt.WebRtcControlPeerRoom;
-            string token = _opt.Token ?? string.Empty;
-
-            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcControlPeerStun);
-            if (psi is null)
-            {
-                ServerEventLog.Log("webrtc.peer", "autostart_skipped", new { reason = "unsupported_os", os = Environment.OSVersion.Platform.ToString() });
-                return;
-            }
-
-            try
-            {
-                var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-                p.Exited += (_, __) =>
-                {
-                    int code = -1;
-                    try { code = p.ExitCode; } catch { }
-                    ServerEventLog.Log("webrtc.peer", "exit", new { code });
-                };
-
-                if (!p.Start())
-                {
-                    ServerEventLog.Log("webrtc.peer", "autostart_failed", new { reason = "start_returned_false" });
-                    return;
-                }
-
-                _process = p;
-                ServerEventLog.Log("webrtc.peer", "autostart_started", new
-                {
-                    serverUrl,
-                    room,
-                    stun = _opt.WebRtcControlPeerStun,
-                    pid = p.Id,
-                    exe = psi.FileName,
-                    args = psi.Arguments
-                });
-            }
-            catch (Exception ex)
-            {
-                ServerEventLog.Log("webrtc.peer", "autostart_failed", new { error = ex.Message });
-            }
-        }
+        string room = string.IsNullOrWhiteSpace(_opt.WebRtcControlPeerRoom) ? "control" : _opt.WebRtcControlPeerRoom;
+        EnsureStarted(room);
     }
 
     /// <summary>
@@ -95,24 +43,166 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     {
         lock (_lock)
         {
-            if (_process is null)
+            foreach (var kvp in _procs.ToArray())
             {
-                return;
+                try
+                {
+                    if (!kvp.Value.Process.HasExited)
+                    {
+                        kvp.Value.Process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch { }
+                finally
+                {
+                    try { kvp.Value.Process.Dispose(); } catch { }
+                    _procs.Remove(kvp.Key);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ensures a helper is running for the specified room.
+    /// </summary>
+    public (bool ok, bool started, int? pid, string? error) EnsureStarted(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return (false, false, null, "room_required");
+        }
+
+        lock (_lock)
+        {
+            if (_procs.TryGetValue(room, out var existing))
+            {
+                if (!existing.Process.HasExited)
+                {
+                    return (true, false, existing.Process.Id, null);
+                }
+
+                try { existing.Process.Dispose(); } catch { }
+                _procs.Remove(room);
+            }
+
+            if (!TryFindToolDir(out string toolDir, out string toolHint))
+            {
+                ServerEventLog.Log("webrtc.peer", "autostart_skipped", new { reason = "tool_not_found", hint = toolHint });
+                return (false, false, null, "tool_not_found");
+            }
+
+            string serverUrl = BuildLocalServerUrl(_opt.Url);
+            string token = _opt.Token ?? string.Empty;
+
+            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcControlPeerStun);
+            if (psi is null)
+            {
+                ServerEventLog.Log("webrtc.peer", "autostart_skipped", new { reason = "unsupported_os", os = Environment.OSVersion.Platform.ToString() });
+                return (false, false, null, "unsupported_os");
             }
 
             try
             {
-                if (!_process.HasExited)
+                var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
+                p.Exited += (_, __) =>
                 {
-                    _process.Kill(entireProcessTree: true);
+                    int code = -1;
+                    try { code = p.ExitCode; } catch { }
+                    ServerEventLog.Log("webrtc.peer", "exit", new { room, code });
+
+                    lock (_lock)
+                    {
+                        if (_procs.TryGetValue(room, out var st) && ReferenceEquals(st.Process, p))
+                        {
+                            _procs.Remove(room);
+                        }
+                    }
+                };
+
+                if (!p.Start())
+                {
+                    ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "start_returned_false" });
+                    return (false, false, null, "start_failed");
+                }
+
+                _procs[room] = new ProcState(p, DateTimeOffset.UtcNow);
+                ServerEventLog.Log("webrtc.peer", "autostart_started", new
+                {
+                    serverUrl,
+                    room,
+                    stun = _opt.WebRtcControlPeerStun,
+                    pid = p.Id,
+                    exe = psi.FileName,
+                    args = psi.Arguments
+                });
+                return (true, true, p.Id, null);
+            }
+            catch (Exception ex)
+            {
+                ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, error = ex.Message });
+                return (false, false, null, ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stops a helper process for a specific room.
+    /// </summary>
+    public (bool ok, bool stopped, string? error) StopRoom(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return (false, false, "room_required");
+        }
+
+        lock (_lock)
+        {
+            if (!_procs.TryGetValue(room, out var st))
+            {
+                return (true, false, null);
+            }
+
+            try
+            {
+                if (!st.Process.HasExited)
+                {
+                    st.Process.Kill(entireProcessTree: true);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                return (false, false, ex.Message);
+            }
             finally
             {
-                try { _process.Dispose(); } catch { }
-                _process = null;
+                try { st.Process.Dispose(); } catch { }
+                _procs.Remove(room);
             }
+
+            return (true, true, null);
+        }
+    }
+
+    /// <summary>
+    /// Returns the list of helper rooms currently running.
+    /// </summary>
+    public IReadOnlyList<object> GetHelpersSnapshot()
+    {
+        lock (_lock)
+        {
+            var list = new List<object>(_procs.Count);
+            foreach (var kvp in _procs)
+            {
+                var p = kvp.Value.Process;
+                list.Add(new
+                {
+                    room = kvp.Key,
+                    pid = p.HasExited ? (int?)null : p.Id,
+                    hasExited = p.HasExited,
+                    startedAtUtc = kvp.Value.StartedAtUtc
+                });
+            }
+            return list;
         }
     }
 
@@ -211,4 +301,3 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
         Stop();
     }
 }
-

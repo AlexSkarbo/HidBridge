@@ -33,7 +33,9 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 
 - **Rooms / concurrency (MVP):** the default room `control` allows **only 1 controller** at a time (plus the helper).
   - If another tab/browser tries to join, it will get `room_full`.
-  - To run multiple independent sessions, use different room ids (the web UI has a `Generate` button).
+  - To run multiple independent sessions, use different room ids.
+    - `HidControl.Web` can create a room on the server (and start a helper for it) via `Generate`.
+    - You can also create rooms via REST: `POST /status/webrtc/rooms` (returns `room`, `pid`).
 - STUN is required for many environments. Default: `stun:stun.l.google.com:19302`.
 - Some Chromium-based browsers (Edge/Opera) may produce **0 ICE candidates** in hardened environments.
   - In that case, STUN-only cannot work and you need a TURN relay.

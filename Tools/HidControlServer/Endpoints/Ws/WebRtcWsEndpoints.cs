@@ -18,6 +18,15 @@ public static class WebRtcWsEndpoints
     private const int ControlRoomMaxPeers = 2;
 
     /// <summary>
+    /// Returns a snapshot of active room peer counts.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> GetRoomPeerCountsSnapshot()
+    {
+        // Concurrent enumeration gives a point-in-time snapshot.
+        return Rooms.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Clients.Count, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Maps the WebRTC signaling endpoint at <c>/ws/webrtc</c>.
     /// </summary>
     /// <param name="app">Web application.</param>

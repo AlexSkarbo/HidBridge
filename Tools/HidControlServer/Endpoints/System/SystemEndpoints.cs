@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using HidControlServer;
+using HidControlServer.Endpoints.Ws;
 using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -155,6 +156,69 @@ public static class SystemEndpoints
             return Results.Ok(new { ok = true, iceServers });
         });
 
+        app.MapGet("/status/webrtc/rooms", (WebRtcControlPeerSupervisor sup) =>
+        {
+            var peers = WebRtcWsEndpoints.GetRoomPeerCountsSnapshot();
+            var helpers = sup.GetHelpersSnapshot();
+
+            var helperRooms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var h in helpers)
+            {
+                string? r = h.GetType().GetProperty("room")?.GetValue(h)?.ToString();
+                if (!string.IsNullOrWhiteSpace(r)) helperRooms.Add(r);
+            }
+
+            var allRooms = new HashSet<string>(peers.Keys, StringComparer.OrdinalIgnoreCase);
+            foreach (var hr in helperRooms) allRooms.Add(hr);
+
+            var rooms = allRooms
+                .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
+                .Select(r => new
+                {
+                    room = r,
+                    peers = peers.TryGetValue(r, out int c) ? c : 0,
+                    hasHelper = helperRooms.Contains(r),
+                    isControl = string.Equals(r, "control", StringComparison.OrdinalIgnoreCase)
+                })
+                .ToArray();
+
+            return Results.Ok(new { ok = true, rooms });
+        });
+
+        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, WebRtcControlPeerSupervisor sup) =>
+        {
+            string? roomId = null;
+            try
+            {
+                var body = await req.ReadFromJsonAsync<Dictionary<string, string?>>();
+                if (body is not null && body.TryGetValue("room", out var r))
+                {
+                    roomId = r;
+                }
+            }
+            catch { }
+
+            roomId = string.IsNullOrWhiteSpace(roomId) ? GenerateRoomId() : roomId.Trim();
+            if (!TryNormalizeRoomIdForApi(roomId, out string normalized, out string? err))
+            {
+                return Results.Ok(new { ok = false, error = err ?? "bad_room" });
+            }
+
+            var (ok, started, pid, error) = sup.EnsureStarted(normalized);
+            return Results.Ok(new { ok, room = normalized, started, pid, error });
+        });
+
+        app.MapDelete("/status/webrtc/rooms/{room}", (string room, WebRtcControlPeerSupervisor sup) =>
+        {
+            if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Ok(new { ok = false, error = "cannot_delete_control" });
+            }
+
+            var (ok, stopped, error) = sup.StopRoom(room);
+            return Results.Ok(new { ok, room, stopped, error });
+        });
+
         app.MapGet("/serial/ports", () =>
         {
             var list = SerialPortService.ListSerialPortCandidates();
@@ -254,5 +318,53 @@ public static class SystemEndpoints
                 }
             });
         });
+    }
+
+    private static string GenerateRoomId()
+    {
+        const string alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+        var bytes = new byte[10];
+        RandomNumberGenerator.Fill(bytes);
+        var sb = new StringBuilder(11);
+        sb.Append('r');
+        foreach (byte b in bytes)
+        {
+            sb.Append(alphabet[b % alphabet.Length]);
+        }
+        return sb.ToString();
+    }
+
+    private static bool TryNormalizeRoomIdForApi(string room, out string normalized, out string? error)
+    {
+        normalized = string.Empty;
+        error = null;
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            error = "room_required";
+            return false;
+        }
+
+        string r = room.Trim();
+        if (r.Length > 64)
+        {
+            error = "room_too_long";
+            return false;
+        }
+
+        foreach (char ch in r)
+        {
+            bool ok = (ch >= 'a' && ch <= 'z') ||
+                      (ch >= 'A' && ch <= 'Z') ||
+                      (ch >= '0' && ch <= '9') ||
+                      ch == '_' || ch == '-';
+            if (!ok)
+            {
+                error = "room_invalid_chars";
+                return false;
+            }
+        }
+
+        normalized = r;
+        return true;
     }
 }

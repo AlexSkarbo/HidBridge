@@ -3,6 +3,7 @@ using System.Linq;
 using HidControl.ClientSdk;
 using System.Net.WebSockets;
 using System.Net.Http;
+using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -187,6 +188,10 @@ app.MapGet("/", () =>
 	    <div class="row">
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
+	      <button id="rtcRefreshRooms" title="Fetch rooms from server">Refresh Rooms</button>
+	      <select id="rtcRooms" style="min-width: 220px">
+	        <option value="">(rooms)</option>
+	      </select>
 	      <button id="rtcConnect">Connect</button>
 	      <button id="rtcHangup">Hangup</button>
 	      <span class="muted">Debug:</span>
@@ -360,11 +365,6 @@ app.MapGet("/", () =>
 
 	    let webrtcClient = null;
 	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
-	    function genRoomId() {
-	      // Friendly, URL-safe room id (letters/digits only).
-	      const s = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-	      return "r" + s.replace(/[^a-z0-9]/gi, "").slice(0, 10);
-	    }
 	    function resetWebRtcClient() {
 	      if (webrtcClient) {
 	        try { webrtcClient.hangup(); } catch {}
@@ -389,11 +389,60 @@ app.MapGet("/", () =>
 	    }
 	    resetWebRtcClient();
 
-	    document.getElementById("rtcGenRoom").addEventListener("click", () => {
-	      document.getElementById("rtcRoom").value = genRoomId();
+	    async function refreshRooms() {
+	      try {
+	        const res = await fetch("/api/webrtc/rooms");
+	        if (!res.ok) return;
+	        const j = await res.json();
+	        if (!j || !j.ok || !Array.isArray(j.rooms)) return;
+	        const sel = document.getElementById("rtcRooms");
+	        sel.innerHTML = "";
+	        const empty = document.createElement("option");
+	        empty.value = "";
+	        empty.textContent = "(rooms)";
+	        sel.appendChild(empty);
+	        for (const r of j.rooms) {
+	          const opt = document.createElement("option");
+	          opt.value = r.room;
+	          const tags = [];
+	          if (r.isControl) tags.push("control");
+	          if (r.hasHelper) tags.push("helper");
+	          opt.textContent = `${r.room} (peers=${r.peers}${tags.length ? ", " + tags.join(",") : ""})`;
+	          sel.appendChild(opt);
+	        }
+	      } catch {}
+	    }
+
+	    document.getElementById("rtcRefreshRooms").addEventListener("click", async () => {
+	      await refreshRooms();
+	      rtcLog({ webrtc: "ui.rooms_refreshed" });
+	    });
+
+	    document.getElementById("rtcRooms").addEventListener("change", () => {
+	      const v = document.getElementById("rtcRooms").value;
+	      if (!v) return;
+	      document.getElementById("rtcRoom").value = v;
 	      resetWebRtcClient();
-	      rtcLog({ webrtc: "ui.room_generated", room: getRoom() });
-	      rtcLog({ webrtc: "ui.note", note: "Generated room has no server-side peer by default. For server control use room 'control', or start WebRtcControlPeer with this room." });
+	      rtcLog({ webrtc: "ui.room_selected", room: v });
+	    });
+
+	    document.getElementById("rtcGenRoom").addEventListener("click", async () => {
+	      try {
+	        const res = await fetch("/api/webrtc/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+	        const j = await res.json().catch(() => null);
+	        if (!j || !j.ok || !j.room) {
+	          rtcLog({ webrtc: "ui.room_create_failed", payload: j });
+	          show(j || { ok: false, error: "room_create_failed" });
+	          return;
+	        }
+	        document.getElementById("rtcRoom").value = j.room;
+	        resetWebRtcClient();
+	        rtcLog({ webrtc: "ui.room_created", room: j.room, started: j.started, pid: j.pid });
+	        await refreshRooms();
+	      } catch (e) {
+	        rtcLog({ webrtc: "ui.room_create_error", error: String(e) });
+	        show({ ok: false, error: String(e) });
+	      }
 	    });
 
 	    // Try to auto-load ICE servers from the server (TURN REST) if available.
@@ -414,6 +463,7 @@ app.MapGet("/", () =>
 	        }
 	      } catch {}
 	    })();
+	    refreshRooms();
 
 	    async function connectWithTimeout(timeoutMs) {
 	      const start = Date.now();
@@ -536,6 +586,37 @@ app.MapGet("/api/webrtc/ice", async (CancellationToken ct) =>
 
     string url = serverUrl.TrimEnd('/') + "/status/webrtc/ice";
     string json = await http.GetStringAsync(url, ct);
+    return Results.Text(json, "application/json");
+});
+
+app.MapGet("/api/webrtc/rooms", async (CancellationToken ct) =>
+{
+    using var http = new HttpClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        http.DefaultRequestHeaders.Add("X-HID-Token", token);
+    }
+
+    string url = serverUrl.TrimEnd('/') + "/status/webrtc/rooms";
+    string json = await http.GetStringAsync(url, ct);
+    return Results.Text(json, "application/json");
+});
+
+app.MapPost("/api/webrtc/rooms", async (HttpRequest req, CancellationToken ct) =>
+{
+    using var http = new HttpClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        http.DefaultRequestHeaders.Add("X-HID-Token", token);
+    }
+
+    string url = serverUrl.TrimEnd('/') + "/status/webrtc/rooms";
+    using var reader = new StreamReader(req.Body);
+    string body = await reader.ReadToEndAsync(ct);
+    body = string.IsNullOrWhiteSpace(body) ? "{}" : body;
+    using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+    using HttpResponseMessage resp = await http.PostAsync(url, content, ct);
+    string json = await resp.Content.ReadAsStringAsync(ct);
     return Results.Text(json, "application/json");
 });
 
