@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HidControlServer\HidControlServer.csproj" />
+    <ProjectReference Include="..\Core\HidControl.Application\HidControl.Application.csproj" />
+    <ProjectReference Include="..\Infrastructure\HidControl.Infrastructure\HidControl.Infrastructure.csproj" />
     <ProjectReference Include="..\Shared\HidControl.Contracts\HidControl.Contracts.csproj" />
     <ProjectReference Include="..\Shared\HidControl.UseCases\HidControl.UseCases.csproj" />
   </ItemGroup>

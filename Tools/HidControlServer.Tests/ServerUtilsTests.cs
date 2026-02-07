@@ -16,16 +16,11 @@ public sealed class ServerUtilsTests
     /// </summary>
     public void BuildBindUrls_BindAllFalse_ReturnsOriginal()
     {
-        var opt = new Options(
-            "COM1", false, null, 115200, "http://127.0.0.1:8080", false, "db",
-            "Host=localhost", false, Array.Empty<VideoSourceConfig>(),
-            Array.Empty<VideoProfileConfig>(), "low-latency",
-            4, 256, 8, 200, 2, 50, true, true, 50, true, true, 200, 2,
-            "secret", 255, 254, "mouse", "keyboard", true, 2000, true, "",
-            "", 1, 2, 4, 8, 16, null, "ffmpeg",
-            false, true, 1000, 1500, 10, 60000,
-            8554, 9000, 50, 1935, "video_hls", true, 1, 6, true, "video_logs",
-            true, 3, 500, 2000, false, true, 256 * 1024, 64 * 1024, 16 * 1024, 4 * 1024 * 1024, 300, 600);
+        var opt = Options.Parse(new[]
+        {
+            "--url", "http://127.0.0.1:8080",
+            "--bindAll", "false"
+        });
 
         string[] urls = BuildBindUrls(opt);
 
@@ -39,16 +34,11 @@ public sealed class ServerUtilsTests
     /// </summary>
     public void BuildBindUrls_BindAllTrue_WithScheme_ReturnsWildcardAndOriginal()
     {
-        var opt = new Options(
-            "COM1", false, null, 115200, "http://127.0.0.1:8080", true, "db",
-            "Host=localhost", false, Array.Empty<VideoSourceConfig>(),
-            Array.Empty<VideoProfileConfig>(), "low-latency",
-            4, 256, 8, 200, 2, 50, true, true, 50, true, true, 200, 2,
-            "secret", 255, 254, "mouse", "keyboard", true, 2000, true, "",
-            "", 1, 2, 4, 8, 16, null, "ffmpeg",
-            false, true, 1000, 1500, 10, 60000,
-            8554, 9000, 50, 1935, "video_hls", true, 1, 6, true, "video_logs",
-            true, 3, 500, 2000, false, true, 256 * 1024, 64 * 1024, 16 * 1024, 4 * 1024 * 1024, 300, 600);
+        var opt = Options.Parse(new[]
+        {
+            "--url", "http://127.0.0.1:8080",
+            "--bindAll", "true"
+        });
 
         string[] urls = BuildBindUrls(opt);
 

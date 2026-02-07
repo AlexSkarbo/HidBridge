@@ -18,7 +18,15 @@ public sealed class VideoInputTests
     {
         var src = new VideoSourceConfig("cam", "uvc", "/dev/video0", "USB", true);
         string? input = BuildFfmpegInput(src);
-        Assert.Equal("-f v4l2 -i /dev/video0", input);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.Equal("-f v4l2 -i /dev/video0", input);
+        }
+        else
+        {
+            // Linux-only input format, should be rejected on non-Linux OS.
+            Assert.Null(input);
+        }
     }
 
     [Fact]

@@ -19,7 +19,25 @@ public sealed class VideoProfileStoreTests
         var all = store.GetAll();
 
         Assert.True(all.Count >= 2);
-        Assert.Equal(all[0].Name, store.ActiveProfile);
+        // Active profile is auto-selected based on OS preference.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("win-1080-low", store.ActiveProfile);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            Assert.Equal("pi-1080-low", store.ActiveProfile);
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            Assert.Equal("mac-1080-low", store.ActiveProfile);
+        }
+        else
+        {
+            Assert.Equal("low-latency", store.ActiveProfile);
+        }
+
+        Assert.Contains(all, p => string.Equals(p.Name, store.ActiveProfile, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
