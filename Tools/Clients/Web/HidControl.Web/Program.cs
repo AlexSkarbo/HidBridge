@@ -4,8 +4,13 @@ using HidControl.ClientSdk;
 using System.Net.WebSockets;
 using System.Net.Http;
 using System.IO;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
 
 var app = builder.Build();
 app.UseWebSockets();
