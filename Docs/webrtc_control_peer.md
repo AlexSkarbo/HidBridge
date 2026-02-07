@@ -49,6 +49,19 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
   - See `Docs/turn_setup.md` (coturn + TURN REST ephemeral credentials).
 - `WebRtcControlPeer` requires Go 1.21+ (some Pion transport dependencies require `sync/atomic.Bool`).
 
+## Web UI Room Browser
+
+`HidControl.Web` includes a small room browser UI:
+- `Generate`: creates a new room on the server and starts a helper for it.
+- Rooms table:
+  - `Use`: select a room (fills the Room field).
+  - `Connect`: selects the room and attempts to connect.
+  - `Delete`: stops the helper for that room (not allowed for `control`).
+
+Troubleshooting:
+- `room_full`: the room already has a controller. Close the other tab/browser or generate a new room.
+- `connect_timeout`: typically means NAT traversal failed. Configure TURN (`Docs/turn_setup.md`) and retry.
+
 ## Optional Auto-Start (Server)
 
 `HidControlServer` can auto-start the helper on boot when enabled in config:
