@@ -27,7 +27,7 @@ public sealed class WebRtcIceService : IWebRtcIceService
         var servers = new List<WebRtcIceServer>();
 
         string stun = string.IsNullOrWhiteSpace(_backend.StunUrl) ? "stun:stun.l.google.com:19302" : _backend.StunUrl.Trim();
-        servers.Add(new WebRtcIceServer(new[] { stun }, username: null, credential: null, credentialType: null));
+        servers.Add(new WebRtcIceServer(new[] { stun }, Username: null, Credential: null, CredentialType: null));
 
         if (_backend.TurnUrls.Count > 0 && !string.IsNullOrWhiteSpace(_backend.TurnSharedSecret))
         {
@@ -41,11 +41,10 @@ public sealed class WebRtcIceService : IWebRtcIceService
             using var hmac = new HMACSHA1(key);
             string credential = Convert.ToBase64String(hmac.ComputeHash(msg));
 
-            servers.Add(new WebRtcIceServer(_backend.TurnUrls, username, credential, credentialType: "password"));
+            servers.Add(new WebRtcIceServer(_backend.TurnUrls, Username: username, Credential: credential, CredentialType: "password"));
             return Task.FromResult(new WebRtcIceConfig(ttl, servers));
         }
 
         return Task.FromResult(new WebRtcIceConfig(null, servers));
     }
 }
-
