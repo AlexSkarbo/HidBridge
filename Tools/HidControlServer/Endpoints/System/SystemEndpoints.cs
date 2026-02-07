@@ -1,9 +1,5 @@
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using HidControlServer;
-using HidControlServer.Endpoints.Ws;
-using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
@@ -121,88 +117,45 @@ public static class SystemEndpoints
         //
         // Note: This endpoint is under `/status/*` so it can be accessed when token auth is enabled
         // (same auth rules as `/ws/*`).
-        app.MapGet("/status/webrtc/ice", (Options opt) =>
+        app.MapGet("/status/webrtc/ice", async (HidControl.Application.UseCases.WebRtc.GetWebRtcIceConfigUseCase uc, CancellationToken ct) =>
         {
-            var iceServers = new List<object>();
-            if (!string.IsNullOrWhiteSpace(opt.WebRtcControlPeerStun))
-            {
-                iceServers.Add(new { urls = new[] { opt.WebRtcControlPeerStun } });
-            }
-
-            // TURN REST credentials (coturn: --use-auth-secret --static-auth-secret=...).
-            if (opt.WebRtcTurnUrls.Count > 0 && !string.IsNullOrWhiteSpace(opt.WebRtcTurnSharedSecret))
-            {
-                int ttl = Math.Clamp(opt.WebRtcTurnTtlSeconds, 60, 24 * 60 * 60);
-                long expires = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ttl;
-                string userPart = string.IsNullOrWhiteSpace(opt.WebRtcTurnUsername) ? "hidbridge" : opt.WebRtcTurnUsername.Trim();
-                string username = $"{expires}:{userPart}";
-
-                byte[] key = Encoding.UTF8.GetBytes(opt.WebRtcTurnSharedSecret);
-                byte[] msg = Encoding.UTF8.GetBytes(username);
-                using var hmac = new HMACSHA1(key);
-                string credential = Convert.ToBase64String(hmac.ComputeHash(msg));
-
-                iceServers.Add(new
+            var cfg = await uc.Execute(ct);
+            var iceServers = cfg.IceServers
+                .Select(s => new
                 {
-                    urls = opt.WebRtcTurnUrls,
-                    username,
-                    credential,
-                    credentialType = "password"
-                });
+                    urls = s.Urls,
+                    username = s.Username,
+                    credential = s.Credential,
+                    credentialType = s.CredentialType
+                })
+                .ToList();
 
-                return Results.Ok(new { ok = true, ttlSeconds = ttl, iceServers });
-            }
-
-            return Results.Ok(new { ok = true, iceServers });
+            return Results.Ok(new { ok = true, ttlSeconds = cfg.TtlSeconds, iceServers });
         });
 
         // WebRTC client-side timeouts/config for UIs.
-        app.MapGet("/status/webrtc/config", (Options opt) =>
+        app.MapGet("/status/webrtc/config", async (HidControl.Application.UseCases.WebRtc.GetWebRtcClientConfigUseCase uc, CancellationToken ct) =>
         {
-            // Keep defaults minimal; the UI can increase these for slow networks via config.
-            int joinTimeoutMs = Math.Clamp(opt.WebRtcClientJoinTimeoutMs, 250, 60_000);
-            int connectTimeoutMs = Math.Clamp(opt.WebRtcClientConnectTimeoutMs, 250, 120_000);
+            var cfg = await uc.Execute(ct);
             return Results.Ok(new
             {
                 ok = true,
-                joinTimeoutMs,
-                connectTimeoutMs,
-                roomsCleanupIntervalSeconds = opt.WebRtcRoomsCleanupIntervalSeconds,
-                roomIdleStopSeconds = opt.WebRtcRoomIdleStopSeconds,
-                roomsMaxHelpers = opt.WebRtcRoomsMaxHelpers
+                joinTimeoutMs = cfg.JoinTimeoutMs,
+                connectTimeoutMs = cfg.ConnectTimeoutMs,
+                roomsCleanupIntervalSeconds = cfg.RoomsCleanupIntervalSeconds,
+                roomIdleStopSeconds = cfg.RoomIdleStopSeconds,
+                roomsMaxHelpers = cfg.RoomsMaxHelpers
             });
         });
 
-        app.MapGet("/status/webrtc/rooms", (WebRtcControlPeerSupervisor sup) =>
+        app.MapGet("/status/webrtc/rooms", async (HidControl.Application.UseCases.WebRtc.ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
         {
-            var peers = WebRtcWsEndpoints.GetRoomPeerCountsSnapshot();
-            var helpers = sup.GetHelpersSnapshot();
-
-            var helperRooms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var h in helpers)
-            {
-                string? r = h.GetType().GetProperty("room")?.GetValue(h)?.ToString();
-                if (!string.IsNullOrWhiteSpace(r)) helperRooms.Add(r);
-            }
-
-            var allRooms = new HashSet<string>(peers.Keys, StringComparer.OrdinalIgnoreCase);
-            foreach (var hr in helperRooms) allRooms.Add(hr);
-
-            var rooms = allRooms
-                .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
-                .Select(r => new
-                {
-                    room = r,
-                    peers = peers.TryGetValue(r, out int c) ? c : 0,
-                    hasHelper = helperRooms.Contains(r),
-                    isControl = string.Equals(r, "control", StringComparison.OrdinalIgnoreCase)
-                })
-                .ToArray();
-
+            var snap = await uc.Execute(ct);
+            var rooms = snap.Rooms.Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper, isControl = r.IsControl }).ToArray();
             return Results.Ok(new { ok = true, rooms });
         });
 
-        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, WebRtcControlPeerSupervisor sup, HidUartClient uart) =>
+        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, HidControl.Application.UseCases.WebRtc.CreateWebRtcRoomUseCase uc, CancellationToken ct) =>
         {
             string? roomId = null;
             try
@@ -215,25 +168,14 @@ public static class SystemEndpoints
             }
             catch { }
 
-            roomId = string.IsNullOrWhiteSpace(roomId) ? GenerateRoomId(uart.GetDeviceIdHex()) : roomId.Trim();
-            if (!TryNormalizeRoomIdForApi(roomId, out string normalized, out string? err))
-            {
-                return Results.Ok(new { ok = false, error = err ?? "bad_room" });
-            }
-
-            var (ok, started, pid, error) = sup.EnsureStarted(normalized);
-            return Results.Ok(new { ok, room = normalized, started, pid, error });
+            var res = await uc.Execute(roomId, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
         });
 
-        app.MapDelete("/status/webrtc/rooms/{room}", (string room, WebRtcControlPeerSupervisor sup) =>
+        app.MapDelete("/status/webrtc/rooms/{room}", async (string room, HidControl.Application.UseCases.WebRtc.DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
         {
-            if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
-            {
-                return Results.Ok(new { ok = false, error = "cannot_delete_control" });
-            }
-
-            var (ok, stopped, error) = sup.StopRoom(room);
-            return Results.Ok(new { ok, room, stopped, error });
+            var res = await uc.Execute(room, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
         });
 
         app.MapGet("/serial/ports", () =>
@@ -337,63 +279,5 @@ public static class SystemEndpoints
         });
     }
 
-    private static string GenerateRoomId(string? deviceIdHex)
-    {
-        const string alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-        var bytes = new byte[6];
-        RandomNumberGenerator.Fill(bytes);
-        var sb = new StringBuilder(64);
-        sb.Append("hb-");
-        if (!string.IsNullOrWhiteSpace(deviceIdHex))
-        {
-            // Keep it short but hardware-tied (hex is already URL safe).
-            string d = deviceIdHex.Trim().ToLowerInvariant();
-            if (d.Length > 8) d = d.Substring(0, 8);
-            sb.Append(d);
-        }
-        else
-        {
-            sb.Append("unknown");
-        }
-        sb.Append('-');
-        foreach (byte b in bytes)
-        {
-            sb.Append(alphabet[b % alphabet.Length]);
-        }
-        return sb.ToString();
-    }
-
-    private static bool TryNormalizeRoomIdForApi(string room, out string normalized, out string? error)
-    {
-        normalized = string.Empty;
-        error = null;
-        if (string.IsNullOrWhiteSpace(room))
-        {
-            error = "room_required";
-            return false;
-        }
-
-        string r = room.Trim();
-        if (r.Length > 64)
-        {
-            error = "room_too_long";
-            return false;
-        }
-
-        foreach (char ch in r)
-        {
-            bool ok = (ch >= 'a' && ch <= 'z') ||
-                      (ch >= 'A' && ch <= 'Z') ||
-                      (ch >= '0' && ch <= '9') ||
-                      ch == '_' || ch == '-';
-            if (!ok)
-            {
-                error = "room_invalid_chars";
-                return false;
-            }
-        }
-
-        normalized = r;
-        return true;
-    }
+    // Room ID generation and validation live in Infrastructure (WebRtcRoomsService) so API endpoints remain thin.
 }
