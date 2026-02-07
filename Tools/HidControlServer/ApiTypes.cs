@@ -132,6 +132,8 @@ public static class Hex
 /// <param name="WebRtcTurnSharedSecret">WebRtcTurnSharedSecret.</param>
 /// <param name="WebRtcTurnTtlSeconds">WebRtcTurnTtlSeconds.</param>
 /// <param name="WebRtcTurnUsername">WebRtcTurnUsername.</param>
+/// <param name="WebRtcClientJoinTimeoutMs">WebRtcClientJoinTimeoutMs.</param>
+/// <param name="WebRtcClientConnectTimeoutMs">WebRtcClientConnectTimeoutMs.</param>
 public sealed record Options(
     string SerialPort,
     bool SerialAuto,
@@ -213,7 +215,9 @@ public sealed record Options(
     IReadOnlyList<string> WebRtcTurnUrls,
     string WebRtcTurnSharedSecret,
     int WebRtcTurnTtlSeconds,
-    string WebRtcTurnUsername)
+    string WebRtcTurnUsername,
+    int WebRtcClientJoinTimeoutMs,
+    int WebRtcClientConnectTimeoutMs)
 {
     /// <summary>
     /// Maps server options to minimal video options DTO.
@@ -537,7 +541,9 @@ public sealed record Options(
         List<string>? WebRtcTurnUrls,
         string? WebRtcTurnSharedSecret,
         int? WebRtcTurnTtlSeconds,
-        string? WebRtcTurnUsername);
+        string? WebRtcTurnUsername,
+        int? WebRtcClientJoinTimeoutMs,
+        int? WebRtcClientConnectTimeoutMs);
 
     /// <summary>
     /// Parses parse.
@@ -775,6 +781,8 @@ public sealed record Options(
         string webRtcTurnSharedSecret = cfg?.WebRtcTurnSharedSecret ?? string.Empty;
         int webRtcTurnTtlSeconds = cfg?.WebRtcTurnTtlSeconds ?? 3600;
         string webRtcTurnUsername = cfg?.WebRtcTurnUsername ?? "hidbridge";
+        int webRtcClientJoinTimeoutMs = cfg?.WebRtcClientJoinTimeoutMs ?? 2000;
+        int webRtcClientConnectTimeoutMs = cfg?.WebRtcClientConnectTimeoutMs ?? 8000;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1235,7 +1243,9 @@ public sealed record Options(
             webRtcTurnUrls,
             webRtcTurnSharedSecret,
             webRtcTurnTtlSeconds,
-            webRtcTurnUsername);
+            webRtcTurnUsername,
+            webRtcClientJoinTimeoutMs,
+            webRtcClientConnectTimeoutMs);
     }
 }
 

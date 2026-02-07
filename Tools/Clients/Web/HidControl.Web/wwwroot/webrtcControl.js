@@ -33,6 +33,7 @@
     const signalingUrl = opts.signalingUrl || getDefaultSignalingUrl();
     const iceServers = normalizeIceServers(opts.iceServers);
     const iceTransportPolicy = (opts.iceTransportPolicy === "relay") ? "relay" : "all";
+    const joinTimeoutMs = (typeof opts.joinTimeoutMs === "number" && Number.isFinite(opts.joinTimeoutMs)) ? opts.joinTimeoutMs : 2000;
     const onLog = typeof opts.onLog === "function" ? opts.onLog : defaultLogger;
     const onStatus = typeof opts.onStatus === "function" ? opts.onStatus : defaultLogger;
     const onMessage = typeof opts.onMessage === "function" ? opts.onMessage : defaultLogger;
@@ -265,7 +266,7 @@
         if (!joinWaiter) return;
         joinWaiter.reject(new Error("join_timeout"));
         joinWaiter = null;
-      }, 3000);
+      }, Math.max(250, joinTimeoutMs | 0));
       await wsSend({ type: "join", room });
       setStatus("joined room: " + room);
       await joinWaiter.promise;

@@ -343,6 +343,9 @@ app.MapGet("/", () =>
 	    const rtcStatus = document.getElementById("rtcStatus");
 	    const rtcSendBtn = document.getElementById("rtcSendBtn");
 	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
+	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
+	    // Defaults are intentionally minimal.
+	    let rtcCfg = { joinTimeoutMs: 2000, connectTimeoutMs: 8000 };
 	    function setRtcStatus(s) {
 	      rtcStatus.textContent = s;
 	      const open = (s === "datachannel: open");
@@ -382,12 +385,27 @@ app.MapGet("/", () =>
 	        room: getRoom(),
 	        iceServers: getIceServers(),
 	        iceTransportPolicy: rtcRelayOnly.checked ? "relay" : "all",
+	        joinTimeoutMs: rtcCfg.joinTimeoutMs,
 	        onLog: rtcLog,
 	        onStatus: setRtcStatus,
 	        onMessage: (data) => show({ webrtc: "message", data })
 	      });
 	    }
 	    resetWebRtcClient();
+
+	    async function refreshWebRtcConfig() {
+	      try {
+	        const res = await fetch("/api/webrtc/config");
+	        if (!res.ok) return;
+	        const j = await res.json().catch(() => null);
+	        if (!j || !j.ok) return;
+	        if (typeof j.joinTimeoutMs === "number") rtcCfg.joinTimeoutMs = j.joinTimeoutMs;
+	        if (typeof j.connectTimeoutMs === "number") rtcCfg.connectTimeoutMs = j.connectTimeoutMs;
+	        rtcLog({ webrtc: "ui.cfg_loaded", rtcCfg });
+	        // Recreate client so join timeout changes apply immediately.
+	        resetWebRtcClient();
+	      } catch {}
+	    }
 
 	    async function refreshRooms() {
 	      try {
@@ -463,6 +481,7 @@ app.MapGet("/", () =>
 	        }
 	      } catch {}
 	    })();
+	    refreshWebRtcConfig();
 	    refreshRooms();
 
 	    async function connectWithTimeout(timeoutMs) {
@@ -486,7 +505,7 @@ app.MapGet("/", () =>
 	      if (!webrtcClient) return;
 	      try {
 	        await webrtcClient.call();
-	        const ok = await connectWithTimeout(15000);
+	        const ok = await connectWithTimeout(rtcCfg.connectTimeoutMs);
 	        if (!ok) {
 	          rtcLog({ webrtc: "ui.connect_timeout", room: getRoom(), debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
 	          const dbg = webrtcClient.getDebug ? webrtcClient.getDebug() : null;
@@ -585,6 +604,20 @@ app.MapGet("/api/webrtc/ice", async (CancellationToken ct) =>
     }
 
     string url = serverUrl.TrimEnd('/') + "/status/webrtc/ice";
+    string json = await http.GetStringAsync(url, ct);
+    return Results.Text(json, "application/json");
+});
+
+app.MapGet("/api/webrtc/config", async (CancellationToken ct) =>
+{
+    // Fetch WebRTC UI config (timeouts, limits) from HidControlServer.
+    using var http = new HttpClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        http.DefaultRequestHeaders.Add("X-HID-Token", token);
+    }
+
+    string url = serverUrl.TrimEnd('/') + "/status/webrtc/config";
     string json = await http.GetStringAsync(url, ct);
     return Results.Text(json, "application/json");
 });

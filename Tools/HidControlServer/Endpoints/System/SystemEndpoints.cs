@@ -156,6 +156,23 @@ public static class SystemEndpoints
             return Results.Ok(new { ok = true, iceServers });
         });
 
+        // WebRTC client-side timeouts/config for UIs.
+        app.MapGet("/status/webrtc/config", (Options opt) =>
+        {
+            // Keep defaults minimal; the UI can increase these for slow networks via config.
+            int joinTimeoutMs = Math.Clamp(opt.WebRtcClientJoinTimeoutMs, 250, 60_000);
+            int connectTimeoutMs = Math.Clamp(opt.WebRtcClientConnectTimeoutMs, 250, 120_000);
+            return Results.Ok(new
+            {
+                ok = true,
+                joinTimeoutMs,
+                connectTimeoutMs,
+                roomsCleanupIntervalSeconds = opt.WebRtcRoomsCleanupIntervalSeconds,
+                roomIdleStopSeconds = opt.WebRtcRoomIdleStopSeconds,
+                roomsMaxHelpers = opt.WebRtcRoomsMaxHelpers
+            });
+        });
+
         app.MapGet("/status/webrtc/rooms", (WebRtcControlPeerSupervisor sup) =>
         {
             var peers = WebRtcWsEndpoints.GetRoomPeerCountsSnapshot();

@@ -60,3 +60,16 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
   "webRtcControlPeerStun": "stun:stun.l.google.com:19302"
 }
 ```
+
+## Timeouts (Config)
+
+The WebRTC control UI uses server-provided timeouts (so they are tweakable without rebuilding the web client):
+
+```json
+{
+  "webRtcClientJoinTimeoutMs": 2000,
+  "webRtcClientConnectTimeoutMs": 8000
+}
+```
+
+Defaults are intentionally small for fast fail on LAN. Increase them if you expect slow TURN/TCP connections.
