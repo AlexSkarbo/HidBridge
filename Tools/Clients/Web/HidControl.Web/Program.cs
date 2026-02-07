@@ -194,11 +194,9 @@ app.MapGet("/", () =>
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
 	      <button id="rtcRefreshRooms" title="Fetch rooms from server">Refresh Rooms</button>
+	      <button id="rtcStartHelper" title="Ensure the server-side helper is started for this room">Start Helper</button>
 	      <button id="rtcConnect">Connect</button>
 	      <button id="rtcHangup">Hangup</button>
-	      <span class="muted">Debug:</span>
-	      <button id="rtcJoin" title="Debug: join without calling">Join</button>
-	      <button id="rtcCall" title="Debug: call (create datachannel + offer)">Call</button>
 	    </div>
 	    <div class="row">
 	      <label class="muted"><input id="rtcAutoRefresh" type="checkbox" checked /> Auto-refresh rooms</label>
@@ -218,14 +216,58 @@ app.MapGet("/", () =>
 	        <tbody id="rtcRoomsBody"></tbody>
 	      </table>
 	    </div>
-	    <div class="row">
-	      <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
-	      <label class="muted"><input id="rtcRelayOnly" type="checkbox" /> Force TURN relay</label>
+	    <div class="card">
+	      <h4>Control Actions (DataChannel)</h4>
+	      <div class="row">
+	        <input id="rtcShortcut" style="min-width: 220px" value="Ctrl+C" placeholder="Shortcut, e.g. Ctrl+C" />
+	        <input id="rtcShortcutHoldMs" type="number" style="width: 140px" value="80" />
+	        <button id="rtcSendShortcutBtn" disabled>Send Shortcut</button>
+	      </div>
+	      <div class="row">
+	        <button class="rtcPreset" data-shortcut="Ctrl+C">Ctrl+C</button>
+	        <button class="rtcPreset" data-shortcut="Ctrl+V">Ctrl+V</button>
+	        <button class="rtcPreset" data-shortcut="Alt+Tab">Alt+Tab</button>
+	        <button class="rtcPreset" data-shortcut="Win+R">Win+R</button>
+	        <button class="rtcPreset" data-shortcut="Ctrl+Alt+Del">Ctrl+Alt+Del</button>
+	        <button class="rtcPreset" data-shortcut="Esc">Esc</button>
+	        <button class="rtcPreset" data-shortcut="Enter">Enter</button>
+	      </div>
+	      <div class="row">
+	        <input id="rtcText" style="min-width: 320px" placeholder="Text (layout-dependent)" />
+	        <select id="rtcTextLayout">
+	          <option value="en">EN (layout-dependent)</option>
+	          <option value="uk">UA (layout-dependent)</option>
+	          <option value="ru">RU (layout-dependent)</option>
+	        </select>
+	        <button id="rtcSendTextBtn" disabled>Send Text</button>
+	      </div>
+	      <div class="row">
+	        <input id="rtcMouseDx" type="number" value="20" style="width: 120px" />
+	        <input id="rtcMouseDy" type="number" value="0" style="width: 120px" />
+	        <button id="rtcMouseMoveBtn" disabled>Move</button>
+	        <button class="rtcClick" data-btn="left" disabled>Left click</button>
+	        <button class="rtcClick" data-btn="right" disabled>Right click</button>
+	        <button class="rtcClick" data-btn="middle" disabled>Middle click</button>
+	      </div>
+	      <div class="row muted">
+	        Note: text input is layout-dependent and currently not guaranteed for all Unicode characters (see docs).
+	      </div>
 	    </div>
-	    <div class="row">
-	      <input id="rtcSend" style="min-width: 520px" value='{"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' placeholder='JSON to forward to /ws/hid, e.g. {"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' />
-	      <button id="rtcSendBtn" disabled>Send</button>
-	    </div>
+	    <details id="rtcDebug">
+	      <summary class="muted">Advanced / Debug</summary>
+	      <div class="row">
+	        <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
+	        <label class="muted"><input id="rtcRelayOnly" type="checkbox" /> Force TURN relay</label>
+	      </div>
+	      <div class="row">
+	        <input id="rtcSend" style="min-width: 520px" value='{"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' placeholder='JSON to forward to /ws/hid, e.g. {"type":"keyboard.shortcut","shortcut":"Ctrl+C","holdMs":80}' />
+	        <button id="rtcSendBtn" disabled>Send (raw JSON)</button>
+	      </div>
+	      <div class="row">
+	        <button id="rtcJoin" title="Debug: join without calling">Join</button>
+	        <button id="rtcCall" title="Debug: call (create datachannel + offer)">Call</button>
+	      </div>
+	    </details>
 	    <div class="row muted" id="rtcStatus">disconnected</div>
 	    <pre id="rtcOut">webrtc: ready</pre>
 	  </div>
@@ -359,9 +401,12 @@ app.MapGet("/", () =>
 
     
 
-    // --- WebRTC signaling demo (module) ---
+	    // --- WebRTC signaling demo (module) ---
 	    const rtcStatus = document.getElementById("rtcStatus");
-	    const rtcSendBtn = document.getElementById("rtcSendBtn");
+	    const rtcSendBtn = document.getElementById("rtcSendBtn"); // raw JSON (debug)
+	    const rtcSendShortcutBtn = document.getElementById("rtcSendShortcutBtn");
+	    const rtcSendTextBtn = document.getElementById("rtcSendTextBtn");
+	    const rtcMouseMoveBtn = document.getElementById("rtcMouseMoveBtn");
 	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
 	    // Defaults are intentionally minimal.
@@ -370,6 +415,10 @@ app.MapGet("/", () =>
 	      rtcStatus.textContent = s;
 	      const open = (s === "datachannel: open");
 	      rtcSendBtn.disabled = !open;
+	      rtcSendShortcutBtn.disabled = !open;
+	      rtcSendTextBtn.disabled = !open;
+	      rtcMouseMoveBtn.disabled = !open;
+	      for (const b of document.querySelectorAll(".rtcClick")) b.disabled = !open;
 	    }
 
     function getIceServers() {
@@ -455,6 +504,7 @@ app.MapGet("/", () =>
 	            <td style="padding: 6px 4px" class="muted">${tags.join(", ") || "-"}</td>
 	            <td style="padding: 6px 4px">${status}</td>
 	            <td style="padding: 6px 4px">
+	              <button data-act="start" data-room="${r.room}" ${r.hasHelper ? "disabled" : ""} title="${r.hasHelper ? "helper already started" : "start helper for this room"}">Start</button>
 	              <button data-act="use" data-room="${r.room}">Use</button>
 	              <button data-act="connect" data-room="${r.room}">Connect</button>
 	              <button data-act="delete" data-room="${r.room}" ${r.isControl ? "disabled title=\"control room cannot be deleted\"" : ""}>Delete</button>
@@ -477,6 +527,19 @@ app.MapGet("/", () =>
 	      const room = btn.getAttribute("data-room");
 	      if (!room) return;
 
+	      if (act === "start") {
+	        try {
+	          const res = await fetch("/api/webrtc/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room }) });
+	          const j = await res.json().catch(() => null);
+	          rtcLog({ webrtc: "ui.room_started", room, payload: j });
+	          show(j || { ok: false, error: "start_failed" });
+	          await refreshRooms();
+	        } catch (e) {
+	          rtcLog({ webrtc: "ui.room_start_error", room, error: String(e) });
+	          show({ ok: false, error: String(e) });
+	        }
+	        return;
+	      }
 	      if (act === "use") {
 	        setRoom(room);
 	        return;
@@ -566,22 +629,83 @@ app.MapGet("/", () =>
 	        if (s === "datachannel: open") return true;
 	        if (s === "no_local_candidates") return false;
 	        if (s && (s.startsWith("error:") || s === "room_full" || s === "disconnected")) return false;
-	        if (webrtcClient && webrtcClient.getDebug) {
-	          const d = webrtcClient.getDebug();
-	          if (d && d.lastJoinedPeers === 1) return false;
-	        }
 	        await new Promise(r => setTimeout(r, 50));
 	      }
 	      return false;
 	    }
 
+	    async function ensureHelper(room) {
+	      try {
+	        const res = await fetch("/api/webrtc/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room }) });
+	        const j = await res.json().catch(() => null);
+	        rtcLog({ webrtc: "ui.ensure_helper", room, payload: j });
+	        if (j && j.ok) return true;
+	        show(j || { ok: false, error: "ensure_helper_failed" });
+	      } catch (e) {
+	        rtcLog({ webrtc: "ui.ensure_helper_error", room, error: String(e) });
+	        show({ ok: false, error: String(e) });
+	      }
+	      return false;
+	    }
+
+	    async function waitForHelperPeer(room, timeoutMs) {
+	      const start = Date.now();
+	      while (Date.now() - start < timeoutMs) {
+	        try {
+	          const res = await fetch("/api/webrtc/rooms");
+	          if (res.ok) {
+	            const j = await res.json().catch(() => null);
+	            if (j && j.ok && Array.isArray(j.rooms)) {
+	              const rr = j.rooms.find(x => x && x.room && x.room.toLowerCase() === room.toLowerCase());
+	              if (rr && rr.hasHelper && typeof rr.peers === "number" && rr.peers >= 1) return true;
+	            }
+	          }
+	        } catch {}
+	        await new Promise(r => setTimeout(r, 150));
+	      }
+	      return false;
+	    }
+
+	    document.getElementById("rtcStartHelper").addEventListener("click", async () => {
+	      const room = getRoom();
+	      const ok = await ensureHelper(room);
+	      if (ok) {
+	        const ready = await waitForHelperPeer(room, 5000);
+	        rtcLog({ webrtc: "ui.helper_ready", room, ready });
+	      }
+	      await refreshRooms();
+	    });
+
 	    document.getElementById("rtcConnect").addEventListener("click", async () => {
 	      resetWebRtcClient();
 	      if (!webrtcClient) return;
 	      try {
+	        const room = getRoom();
+	        // If the room has no helper yet, start it before calling (gives a consistent UX for generated rooms).
+	        const helperOk = await ensureHelper(room);
+	        if (!helperOk) return;
+	        // Important: signaling is a relay. If we send an offer before the helper joins the room, it will be lost.
+	        const ready = await waitForHelperPeer(room, 5000);
+	        if (!ready) {
+	          show({ ok: false, error: "helper_not_ready", hint: "Helper did not join the room in time. Try again or increase timeouts.", room });
+	          return;
+	        }
 	        await webrtcClient.call();
-	        const ok = await connectWithTimeout(rtcCfg.connectTimeoutMs);
-	        if (!ok) {
+	        const connectedOk = await connectWithTimeout(rtcCfg.connectTimeoutMs);
+	        if (!connectedOk) {
+	          const statusNow = rtcStatus.textContent || "";
+	          if (statusNow === "no_local_candidates" || statusNow.startsWith("error: no_local_candidates")) {
+	            show({
+	              ok: false,
+	              error: "no_local_candidates",
+	              hint: "This browser produced 0 ICE candidates. Try Chrome/Firefox or configure TURN in ICE servers JSON."
+	            });
+	            return;
+	          }
+	          if (statusNow.startsWith("error: room_full") || statusNow === "room_full") {
+	            show({ ok: false, error: "room_full", hint: "This room already has a controller. Close the other tab/browser or generate a new room.", room: getRoom() });
+	            return;
+	          }
 	          rtcLog({ webrtc: "ui.connect_timeout", room: getRoom(), debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
 	          const dbg = webrtcClient.getDebug ? webrtcClient.getDebug() : null;
 	          if (dbg && dbg.lastJoinedPeers === 1) {
@@ -593,15 +717,7 @@ app.MapGet("/", () =>
 	            });
 	            return;
 	          }
-	          if (rtcStatus.textContent === "no_local_candidates") {
-	            show({
-	              ok: false,
-	              error: "no_local_candidates",
-	              hint: "This browser produced 0 ICE candidates. Try Chrome/Firefox or configure TURN in ICE servers JSON."
-	            });
-	          } else {
-	            show({ ok: false, error: "connect_timeout", debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
-	          }
+	          show({ ok: false, error: "connect_timeout", debug: webrtcClient.getDebug ? webrtcClient.getDebug() : null });
 	        }
 	      } catch (e) {
 	        rtcLog({ webrtc: "ui.connect_error", error: String(e) });
@@ -635,6 +751,58 @@ app.MapGet("/", () =>
 	      if (webrtcClient) webrtcClient.hangup();
 	      setRtcStatus("disconnected");
 	    });
+
+    function sendDcJson(obj) {
+      if (!webrtcClient) throw new Error("webrtc_not_ready");
+      const s = rtcStatus.textContent;
+      if (s !== "datachannel: open") throw new Error("datachannel_not_open");
+      const text = JSON.stringify(obj);
+      webrtcClient.send(text);
+      show({ ok: true, sent: obj });
+    }
+
+    for (const btn of document.querySelectorAll(".rtcPreset")) {
+      btn.addEventListener("click", () => {
+        const sc = btn.getAttribute("data-shortcut") || "";
+        document.getElementById("rtcShortcut").value = sc;
+      });
+    }
+
+    document.getElementById("rtcSendShortcutBtn").addEventListener("click", async () => {
+      const shortcut = document.getElementById("rtcShortcut").value.trim();
+      const holdMs = Number.parseInt(document.getElementById("rtcShortcutHoldMs").value, 10) || 80;
+      if (!shortcut) {
+        show({ ok: false, error: "shortcut_required" });
+        return;
+      }
+      try { sendDcJson({ type: "keyboard.shortcut", shortcut, holdMs }); } catch (e) { show({ ok: false, error: String(e) }); }
+    });
+
+    document.getElementById("rtcSendTextBtn").addEventListener("click", async () => {
+      const text = document.getElementById("rtcText").value || "";
+      const layout = document.getElementById("rtcTextLayout").value || "en";
+      try { sendDcJson({ type: "keyboard.text", text, layout }); } catch (e) { show({ ok: false, error: String(e) }); }
+    });
+
+    document.getElementById("rtcMouseMoveBtn").addEventListener("click", async () => {
+      const dx = Number.parseInt(document.getElementById("rtcMouseDx").value, 10) || 0;
+      const dy = Number.parseInt(document.getElementById("rtcMouseDy").value, 10) || 0;
+      try { sendDcJson({ type: "mouse.move", dx, dy }); } catch (e) { show({ ok: false, error: String(e) }); }
+    });
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    for (const btn of document.querySelectorAll(".rtcClick")) {
+      btn.addEventListener("click", async () => {
+        const button = btn.getAttribute("data-btn") || "left";
+        try {
+          sendDcJson({ type: "mouse.button", button, down: true });
+          await sleep(20);
+          sendDcJson({ type: "mouse.button", button, down: false });
+        } catch (e) {
+          show({ ok: false, error: String(e) });
+        }
+      });
+    }
 
     document.getElementById("rtcSendBtn").addEventListener("click", async () => {
       const text = document.getElementById("rtcSend").value;

@@ -35,6 +35,7 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
   - If another tab/browser tries to join, it will get `room_full`.
   - To run multiple independent sessions, use different room ids.
     - `HidControl.Web` can create a room on the server (and start a helper for it) via `Generate`.
+    - `Start Helper` ensures the helper is running for the selected room (useful when you typed/pasted a room id).
     - You can also create rooms via REST: `POST /status/webrtc/rooms` (returns `room`, `pid`).
 - **Room name generation (server):**
   - When you call `POST /status/webrtc/rooms` without a `room` value, the server generates a room id:
@@ -53,10 +54,21 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 
 `HidControl.Web` includes a small room browser UI:
 - `Generate`: creates a new room on the server and starts a helper for it.
+- `Start Helper`: ensures the helper is started for the currently selected room.
 - Rooms table:
+  - `Start`: starts the helper for that room (disabled if already started).
   - `Use`: select a room (fills the Room field).
   - `Connect`: selects the room and attempts to connect.
   - `Delete`: stops the helper for that room (not allowed for `control`).
+
+## Web UI Control Actions
+
+Once the status becomes `datachannel: open`, you can use the built-in controls:
+- Preset keyboard shortcuts (Ctrl+C, Alt+Tab, Win+R, etc.)
+- Text input (layout-dependent, limited Unicode support for now)
+- Mouse move + basic clicks
+
+All of these send JSON messages over the WebRTC DataChannel and are forwarded by the helper to `/ws/hid`.
 
 Troubleshooting:
 - `room_full`: the room already has a controller. Close the other tab/browser or generate a new room.

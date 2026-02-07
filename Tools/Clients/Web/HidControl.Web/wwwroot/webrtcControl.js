@@ -15,8 +15,30 @@
   }
 
   function normalizeIceServers(iceServers) {
-    if (Array.isArray(iceServers) && iceServers.length > 0) return iceServers;
-    return [{ urls: "stun:stun.l.google.com:19302" }];
+    if (!Array.isArray(iceServers) || iceServers.length === 0) {
+      return [{ urls: "stun:stun.l.google.com:19302" }];
+    }
+
+    // Sanitize for strict browsers:
+    // - RTCIceServer.credentialType is optional, but MUST NOT be null if provided.
+    // - Many fields are optional and should be omitted when empty.
+    const out = [];
+    for (const s of iceServers) {
+      if (!s) continue;
+      const urlsRaw = s.urls ?? s.url;
+      const urls = Array.isArray(urlsRaw) ? urlsRaw.filter(Boolean) : (typeof urlsRaw === "string" && urlsRaw ? [urlsRaw] : []);
+      if (urls.length === 0) continue;
+
+      const clean = { urls };
+      if (typeof s.username === "string" && s.username) clean.username = s.username;
+      if (typeof s.credential === "string" && s.credential) clean.credential = s.credential;
+      // Allowed values in browsers are typically "password". If missing/invalid, omit it.
+      if (typeof s.credentialType === "string" && s.credentialType) clean.credentialType = s.credentialType;
+
+      out.push(clean);
+    }
+
+    return out.length > 0 ? out : [{ urls: "stun:stun.l.google.com:19302" }];
   }
 
   function getPeerConnectionCtor() {
