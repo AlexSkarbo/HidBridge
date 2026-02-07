@@ -31,9 +31,9 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 
 ## Notes
 
-- **Rooms / concurrency (MVP):** the default room `control` allows **only 1 controller** at a time (plus the helper).
-  - If another tab/browser tries to join, it will get `room_full`.
-  - To run multiple independent sessions, use different room ids.
+- **Rooms / concurrency (Control MVP):** every room allows **only 1 controller** at a time (plus the helper) = **max 2 peers**.
+  - If another tab/browser tries to join the same room, it will get `room_full`.
+  - To run multiple independent sessions, use different room ids (one room per session).
     - `HidControl.Web` can create a room on the server (and start a helper for it) via `Generate`.
     - `Start Helper` ensures the helper is running for the selected room (useful when you typed/pasted a room id).
     - You can also create rooms via REST: `POST /status/webrtc/rooms` (returns `room`, `pid`).
@@ -92,8 +92,8 @@ The WebRTC control UI uses server-provided timeouts (so they are tweakable witho
 
 ```json
 {
-  "webRtcClientJoinTimeoutMs": 2000,
-  "webRtcClientConnectTimeoutMs": 8000
+  "webRtcClientJoinTimeoutMs": 250,
+  "webRtcClientConnectTimeoutMs": 5000
 }
 ```
 

@@ -55,7 +55,7 @@
     const signalingUrl = opts.signalingUrl || getDefaultSignalingUrl();
     const iceServers = normalizeIceServers(opts.iceServers);
     const iceTransportPolicy = (opts.iceTransportPolicy === "relay") ? "relay" : "all";
-    const joinTimeoutMs = (typeof opts.joinTimeoutMs === "number" && Number.isFinite(opts.joinTimeoutMs)) ? opts.joinTimeoutMs : 2000;
+    const joinTimeoutMs = (typeof opts.joinTimeoutMs === "number" && Number.isFinite(opts.joinTimeoutMs)) ? opts.joinTimeoutMs : 250;
     const onLog = typeof opts.onLog === "function" ? opts.onLog : defaultLogger;
     const onStatus = typeof opts.onStatus === "function" ? opts.onStatus : defaultLogger;
     const onMessage = typeof opts.onMessage === "function" ? opts.onMessage : defaultLogger;

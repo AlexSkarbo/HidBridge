@@ -146,8 +146,8 @@
   "webRtcRoomIdleStopSeconds": 30,
   "webRtcRoomsMaxHelpers": 5,
 
-  "webRtcClientJoinTimeoutMs": 2000,
-  "webRtcClientConnectTimeoutMs": 8000,
+  "webRtcClientJoinTimeoutMs": 250,
+  "webRtcClientConnectTimeoutMs": 5000,
 
   "webRtcTurnUrls": [
     "turn:localhost:3478?transport=udp",

@@ -410,7 +410,8 @@ app.MapGet("/", () =>
 	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
 	    // Defaults are intentionally minimal.
-	    let rtcCfg = { joinTimeoutMs: 2000, connectTimeoutMs: 8000 };
+	    // Default values are overwritten by /api/webrtc/config on page load. Keep them small for fast fail on LAN.
+	    let rtcCfg = { joinTimeoutMs: 250, connectTimeoutMs: 5000 };
 	    function setRtcStatus(s) {
 	      rtcStatus.textContent = s;
 	      const open = (s === "datachannel: open");
@@ -670,7 +671,7 @@ app.MapGet("/", () =>
 	      const room = getRoom();
 	      const ok = await ensureHelper(room);
 	      if (ok) {
-	        const ready = await waitForHelperPeer(room, 5000);
+	        const ready = await waitForHelperPeer(room, Math.min(10_000, Math.max(1000, rtcCfg.connectTimeoutMs)));
 	        rtcLog({ webrtc: "ui.helper_ready", room, ready });
 	      }
 	      await refreshRooms();
@@ -685,7 +686,7 @@ app.MapGet("/", () =>
 	        const helperOk = await ensureHelper(room);
 	        if (!helperOk) return;
 	        // Important: signaling is a relay. If we send an offer before the helper joins the room, it will be lost.
-	        const ready = await waitForHelperPeer(room, 5000);
+	        const ready = await waitForHelperPeer(room, Math.min(10_000, Math.max(1000, rtcCfg.connectTimeoutMs)));
 	        if (!ready) {
 	          show({ ok: false, error: "helper_not_ready", hint: "Helper did not join the room in time. Try again or increase timeouts.", room });
 	          return;

@@ -112,6 +112,35 @@ public sealed class WebRtcIntegrationTests
     }
 
     [Fact]
+    public async Task CreateRoom_GeneratesFallbackRoomId_WhenDeviceIdMissing()
+    {
+        var backend = new FakeBackend(deviceIdHex: null);
+        var roomsSvc = new WebRtcRoomsService(backend);
+        var uc = new CreateWebRtcRoomUseCase(roomsSvc);
+
+        var res = await uc.Execute(null, CancellationToken.None);
+
+        Assert.True(res.Ok);
+        Assert.NotNull(res.Room);
+        Assert.StartsWith("hb-unknown-", res.Room!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CreateRoom_WithExplicitRoomId_StartsHelperForThatRoom()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomsSvc = new WebRtcRoomsService(backend);
+        var uc = new CreateWebRtcRoomUseCase(roomsSvc);
+
+        var res = await uc.Execute("hb-50443405-demo", CancellationToken.None);
+
+        Assert.True(res.Ok);
+        Assert.Equal("hb-50443405-demo", res.Room);
+        Assert.True(res.Started);
+        Assert.Equal(1, backend.EnsureHelperStartedCalls);
+    }
+
+    [Fact]
     public async Task CreateRoom_RejectsInvalidRoomId()
     {
         var backend = new FakeBackend();

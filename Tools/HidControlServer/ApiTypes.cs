@@ -781,8 +781,9 @@ public sealed record Options(
         string webRtcTurnSharedSecret = cfg?.WebRtcTurnSharedSecret ?? string.Empty;
         int webRtcTurnTtlSeconds = cfg?.WebRtcTurnTtlSeconds ?? 3600;
         string webRtcTurnUsername = cfg?.WebRtcTurnUsername ?? "hidbridge";
-        int webRtcClientJoinTimeoutMs = cfg?.WebRtcClientJoinTimeoutMs ?? 2000;
-        int webRtcClientConnectTimeoutMs = cfg?.WebRtcClientConnectTimeoutMs ?? 8000;
+        // Intentionally small defaults for fast-fail on LAN. Increase for TURN/TCP-heavy environments.
+        int webRtcClientJoinTimeoutMs = cfg?.WebRtcClientJoinTimeoutMs ?? 250;
+        int webRtcClientConnectTimeoutMs = cfg?.WebRtcClientConnectTimeoutMs ?? 5000;
 
         for (int i = 0; i < args.Length; i++)
         {

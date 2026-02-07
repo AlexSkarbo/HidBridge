@@ -14,8 +14,7 @@ namespace HidControlServer.Endpoints.Ws;
 public static class WebRtcWsEndpoints
 {
     private static readonly ConcurrentDictionary<string, RoomState> Rooms = new(StringComparer.OrdinalIgnoreCase);
-    private const string ControlRoomId = "control";
-    private const int ControlRoomMaxPeers = 2;
+    private const int DefaultRoomMaxPeers = 2;
 
     /// <summary>
     /// Returns a snapshot of active room peer counts.
@@ -94,9 +93,9 @@ public static class WebRtcWsEndpoints
                         roomId = normalized;
                         RoomState room = Rooms.GetOrAdd(roomId, _ => new RoomState());
 
-                        // For the default control room, enforce a single controller + a single helper.
-                        if (string.Equals(roomId, ControlRoomId, StringComparison.OrdinalIgnoreCase) &&
-                            room.Clients.Count >= ControlRoomMaxPeers)
+                        // Control MVP policy: 1 controller + 1 helper per room (max 2 peers).
+                        // This prevents multi-controller races and makes "room_full" deterministic.
+                        if (room.Clients.Count >= DefaultRoomMaxPeers)
                         {
                             await client.SendJsonAsync(new
                             {

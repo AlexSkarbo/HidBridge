@@ -75,7 +75,7 @@ This roadmap is a living plan for getting from the current state (control MVP + 
 
 ### Milestone 1 — “Control MVP” (DONE)
 - In-memory signaling rooms.
-- One controller per control room (helper + one browser).
+- One controller per room (helper + one browser) via a **max 2 peers** policy.
 - Room listing + room creation + helper autostart.
 - TURN support (optional) for restrictive networks.
 
@@ -130,4 +130,3 @@ Setup instructions live in `Docs/turn_setup.md`.
    - Move room/ICE logic into Application + Infrastructure services.
 5. Add minimal integration smoke tests:
    - Room lifecycle + helper supervision policy.
-
