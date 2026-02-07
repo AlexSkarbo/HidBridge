@@ -30,6 +30,24 @@ public interface IWebRtcRoomsService
 }
 
 /// <summary>
+/// Generates WebRTC room ids that are stable-ish and hardware-associated when possible.
+/// </summary>
+public interface IWebRtcRoomIdService
+{
+    /// <summary>
+    /// Generates a room id for a control-plane (DataChannel) session.
+    /// </summary>
+    /// <returns>Room id.</returns>
+    string GenerateControlRoomId();
+
+    /// <summary>
+    /// Generates a room id for a video-plane (WebRTC media) session.
+    /// </summary>
+    /// <returns>Room id.</returns>
+    string GenerateVideoRoomId();
+}
+
+/// <summary>
 /// Provides ICE server configuration for WebRTC clients (STUN/TURN).
 /// </summary>
 public interface IWebRtcIceService
@@ -119,4 +137,3 @@ public sealed record WebRtcClientConfig(
     int RoomsCleanupIntervalSeconds,
     int RoomIdleStopSeconds,
     int RoomsMaxHelpers);
-

@@ -2,7 +2,7 @@ using HidControlServer;
 using HidControlServer.Endpoints.Devices;
 using HidControlServer.Endpoints.Keyboard;
 using HidControlServer.Endpoints.Mouse;
-using HidControlServer.Endpoints.System;
+using HidControlServer.Endpoints.Sys;
 using HidControlServer.Endpoints.Uart;
 using HidControlServer.Endpoints.Video;
 using HidControlServer.Endpoints.Ws;
@@ -76,7 +76,9 @@ builder.Services.AddSingleton(new KeyboardMappingStore(options.PgConnectionStrin
 builder.Services.AddSingleton(new VideoSourceStore(options.VideoSources));
 builder.Services.AddSingleton(new VideoProfileStore(options.VideoProfiles, options.ActiveVideoProfile));
 builder.Services.AddSingleton<WebRtcControlPeerSupervisor>();
+builder.Services.AddSingleton<WebRtcVideoPeerSupervisor>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcBackend, HidControlServer.Services.WebRtcBackendAdapter>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcRoomIdService, HidControl.Infrastructure.Services.WebRtcRoomIdService>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcRoomsService, HidControl.Infrastructure.Services.WebRtcRoomsService>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcIceService, HidControl.Infrastructure.Services.WebRtcIceService>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcConfigService, HidControl.Infrastructure.Services.WebRtcConfigService>();
@@ -108,6 +110,10 @@ builder.Services.AddSingleton<SetActiveVideoProfileUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoSourceStore, VideoSourceStoreAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoRuntimeControl, VideoRuntimeControlAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOutputStateProvider, VideoOutputStateProviderAdapter>();
+
+// WebRTC use-cases.
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.CreateWebRtcVideoRoomUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.DeleteWebRtcVideoRoomUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOutputApplier, VideoOutputApplierAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoFfmpegStarter, VideoFfmpegStarterAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOrphanKiller, VideoOrphanKillerAdapter>();
@@ -175,6 +181,11 @@ app.Lifetime.ApplicationStopping.Register(() =>
     try
     {
         app.Services.GetRequiredService<WebRtcControlPeerSupervisor>().Stop();
+    }
+    catch { }
+    try
+    {
+        app.Services.GetRequiredService<WebRtcVideoPeerSupervisor>().Stop();
     }
     catch { }
     foreach (var kvp in appState.FfmpegProcesses)

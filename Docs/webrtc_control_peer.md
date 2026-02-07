@@ -49,6 +49,7 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
   - In that case, STUN-only cannot work and you need a TURN relay.
   - See `Docs/turn_setup.md` (coturn + TURN REST ephemeral credentials).
 - `WebRtcControlPeer` requires Go 1.21+ (some Pion transport dependencies require `sync/atomic.Bool`).
+- Video-plane skeleton notes: see `Docs/webrtc_video_peer.md`.
 
 ## Web UI Room Browser
 

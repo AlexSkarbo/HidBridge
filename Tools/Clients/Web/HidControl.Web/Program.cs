@@ -188,9 +188,13 @@ app.MapGet("/", () =>
 	      If you see <code>room_full</code>: someone is already controlling that room (close the other tab or generate a new room).
 	    </div>
 	    <div class="row muted">
-	      Note: the server-side helper listens on room <code>control</code> by default. If you generate a new room id, you must start <code>Tools/WebRtcControlPeer</code> with the same room (or switch back to <code>control</code>).
+	      Note: server-side helpers listen on <code>control</code> (control-plane) and <code>video</code> (video-plane) by default. Generated rooms auto-start helpers when possible.
 	    </div>
 	    <div class="row">
+	      <select id="rtcMode" title="Room mode">
+	        <option value="control" selected>control</option>
+	        <option value="video">video</option>
+	      </select>
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
 	      <button id="rtcRefreshRooms" title="Fetch rooms from server">Refresh Rooms</button>
@@ -437,10 +441,17 @@ app.MapGet("/", () =>
     }
 
 	    let webrtcClient = null;
+	    function isVideoRoomId(r) {
+	      if (!r) return false;
+	      const x = String(r).toLowerCase();
+	      return x === "video" || x.startsWith("hb-v-") || x.startsWith("video-");
+	    }
+	    function getMode() { return (document.getElementById("rtcMode").value || "control"); }
 	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
 	    function setRoom(r) {
 	      if (!r) return;
 	      document.getElementById("rtcRoom").value = r;
+	      document.getElementById("rtcMode").value = isVideoRoomId(r) ? "video" : "control";
 	      resetWebRtcClient();
 	      rtcLog({ webrtc: "ui.room_selected", room: r });
 	    }
@@ -494,9 +505,11 @@ app.MapGet("/", () =>
 	        for (const r of j.rooms) {
 	          const tags = [];
 	          if (r.isControl) tags.push("control");
+	          if (isVideoRoomId(r.room)) tags.push("video");
 	          if (r.hasHelper) tags.push("helper");
 
 	          const status = (r.peers >= 2) ? "busy" : (r.hasHelper ? "idle" : "empty");
+	          const canDelete = !r.isControl && String(r.room).toLowerCase() !== "video";
 
 	          const tr = document.createElement("tr");
 	          tr.innerHTML = `
@@ -508,7 +521,7 @@ app.MapGet("/", () =>
 	              <button data-act="start" data-room="${r.room}" ${r.hasHelper ? "disabled" : ""} title="${r.hasHelper ? "helper already started" : "start helper for this room"}">Start</button>
 	              <button data-act="use" data-room="${r.room}">Use</button>
 	              <button data-act="connect" data-room="${r.room}">Connect</button>
-	              <button data-act="delete" data-room="${r.room}" ${r.isControl ? "disabled title=\"control room cannot be deleted\"" : ""}>Delete</button>
+	              <button data-act="delete" data-room="${r.room}" ${canDelete ? "" : "disabled"} title="${canDelete ? "stop helper for this room" : "this room cannot be deleted"}">Delete</button>
 	            </td>
 	          `;
 	          body.appendChild(tr);
@@ -566,7 +579,9 @@ app.MapGet("/", () =>
 
 	    document.getElementById("rtcGenRoom").addEventListener("click", async () => {
 	      try {
-	        const res = await fetch("/api/webrtc/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+	        const mode = getMode();
+	        const createUrl = (mode === "video") ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
+	        const res = await fetch(createUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
 	        const j = await res.json().catch(() => null);
 	        if (!j || !j.ok || !j.room) {
 	          rtcLog({ webrtc: "ui.room_create_failed", payload: j });
@@ -929,6 +944,69 @@ app.MapDelete("/api/webrtc/rooms/{room}", async (string room, CancellationToken 
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
         var res = await HidControl.ClientSdk.WebRtcClientExtensions.DeleteWebRtcRoomAsync(client, room, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "delete_failed"));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "timeout"));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, ex.Message));
+    }
+});
+
+// WebRTC "video room" lifecycle (skeleton).
+app.MapGet("/api/webrtc/video/rooms", async (CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
+    catch
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
+});
+
+app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateRoomRequest>(cancellationToken: ct)
+            ?? new HidControl.Contracts.WebRtcCreateRoomRequest(null);
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcVideoRoomAsync(client, body.Room, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "create_failed"));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "timeout"));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, ex.Message));
+    }
+});
+
+app.MapDelete("/api/webrtc/video/rooms/{room}", async (string room, CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.DeleteWebRtcVideoRoomAsync(client, room, ct);
         return Results.Json(res ?? new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "delete_failed"));
     }
     catch (TaskCanceledException)

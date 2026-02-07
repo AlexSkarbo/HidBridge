@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using HidControl.Application.Abstractions;
 
 namespace HidControl.Infrastructure.Services;
@@ -10,14 +8,16 @@ namespace HidControl.Infrastructure.Services;
 public sealed class WebRtcRoomsService : IWebRtcRoomsService
 {
     private readonly IWebRtcBackend _backend;
+    private readonly IWebRtcRoomIdService _roomIds;
 
     /// <summary>
     /// Creates an instance.
     /// </summary>
     /// <param name="backend">Backend.</param>
-    public WebRtcRoomsService(IWebRtcBackend backend)
+    public WebRtcRoomsService(IWebRtcBackend backend, IWebRtcRoomIdService roomIds)
     {
         _backend = backend;
+        _roomIds = roomIds;
     }
 
     /// <inheritdoc />
@@ -46,7 +46,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     public Task<WebRtcRoomCreateResult> CreateAsync(string? room, CancellationToken ct)
     {
         _ = ct;
-        string roomId = string.IsNullOrWhiteSpace(room) ? GenerateRoomId(_backend.GetDeviceIdHex()) : room.Trim();
+        string roomId = string.IsNullOrWhiteSpace(room) ? _roomIds.GenerateControlRoomId() : room.Trim();
         if (!TryNormalizeRoomId(roomId, out string normalized, out string? err))
         {
             return Task.FromResult(new WebRtcRoomCreateResult(false, roomId, false, null, err ?? "bad_room"));
@@ -64,34 +64,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         {
             return Task.FromResult(new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_control"));
         }
+        if (string.Equals(room, "video", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_video"));
+        }
 
         var (ok, stopped, error) = _backend.StopHelper(room);
         return Task.FromResult(new WebRtcRoomDeleteResult(ok, room, stopped, error));
-    }
-
-    private static string GenerateRoomId(string? deviceIdHex)
-    {
-        const string alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-        var bytes = new byte[6];
-        RandomNumberGenerator.Fill(bytes);
-        var sb = new StringBuilder(64);
-        sb.Append("hb-");
-        if (!string.IsNullOrWhiteSpace(deviceIdHex))
-        {
-            string d = deviceIdHex.Trim().ToLowerInvariant();
-            if (d.Length > 8) d = d.Substring(0, 8);
-            sb.Append(d);
-        }
-        else
-        {
-            sb.Append("unknown");
-        }
-        sb.Append('-');
-        foreach (byte b in bytes)
-        {
-            sb.Append(alphabet[b % alphabet.Length]);
-        }
-        return sb.ToString();
     }
 
     private static bool TryNormalizeRoomId(string room, out string normalized, out string? error)
@@ -128,4 +107,3 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         return true;
     }
 }
-

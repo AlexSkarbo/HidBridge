@@ -4,7 +4,7 @@ using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
-namespace HidControlServer.Endpoints.System;
+namespace HidControlServer.Endpoints.Sys;
 
 /// <summary>
 /// Registers System endpoints.
@@ -174,6 +174,45 @@ public static class SystemEndpoints
         });
 
         app.MapDelete("/status/webrtc/rooms/{room}", async (string room, HidControl.Application.UseCases.WebRtc.DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
+        {
+            var res = await uc.Execute(room, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
+        });
+
+        // WebRTC "video room" lifecycle (skeleton).
+        //
+        // Video rooms are a separate namespace (recommended) so we can later attach WebRTC media tracks
+        // without mixing them with control-plane sessions. Current naming convention:
+        // - Default room: "video"
+        // - Generated rooms: "hb-v-<deviceIdShort>-<rand>"
+        app.MapGet("/status/webrtc/video/rooms", async (HidControl.Application.UseCases.WebRtc.ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        {
+            var snap = await uc.Execute(ct);
+            var rooms = snap.Rooms
+                .Where(r => string.Equals(r.Room, "video", StringComparison.OrdinalIgnoreCase) || r.Room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase) || r.Room.StartsWith("video-", StringComparison.OrdinalIgnoreCase))
+                .Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper })
+                .ToArray();
+            return Results.Ok(new { ok = true, rooms });
+        });
+
+        app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, HidControl.Application.UseCases.WebRtc.CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        {
+            string? roomId = null;
+            try
+            {
+                var body = await req.ReadFromJsonAsync<Dictionary<string, string?>>();
+                if (body is not null && body.TryGetValue("room", out var r))
+                {
+                    roomId = r;
+                }
+            }
+            catch { }
+
+            var res = await uc.Execute(roomId, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
+        });
+
+        app.MapDelete("/status/webrtc/video/rooms/{room}", async (string room, HidControl.Application.UseCases.WebRtc.DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
             var res = await uc.Execute(room, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });

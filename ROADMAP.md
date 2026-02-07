@@ -94,11 +94,13 @@ This roadmap is a living plan for getting from the current state (control MVP + 
 
 Room IDs should not be empty and should be traceable to a specific piece of hardware:
 - Base prefix: `hb-`
+- Video-plane prefix: `hb-v-`
 - Device identity component: derived from the bridge identity when available (e.g., a stable device ID from the UART-connected bridge MCU).
 - Random suffix: short url-safe token to avoid collisions.
 
 Example:
 - `hb-<deviceIdShort>-<rand>`
+- `hb-v-<deviceIdShort>-<rand>`
 - Fallback: `hb-unknown-<rand>`
 
 This is intentionally documented so we can later change implementation without forgetting the intent.

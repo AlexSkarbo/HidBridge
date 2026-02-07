@@ -85,7 +85,8 @@ public sealed class WebRtcIntegrationTests
         backend.SetRoomPeers("hb-test", 0);
         backend.SetHelperRoom("hb-helper", true);
 
-        var roomsSvc = new WebRtcRoomsService(backend);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new ListWebRtcRoomsUseCase(roomsSvc);
 
         var snap = await uc.Execute(CancellationToken.None);
@@ -99,7 +100,8 @@ public sealed class WebRtcIntegrationTests
     public async Task CreateRoom_GeneratesRoomId_AndStartsHelper()
     {
         var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
-        var roomsSvc = new WebRtcRoomsService(backend);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcRoomUseCase(roomsSvc);
 
         var res = await uc.Execute(null, CancellationToken.None);
@@ -115,7 +117,8 @@ public sealed class WebRtcIntegrationTests
     public async Task CreateRoom_GeneratesFallbackRoomId_WhenDeviceIdMissing()
     {
         var backend = new FakeBackend(deviceIdHex: null);
-        var roomsSvc = new WebRtcRoomsService(backend);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcRoomUseCase(roomsSvc);
 
         var res = await uc.Execute(null, CancellationToken.None);
@@ -129,7 +132,8 @@ public sealed class WebRtcIntegrationTests
     public async Task CreateRoom_WithExplicitRoomId_StartsHelperForThatRoom()
     {
         var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
-        var roomsSvc = new WebRtcRoomsService(backend);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcRoomUseCase(roomsSvc);
 
         var res = await uc.Execute("hb-50443405-demo", CancellationToken.None);
@@ -144,7 +148,8 @@ public sealed class WebRtcIntegrationTests
     public async Task CreateRoom_RejectsInvalidRoomId()
     {
         var backend = new FakeBackend();
-        var roomsSvc = new WebRtcRoomsService(backend);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcRoomUseCase(roomsSvc);
 
         var res = await uc.Execute("bad room with spaces", CancellationToken.None);
@@ -158,13 +163,29 @@ public sealed class WebRtcIntegrationTests
     public async Task DeleteRoom_RejectsControlRoom()
     {
         var backend = new FakeBackend();
-        var roomsSvc = new WebRtcRoomsService(backend);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new DeleteWebRtcRoomUseCase(roomsSvc);
 
         var res = await uc.Execute("control", CancellationToken.None);
 
         Assert.False(res.Ok);
         Assert.Equal("cannot_delete_control", res.Error);
+        Assert.Equal(0, backend.StopHelperCalls);
+    }
+
+    [Fact]
+    public async Task DeleteRoom_RejectsDefaultVideoRoom()
+    {
+        var backend = new FakeBackend();
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new DeleteWebRtcRoomUseCase(roomsSvc);
+
+        var res = await uc.Execute("video", CancellationToken.None);
+
+        Assert.False(res.Ok);
+        Assert.Equal("cannot_delete_video", res.Error);
         Assert.Equal(0, backend.StopHelperCalls);
     }
 
@@ -191,6 +212,36 @@ public sealed class WebRtcIntegrationTests
             !string.IsNullOrWhiteSpace(s.Username) &&
             !string.IsNullOrWhiteSpace(s.Credential) &&
             string.Equals(s.CredentialType, "password", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_GeneratesRoomIdWithVideoPrefix_AndStartsHelper()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
+
+        var res = await uc.Execute(null, CancellationToken.None);
+
+        Assert.True(res.Ok);
+        Assert.NotNull(res.Room);
+        Assert.StartsWith("hb-v-50443405-", res.Room!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, backend.EnsureHelperStartedCalls);
+    }
+
+    [Fact]
+    public async Task DeleteVideoRoom_RejectsDefaultVideoRoom()
+    {
+        var backend = new FakeBackend();
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new DeleteWebRtcVideoRoomUseCase(roomsSvc);
+
+        var res = await uc.Execute("video", CancellationToken.None);
+
+        Assert.False(res.Ok);
+        Assert.Equal("cannot_delete_video", res.Error);
     }
 
     [Fact]

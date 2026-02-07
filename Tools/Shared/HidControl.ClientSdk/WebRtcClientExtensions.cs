@@ -53,5 +53,33 @@ public static class WebRtcClientExtensions
     /// <returns>Delete response.</returns>
     public static Task<WebRtcDeleteRoomResponse?> DeleteWebRtcRoomAsync(this HidControlClient client, string room, CancellationToken ct = default)
         => client.DeleteAsync<WebRtcDeleteRoomResponse>("/status/webrtc/rooms/" + Uri.EscapeDataString(room), ct);
-}
 
+    /// <summary>
+    /// Lists WebRTC video rooms known to the server.
+    /// </summary>
+    /// <param name="client">Client.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Rooms response.</returns>
+    public static Task<WebRtcRoomsResponse?> ListWebRtcVideoRoomsAsync(this HidControlClient client, CancellationToken ct = default)
+        => client.GetAsync<WebRtcRoomsResponse>("/status/webrtc/video/rooms", ct);
+
+    /// <summary>
+    /// Creates a WebRTC video room and ensures a helper peer is started for it.
+    /// </summary>
+    /// <param name="client">Client.</param>
+    /// <param name="room">Optional room id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Create response.</returns>
+    public static Task<WebRtcCreateRoomResponse?> CreateWebRtcVideoRoomAsync(this HidControlClient client, string? room = null, CancellationToken ct = default)
+        => client.PostAsync<WebRtcCreateRoomRequest, WebRtcCreateRoomResponse>("/status/webrtc/video/rooms", new WebRtcCreateRoomRequest(room), ct);
+
+    /// <summary>
+    /// Deletes a WebRTC video room (stops its helper peer).
+    /// </summary>
+    /// <param name="client">Client.</param>
+    /// <param name="room">Room id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Delete response.</returns>
+    public static Task<WebRtcDeleteRoomResponse?> DeleteWebRtcVideoRoomAsync(this HidControlClient client, string room, CancellationToken ct = default)
+        => client.DeleteAsync<WebRtcDeleteRoomResponse>("/status/webrtc/video/rooms/" + Uri.EscapeDataString(room), ct);
+}

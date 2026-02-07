@@ -38,6 +38,8 @@ internal static class ServerStartupService
 
         // Optional WebRTC control helper auto-start (runs next to the server).
         app.Services.GetRequiredService<WebRtcControlPeerSupervisor>().StartIfEnabled();
+        // Optional WebRTC video helper auto-start (runs next to the server).
+        app.Services.GetRequiredService<WebRtcVideoPeerSupervisor>().StartIfEnabled();
 
         if (opt.FfmpegAutoStart)
         {

@@ -125,6 +125,9 @@ public static class Hex
 /// <param name="WebRtcControlPeerAutoStart">WebRtcControlPeerAutoStart.</param>
 /// <param name="WebRtcControlPeerRoom">WebRtcControlPeerRoom.</param>
 /// <param name="WebRtcControlPeerStun">WebRtcControlPeerStun.</param>
+/// <param name="WebRtcVideoPeerAutoStart">WebRtcVideoPeerAutoStart.</param>
+/// <param name="WebRtcVideoPeerRoom">WebRtcVideoPeerRoom.</param>
+/// <param name="WebRtcVideoPeerStun">WebRtcVideoPeerStun.</param>
 /// <param name="WebRtcRoomsCleanupIntervalSeconds">WebRtcRoomsCleanupIntervalSeconds.</param>
 /// <param name="WebRtcRoomIdleStopSeconds">WebRtcRoomIdleStopSeconds.</param>
 /// <param name="WebRtcRoomsMaxHelpers">WebRtcRoomsMaxHelpers.</param>
@@ -209,6 +212,9 @@ public sealed record Options(
     bool WebRtcControlPeerAutoStart,
     string WebRtcControlPeerRoom,
     string WebRtcControlPeerStun,
+    bool WebRtcVideoPeerAutoStart,
+    string WebRtcVideoPeerRoom,
+    string WebRtcVideoPeerStun,
     int WebRtcRoomsCleanupIntervalSeconds,
     int WebRtcRoomIdleStopSeconds,
     int WebRtcRoomsMaxHelpers,
@@ -535,6 +541,9 @@ public sealed record Options(
         bool? WebRtcControlPeerAutoStart,
         string? WebRtcControlPeerRoom,
         string? WebRtcControlPeerStun,
+        bool? WebRtcVideoPeerAutoStart,
+        string? WebRtcVideoPeerRoom,
+        string? WebRtcVideoPeerStun,
         int? WebRtcRoomsCleanupIntervalSeconds,
         int? WebRtcRoomIdleStopSeconds,
         int? WebRtcRoomsMaxHelpers,
@@ -774,6 +783,9 @@ public sealed record Options(
         bool webRtcControlPeerAutoStart = cfg?.WebRtcControlPeerAutoStart ?? false;
         string webRtcControlPeerRoom = cfg?.WebRtcControlPeerRoom ?? "control";
         string webRtcControlPeerStun = cfg?.WebRtcControlPeerStun ?? "stun:stun.l.google.com:19302";
+        bool webRtcVideoPeerAutoStart = cfg?.WebRtcVideoPeerAutoStart ?? false;
+        string webRtcVideoPeerRoom = cfg?.WebRtcVideoPeerRoom ?? "video";
+        string webRtcVideoPeerStun = cfg?.WebRtcVideoPeerStun ?? webRtcControlPeerStun;
         int webRtcRoomsCleanupIntervalSeconds = cfg?.WebRtcRoomsCleanupIntervalSeconds ?? 5;
         int webRtcRoomIdleStopSeconds = cfg?.WebRtcRoomIdleStopSeconds ?? 30;
         int webRtcRoomsMaxHelpers = cfg?.WebRtcRoomsMaxHelpers ?? 5;
@@ -1238,6 +1250,9 @@ public sealed record Options(
             webRtcControlPeerAutoStart,
             webRtcControlPeerRoom,
             webRtcControlPeerStun,
+            webRtcVideoPeerAutoStart,
+            webRtcVideoPeerRoom,
+            webRtcVideoPeerStun,
             webRtcRoomsCleanupIntervalSeconds,
             webRtcRoomIdleStopSeconds,
             webRtcRoomsMaxHelpers,
