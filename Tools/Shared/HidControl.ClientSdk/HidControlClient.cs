@@ -77,6 +77,33 @@ public sealed class HidControlClient
     }
 
     /// <summary>
+    /// Sends a DELETE request and deserializes JSON response.
+    /// </summary>
+    /// <typeparam name="T">Response type.</typeparam>
+    /// <param name="path">Path.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Response DTO.</returns>
+    public async Task<T?> DeleteAsync<T>(string path, CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync(Normalize(path), ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<T>(_json, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Sends a DELETE request (raw response).
+    /// </summary>
+    /// <param name="path">Path.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>HTTP response.</returns>
+    public async Task<HttpResponseMessage> DeleteRawAsync(string path, CancellationToken ct = default)
+    {
+        var response = await _http.DeleteAsync(Normalize(path), ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return response;
+    }
+
+    /// <summary>
     /// Executes PostAsync.
     /// </summary>
     /// <param name="path">The path.</param>
