@@ -839,49 +839,105 @@ app.MapPost("/api/shortcut", async (KeyboardShortcutRequest req, CancellationTok
 
 app.MapGet("/api/webrtc/ice", async (CancellationToken ct) =>
 {
-    using var http = new HttpClient();
-    if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-    var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-    var res = await HidControl.ClientSdk.WebRtcClientExtensions.GetWebRtcIceAsync(client, ct);
-    return Results.Json(res ?? new HidControl.Contracts.WebRtcIceResponse(false, null, Array.Empty<HidControl.Contracts.WebRtcIceServerDto>()));
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.GetWebRtcIceAsync(client, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcIceResponse(false, null, Array.Empty<HidControl.Contracts.WebRtcIceServerDto>()));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcIceResponse(false, null, Array.Empty<HidControl.Contracts.WebRtcIceServerDto>()));
+    }
+    catch (Exception ex)
+    {
+        // Keep the same response shape so the JS client can always parse it.
+        return Results.Json(new HidControl.Contracts.WebRtcIceResponse(false, null, Array.Empty<HidControl.Contracts.WebRtcIceServerDto>()));
+    }
 });
 
 app.MapGet("/api/webrtc/config", async (CancellationToken ct) =>
 {
-    using var http = new HttpClient();
-    if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-    var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-    var res = await HidControl.ClientSdk.WebRtcClientExtensions.GetWebRtcConfigAsync(client, ct);
-    return Results.Json(res ?? new HidControl.Contracts.WebRtcConfigResponse(false, 0, 0, 0, 0, 0));
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.GetWebRtcConfigAsync(client, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcConfigResponse(false, 0, 0, 0, 0, 0));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcConfigResponse(false, 0, 0, 0, 0, 0));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcConfigResponse(false, 0, 0, 0, 0, 0));
+    }
 });
 
 app.MapGet("/api/webrtc/rooms", async (CancellationToken ct) =>
 {
-    using var http = new HttpClient();
-    if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-    var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-    var res = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcRoomsAsync(client, ct);
-    return Results.Json(res ?? new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcRoomsAsync(client, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
 });
 
 app.MapPost("/api/webrtc/rooms", async (HttpRequest req, CancellationToken ct) =>
 {
-    using var http = new HttpClient();
-    if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-    var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-    var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateRoomRequest>(cancellationToken: ct)
-        ?? new HidControl.Contracts.WebRtcCreateRoomRequest(null);
-    var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcRoomAsync(client, body.Room, ct);
-    return Results.Json(res ?? new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "create_failed"));
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateRoomRequest>(cancellationToken: ct)
+            ?? new HidControl.Contracts.WebRtcCreateRoomRequest(null);
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcRoomAsync(client, body.Room, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "create_failed"));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "timeout"));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, ex.Message));
+    }
 });
 
 app.MapDelete("/api/webrtc/rooms/{room}", async (string room, CancellationToken ct) =>
 {
-    using var http = new HttpClient();
-    if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-    var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-    var res = await HidControl.ClientSdk.WebRtcClientExtensions.DeleteWebRtcRoomAsync(client, room, ct);
-    return Results.Json(res ?? new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "delete_failed"));
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.DeleteWebRtcRoomAsync(client, room, ct);
+        return Results.Json(res ?? new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "delete_failed"));
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "timeout"));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, ex.Message));
+    }
 });
 
 app.MapPost("/api/keyboard/text", async (KeyboardTextRequest req, CancellationToken ct) =>
