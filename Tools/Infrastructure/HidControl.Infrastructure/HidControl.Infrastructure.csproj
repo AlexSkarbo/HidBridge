@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\Core\HidControl.Application\HidControl.Application.csproj" />
     <ProjectReference Include="..\..\Shared\HidControl.Contracts\HidControl.Contracts.csproj" />
     <ProjectReference Include="..\..\Shared\HidControl.Core\HidControl.Core.csproj" />
   </ItemGroup>

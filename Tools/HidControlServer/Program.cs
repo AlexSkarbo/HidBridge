@@ -76,6 +76,10 @@ builder.Services.AddSingleton(new KeyboardMappingStore(options.PgConnectionStrin
 builder.Services.AddSingleton(new VideoSourceStore(options.VideoSources));
 builder.Services.AddSingleton(new VideoProfileStore(options.VideoProfiles, options.ActiveVideoProfile));
 builder.Services.AddSingleton<WebRtcControlPeerSupervisor>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcBackend, HidControlServer.Services.WebRtcBackendAdapter>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcRoomsService, HidControl.Infrastructure.Services.WebRtcRoomsService>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcIceService, HidControl.Infrastructure.Services.WebRtcIceService>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcConfigService, HidControl.Infrastructure.Services.WebRtcConfigService>();
 builder.Services.AddSingleton<HidControl.UseCases.Video.IVideoRuntime, HidControlServer.Adapters.Video.VideoRuntimeAdapter>();
 builder.Services.AddSingleton<HidControl.UseCases.Video.VideoRuntimeService>();
 builder.Services.AddSingleton<HidControl.UseCases.Video.IVideoRuntimeState, HidControlServer.Adapters.Video.VideoRuntimeStateAdapter>();
@@ -118,6 +122,13 @@ builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoStreamAr
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoTestCaptureProbe, VideoTestCaptureProbeAdapter>();
 builder.Services.AddSingleton<ApplyVideoOutputUseCase>();
 builder.Services.AddSingleton<GetVideoOutputStatusUseCase>();
+
+// WebRTC control-plane use-cases.
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.GetWebRtcClientConfigUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.GetWebRtcIceConfigUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.ListWebRtcRoomsUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.CreateWebRtcRoomUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.DeleteWebRtcRoomUseCase>();
 builder.Services.AddSingleton<StartFfmpegUseCase>();
 builder.Services.AddSingleton<StopFfmpegUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoDiagProvider, VideoDiagProviderAdapter>();
