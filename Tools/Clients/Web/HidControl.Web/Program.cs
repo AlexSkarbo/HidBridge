@@ -189,14 +189,29 @@ app.MapGet("/", () =>
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
 	      <button id="rtcRefreshRooms" title="Fetch rooms from server">Refresh Rooms</button>
-	      <select id="rtcRooms" style="min-width: 220px">
-	        <option value="">(rooms)</option>
-	      </select>
 	      <button id="rtcConnect">Connect</button>
 	      <button id="rtcHangup">Hangup</button>
 	      <span class="muted">Debug:</span>
 	      <button id="rtcJoin" title="Debug: join without calling">Join</button>
 	      <button id="rtcCall" title="Debug: call (create datachannel + offer)">Call</button>
+	    </div>
+	    <div class="row">
+	      <label class="muted"><input id="rtcAutoRefresh" type="checkbox" checked /> Auto-refresh rooms</label>
+	      <span class="muted">every <span id="rtcAutoRefreshMs">2000</span>ms</span>
+	    </div>
+	    <div class="row" style="width: 100%">
+	      <table style="width: 100%; border-collapse: collapse">
+	        <thead>
+	          <tr class="muted">
+	            <th style="text-align:left; padding: 6px 4px">Room</th>
+	            <th style="text-align:left; padding: 6px 4px">Peers</th>
+	            <th style="text-align:left; padding: 6px 4px">Tags</th>
+	            <th style="text-align:left; padding: 6px 4px">Status</th>
+	            <th style="text-align:left; padding: 6px 4px">Actions</th>
+	          </tr>
+	        </thead>
+	        <tbody id="rtcRoomsBody"></tbody>
+	      </table>
 	    </div>
 	    <div class="row">
 	      <input id="rtcIce" style="min-width: 420px" value='[{"urls":"stun:stun.l.google.com:19302"}]' placeholder='ICE servers JSON, e.g. [{"urls":"stun:stun.l.google.com:19302"}]' />
@@ -368,6 +383,12 @@ app.MapGet("/", () =>
 
 	    let webrtcClient = null;
 	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
+	    function setRoom(r) {
+	      if (!r) return;
+	      document.getElementById("rtcRoom").value = r;
+	      resetWebRtcClient();
+	      rtcLog({ webrtc: "ui.room_selected", room: r });
+	    }
 	    function resetWebRtcClient() {
 	      if (webrtcClient) {
 	        try { webrtcClient.hangup(); } catch {}
@@ -413,20 +434,28 @@ app.MapGet("/", () =>
 	        if (!res.ok) return;
 	        const j = await res.json();
 	        if (!j || !j.ok || !Array.isArray(j.rooms)) return;
-	        const sel = document.getElementById("rtcRooms");
-	        sel.innerHTML = "";
-	        const empty = document.createElement("option");
-	        empty.value = "";
-	        empty.textContent = "(rooms)";
-	        sel.appendChild(empty);
+	        const body = document.getElementById("rtcRoomsBody");
+	        body.innerHTML = "";
 	        for (const r of j.rooms) {
-	          const opt = document.createElement("option");
-	          opt.value = r.room;
 	          const tags = [];
 	          if (r.isControl) tags.push("control");
 	          if (r.hasHelper) tags.push("helper");
-	          opt.textContent = `${r.room} (peers=${r.peers}${tags.length ? ", " + tags.join(",") : ""})`;
-	          sel.appendChild(opt);
+
+	          const status = (r.peers >= 2) ? "busy" : (r.hasHelper ? "idle" : "empty");
+
+	          const tr = document.createElement("tr");
+	          tr.innerHTML = `
+	            <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${r.room}</td>
+	            <td style="padding: 6px 4px">${r.peers}</td>
+	            <td style="padding: 6px 4px" class="muted">${tags.join(", ") || "-"}</td>
+	            <td style="padding: 6px 4px">${status}</td>
+	            <td style="padding: 6px 4px">
+	              <button data-act="use" data-room="${r.room}">Use</button>
+	              <button data-act="connect" data-room="${r.room}">Connect</button>
+	              <button data-act="delete" data-room="${r.room}" ${r.isControl ? "disabled title=\"control room cannot be deleted\"" : ""}>Delete</button>
+	            </td>
+	          `;
+	          body.appendChild(tr);
 	        }
 	      } catch {}
 	    }
@@ -436,12 +465,34 @@ app.MapGet("/", () =>
 	      rtcLog({ webrtc: "ui.rooms_refreshed" });
 	    });
 
-	    document.getElementById("rtcRooms").addEventListener("change", () => {
-	      const v = document.getElementById("rtcRooms").value;
-	      if (!v) return;
-	      document.getElementById("rtcRoom").value = v;
-	      resetWebRtcClient();
-	      rtcLog({ webrtc: "ui.room_selected", room: v });
+	    document.getElementById("rtcRoomsBody").addEventListener("click", async (ev) => {
+	      const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-act]") : null;
+	      if (!btn) return;
+	      const act = btn.getAttribute("data-act");
+	      const room = btn.getAttribute("data-room");
+	      if (!room) return;
+
+	      if (act === "use") {
+	        setRoom(room);
+	        return;
+	      }
+	      if (act === "connect") {
+	        setRoom(room);
+	        document.getElementById("rtcConnect").click();
+	        return;
+	      }
+	      if (act === "delete") {
+	        try {
+	          const res = await fetch("/api/webrtc/rooms/" + encodeURIComponent(room), { method: "DELETE" });
+	          const j = await res.json().catch(() => null);
+	          rtcLog({ webrtc: "ui.room_deleted", room, payload: j });
+	          show(j || { ok: false, error: "delete_failed" });
+	          await refreshRooms();
+	        } catch (e) {
+	          rtcLog({ webrtc: "ui.room_delete_error", room, error: String(e) });
+	          show({ ok: false, error: String(e) });
+	        }
+	      }
 	    });
 
 	    document.getElementById("rtcGenRoom").addEventListener("click", async () => {
@@ -453,8 +504,7 @@ app.MapGet("/", () =>
 	          show(j || { ok: false, error: "room_create_failed" });
 	          return;
 	        }
-	        document.getElementById("rtcRoom").value = j.room;
-	        resetWebRtcClient();
+	        setRoom(j.room);
 	        rtcLog({ webrtc: "ui.room_created", room: j.room, started: j.started, pid: j.pid });
 	        await refreshRooms();
 	      } catch (e) {
@@ -483,6 +533,26 @@ app.MapGet("/", () =>
 	    })();
 	    refreshWebRtcConfig();
 	    refreshRooms();
+
+	    // Room list auto-refresh (best-effort).
+	    const rtcAutoRefresh = document.getElementById("rtcAutoRefresh");
+	    const rtcAutoRefreshMsEl = document.getElementById("rtcAutoRefreshMs");
+	    let rtcRoomsTimer = null;
+	    function startRoomsTimer() {
+	      stopRoomsTimer();
+	      const intervalMs = 2000;
+	      rtcAutoRefreshMsEl.textContent = String(intervalMs);
+	      rtcRoomsTimer = setInterval(() => { if (rtcAutoRefresh.checked) refreshRooms(); }, intervalMs);
+	    }
+	    function stopRoomsTimer() {
+	      if (!rtcRoomsTimer) return;
+	      clearInterval(rtcRoomsTimer);
+	      rtcRoomsTimer = null;
+	    }
+	    rtcAutoRefresh.addEventListener("change", () => {
+	      rtcLog({ webrtc: "ui.auto_refresh", enabled: rtcAutoRefresh.checked });
+	    });
+	    startRoomsTimer();
 
 	    async function connectWithTimeout(timeoutMs) {
 	      const start = Date.now();
@@ -649,6 +719,20 @@ app.MapPost("/api/webrtc/rooms", async (HttpRequest req, CancellationToken ct) =
     body = string.IsNullOrWhiteSpace(body) ? "{}" : body;
     using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
     using HttpResponseMessage resp = await http.PostAsync(url, content, ct);
+    string json = await resp.Content.ReadAsStringAsync(ct);
+    return Results.Text(json, "application/json");
+});
+
+app.MapDelete("/api/webrtc/rooms/{room}", async (string room, CancellationToken ct) =>
+{
+    using var http = new HttpClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        http.DefaultRequestHeaders.Add("X-HID-Token", token);
+    }
+
+    string url = serverUrl.TrimEnd('/') + "/status/webrtc/rooms/" + Uri.EscapeDataString(room);
+    using HttpResponseMessage resp = await http.DeleteAsync(url, ct);
     string json = await resp.Content.ReadAsStringAsync(ct);
     return Results.Text(json, "application/json");
 });
