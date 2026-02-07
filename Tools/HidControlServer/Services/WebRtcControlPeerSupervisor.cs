@@ -134,7 +134,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     return (false, false, null, "start_failed");
                 }
 
-                _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, idleSinceUtc: null);
+                _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, IdleSinceUtc: null);
                 ServerEventLog.Log("webrtc.peer", "autostart_started", new
                 {
                     serverUrl,
