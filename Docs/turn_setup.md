@@ -12,6 +12,19 @@ This project supports **TURN REST (ephemeral credentials)** which works well wit
   - Cloudflare Tunnel does **not** proxy arbitrary UDP/TCP TURN traffic by default (HTTP-only). For TURN behind Cloudflare, you generally need a product that supports raw TCP/UDP proxying.
 - If you run coturn in Docker, remember TURN allocates **relay ports** (a UDP port range). You must publish that range and configure `min-port/max-port`.
 
+## Do We Need TURN (coturn)?
+
+TURN is **not strictly required**, but it is a practical reliability layer:
+
+- In many LAN setups and with Chrome/Firefox, WebRTC may connect via direct host/srflx candidates + STUN.
+- Some environments/browsers (notably Edge/Opera in hardened networks, VPN/CGNAT, restricted UDP) can produce **0 ICE candidates** or fail to establish a direct P2P path.
+  - In that case, **STUN-only** is often not enough and a TURN relay is required.
+
+Recommendation for MVP:
+
+- Keep TURN available via coturn + TURN REST (ephemeral credentials) in config.
+- Default to `iceTransportPolicy: all` for most browsers, but allow forcing `relay` (and optionally default it for Edge/Opera).
+
 ## coturn (TURN REST) Example
 
 1) Install `coturn` on Linux (RPi or server).
