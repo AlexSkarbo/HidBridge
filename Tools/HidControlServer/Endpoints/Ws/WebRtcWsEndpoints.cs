@@ -4,6 +4,7 @@ using global::System.Text;
 using global::System.Text.Json;
 using HidControl.Application.Abstractions;
 using HidControl.Application.UseCases.WebRtc;
+using HidControlServer.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HidControlServer.Endpoints.Ws;
@@ -28,6 +29,7 @@ public static class WebRtcWsEndpoints
         {
             var signaling = ctx.RequestServices.GetRequiredService<IWebRtcSignalingService>();
             var handleMessageUseCase = ctx.RequestServices.GetRequiredService<HandleWebRtcSignalingMessageUseCase>();
+            var videoPeerSupervisor = ctx.RequestServices.GetRequiredService<WebRtcVideoPeerSupervisor>();
             if (!ctx.WebSockets.IsWebSocketRequest)
             {
                 ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -69,6 +71,37 @@ public static class WebRtcWsEndpoints
                     if (!TryParseMessage(msg, out var mType, out var mRoom, out JsonElement mData, out string? parseError))
                     {
                         await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = parseError ?? "bad_request" }, ctx.RequestAborted);
+                        continue;
+                    }
+
+                    if (string.Equals(mType, "video.status", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrWhiteSpace(roomId))
+                        {
+                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = "not_joined" }, ctx.RequestAborted);
+                            continue;
+                        }
+
+                        string runtimeRoom = roomId;
+                        if (!string.IsNullOrWhiteSpace(mRoom) && !string.Equals(runtimeRoom, mRoom, StringComparison.OrdinalIgnoreCase))
+                        {
+                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = "room_mismatch" }, ctx.RequestAborted);
+                            continue;
+                        }
+
+                        string? eventName = TryGetStringProperty(mData, "event");
+                        string? mode = TryGetStringProperty(mData, "mode");
+                        string? detail = TryGetStringProperty(mData, "detail");
+                        videoPeerSupervisor.ReportRuntimeStatus(runtimeRoom, eventName, mode, detail);
+
+                        await BroadcastAsync(signaling, runtimeRoom, clientId, new
+                        {
+                            ok = true,
+                            type = "webrtc.video_status",
+                            room = runtimeRoom,
+                            from = clientId,
+                            data = mData
+                        }, ctx.RequestAborted);
                         continue;
                     }
 
@@ -285,6 +318,25 @@ public static class WebRtcWsEndpoints
                 return sb.ToString();
             }
         }
+    }
+
+    private static string? TryGetStringProperty(JsonElement data, string name)
+    {
+        try
+        {
+            if (data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty(name, out JsonElement p) &&
+                p.ValueKind == JsonValueKind.String)
+            {
+                return p.GetString();
+            }
+        }
+        catch
+        {
+            // Ignore parse errors from malformed helper payloads.
+        }
+
+        return null;
     }
 
     private sealed class ClientState

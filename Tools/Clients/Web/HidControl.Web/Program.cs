@@ -518,6 +518,9 @@ app.MapGet("/", () =>
 	      updateRtcModeUi();
 	      resetWebRtcClient();
 	      rtcLog({ webrtc: "ui.room_selected", room: r });
+	      if (isVideoRoomId(r)) {
+	        refreshVideoPeerRuntime(r);
+	      }
 	    }
 	    function resetWebRtcClient() {
 	      if (webrtcClient) {
@@ -644,6 +647,35 @@ app.MapGet("/", () =>
 	          `;
 	          body.appendChild(tr);
 	        }
+	      } catch {}
+	      if (getMode() === "video") {
+	        await refreshVideoPeerRuntime(getRoom());
+	      }
+	    }
+
+	    function renderVideoPeerRuntime(j) {
+	      if (!rtcVideoMeta) return;
+	      if (!j || !j.ok) {
+	        rtcVideoMeta.textContent = "video runtime: n/a";
+	        return;
+	      }
+	      const modeReq = j.sourceModeRequested || "?";
+	      const modeAct = j.sourceModeActive || "?";
+	      const running = j.running ? "running" : "stopped";
+	      const fallback = j.fallbackUsed ? "fallback=yes" : "fallback=no";
+	      const err = j.lastVideoError ? ` error=${j.lastVideoError}` : "";
+	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${err}`;
+	    }
+
+	    async function refreshVideoPeerRuntime(room) {
+	      const target = (room || "").trim();
+	      if (!isVideoRoomId(target)) return;
+	      try {
+	        const res = await fetch("/api/webrtc/video/peers/" + encodeURIComponent(target));
+	        if (!res.ok) return;
+	        const j = await res.json().catch(() => null);
+	        renderVideoPeerRuntime(j);
+	        rtcLog({ webrtc: "ui.video_runtime", room: target, payload: j });
 	      } catch {}
 	    }
 
@@ -1181,6 +1213,31 @@ app.MapGet("/api/webrtc/video/rooms", async (CancellationToken ct) =>
     catch
     {
         return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+    }
+});
+
+app.MapGet("/api/webrtc/video/peers/{room}", async (string room, CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/video/peers/{Uri.EscapeDataString(room)}";
+        using var resp = await http.GetAsync(url, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = JsonSerializer.Serialize(new { ok = false, room, error = "empty_response" });
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { ok = false, room, error = "timeout" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, room, error = ex.Message });
     }
 });
 

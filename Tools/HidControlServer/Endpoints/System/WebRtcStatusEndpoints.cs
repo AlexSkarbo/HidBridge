@@ -1,4 +1,5 @@
 using HidControl.Application.UseCases.WebRtc;
+using HidControlServer.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
@@ -91,6 +92,29 @@ public static class WebRtcStatusEndpoints
         {
             var res = await uc.Execute(room, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
+        });
+
+        app.MapGet("/status/webrtc/video/peers/{room}", (string room, WebRtcVideoPeerSupervisor sup) =>
+        {
+            var st = sup.GetRoomRuntimeStatus(room);
+            if (st is null)
+            {
+                return Results.Ok(new { ok = false, room, error = "room_not_found" });
+            }
+
+            return Results.Ok(new
+            {
+                ok = true,
+                room = st.Room,
+                sourceModeRequested = st.SourceModeRequested,
+                sourceModeActive = st.SourceModeActive,
+                fallbackUsed = st.FallbackUsed,
+                lastVideoError = st.LastVideoError,
+                startedAtUtc = st.StartedAtUtc,
+                updatedAtUtc = st.UpdatedAtUtc,
+                pid = st.Pid,
+                running = st.Running
+            });
         });
     }
 
