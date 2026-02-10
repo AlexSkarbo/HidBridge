@@ -117,13 +117,11 @@ public static class WebRtcWsEndpoints
 
                     if (handled.Action == WebRtcSignalingAction.Signal)
                     {
-                        if (!handled.Ok || string.IsNullOrWhiteSpace(handled.Room))
+                        if (!handled.Ok || handled.Room is not string signalRoom || string.IsNullOrWhiteSpace(signalRoom))
                         {
                             await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = handled.Error ?? "not_joined" }, ctx.RequestAborted);
                             continue;
                         }
-
-                        string signalRoom = handled.Room;
                         roomId = handled.NextRoom;
                         await BroadcastAsync(signaling, signalRoom, clientId, new
                         {
@@ -139,9 +137,11 @@ public static class WebRtcWsEndpoints
 
                     if (handled.Action == WebRtcSignalingAction.Leave)
                     {
-                        if (handled.HasPeerLeftBroadcast && !string.IsNullOrWhiteSpace(handled.Room) && handled.Kind is not null)
+                        if (handled.HasPeerLeftBroadcast &&
+                            handled.Room is string leavingRoom &&
+                            !string.IsNullOrWhiteSpace(leavingRoom) &&
+                            handled.Kind is not null)
                         {
-                            string leavingRoom = handled.Room;
                             await BroadcastAsync(signaling, leavingRoom, clientId, new
                             {
                                 ok = true,

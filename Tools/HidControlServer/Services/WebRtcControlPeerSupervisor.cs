@@ -8,6 +8,10 @@ namespace HidControlServer.Services;
 /// </summary>
 public sealed class WebRtcControlPeerSupervisor : IDisposable
 {
+    // Give helper enough time to fail fast on missing deps/toolchain issues.
+    // 300ms is too optimistic on some Windows/Go setups.
+    private const int EarlyExitProbeMs = 1500;
+
     private readonly Options _opt;
     private readonly IWebRtcSignalingService _signaling;
     private readonly object _lock = new();
@@ -138,11 +142,11 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 }
 
                 // Fail fast if helper exits immediately (missing deps, broken toolchain, bad args).
-                if (p.WaitForExit(300))
+                if (p.WaitForExit(EarlyExitProbeMs))
                 {
                     int code = -1;
                     try { code = p.ExitCode; } catch { }
-                    ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "exited_early", code });
+                    ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "exited_early", code, probeMs = EarlyExitProbeMs });
                     try { p.Dispose(); } catch { }
                     return (false, false, null, $"exit_{code}");
                 }

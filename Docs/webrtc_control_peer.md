@@ -31,6 +31,8 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
 
 ## Notes
 
+- Helper process is now **long-running** and reconnects to signaling/HID on transient transport errors instead of exiting immediately.
+  - This reduces room flapping on short network/socket interruptions.
 - **Rooms / concurrency (Control MVP):** every room allows **only 1 controller** at a time (plus the helper) = **max 2 peers**.
   - If another tab/browser tries to join the same room, it will get `room_full`.
   - To run multiple independent sessions, use different room ids (one room per session).

@@ -15,9 +15,12 @@ build_wsl/
 *.log
 Tools/HidControlServer/video_hls/
 Tools/HidControlServer/video_logs/
+Tools/HidControlServer/webrtc_rooms.json
 Tools/HidControlServer/.deps/tmp/
 Tools/HidControlServer/.deps/ffmpeg/
 Tools/HidControlServer/.deps/mediamtx/
+Tools/WebRtcControlPeer/logs/
+Tools/WebRtcVideoPeer/logs/
 
 # Local machine config / caches
 Tools/HidControlServer/hidcontrol.config.json

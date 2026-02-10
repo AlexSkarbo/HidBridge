@@ -68,28 +68,44 @@ func main() {
 		log.Fatalf("bad --server: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	log.Printf("webrtc video peer starting")
 	log.Printf("server=%s room=%s stun=%s", base.String(), *room, *stun)
 
-	sigWS, err := dialWS(ctx, base, "/ws/webrtc", *token)
+	// Long-running loop: reconnect on transport failures instead of exiting.
+	backoff := 1 * time.Second
+	for {
+		err := runSession(base, *token, *room, *stun)
+		if err != nil {
+			log.Printf("session ended: %v", err)
+		} else {
+			log.Printf("session ended")
+		}
+		time.Sleep(backoff)
+		if backoff < 10*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+func runSession(base *url.URL, token string, room string, stun string) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigWS, err := dialWS(ctx, base, "/ws/webrtc", token)
 	if err != nil {
-		log.Fatalf("dial /ws/webrtc: %v", err)
+		return fmt.Errorf("dial /ws/webrtc: %w", err)
 	}
 	defer sigWS.Close()
 
-	if err := sendJSON(sigWS, signalMessage{Type: "join", Room: *room}); err != nil {
-		log.Fatalf("join room: %v", err)
+	if err := sendJSON(sigWS, signalMessage{Type: "join", Room: room}); err != nil {
+		return fmt.Errorf("join room: %w", err)
 	}
 
-	peer := newPeerState(*stun, *room, sigWS)
-
+	peer := newPeerState(stun, room, sigWS)
 	for {
 		_, b, err := sigWS.ReadMessage()
 		if err != nil {
-			log.Fatalf("signaling read: %v", err)
+			return fmt.Errorf("signaling read: %w", err)
 		}
 
 		var env signalEnvelope
@@ -97,10 +113,12 @@ func main() {
 			continue
 		}
 
+		if env.Type == "webrtc.error" {
+			return fmt.Errorf("signaling error: %s", strings.TrimSpace(string(env.Data)))
+		}
 		if env.Type == "webrtc.hello" || env.Type == "webrtc.joined" || env.Type == "webrtc.peer_joined" {
 			continue
 		}
-
 		if env.Type != "webrtc.signal" {
 			continue
 		}

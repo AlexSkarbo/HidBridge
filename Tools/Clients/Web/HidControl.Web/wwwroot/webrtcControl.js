@@ -356,8 +356,15 @@
       dc = p.createDataChannel("data");
       wireDc();
 
-      const offer = await p.createOffer();
+      // Compatibility fallback: some browsers behave better with explicit offerToReceiveVideo
+      // even when we already added a recvonly transceiver.
+      const offerOptions = receiveVideo ? { offerToReceiveVideo: true } : undefined;
+      const offer = offerOptions ? await p.createOffer(offerOptions) : await p.createOffer();
       await p.setLocalDescription(offer);
+      if (receiveVideo && p.localDescription && typeof p.localDescription.sdp === "string") {
+        const hasVideoMline = /\nm=video\s/.test("\n" + p.localDescription.sdp);
+        log("pc.offer.video", { hasVideoMline });
+      }
       await wsSend({ type: "signal", room, data: { kind: "offer", sdp: { type: p.localDescription.type, sdp: p.localDescription.sdp } } });
       setStatus("calling...");
     }
