@@ -66,8 +66,8 @@ public sealed class WebRtcBackendAdapter : IWebRtcBackend
     }
 
     /// <inheritdoc />
-    public (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room)
-        => IsVideoRoom(room) ? _videoSup.EnsureStarted(room) : _controlSup.EnsureStarted(room);
+    public (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room, string? qualityPreset = null)
+        => IsVideoRoom(room) ? _videoSup.EnsureStarted(room, qualityPreset) : _controlSup.EnsureStarted(room);
 
     /// <inheritdoc />
     public (bool ok, bool stopped, string? error) StopHelper(string room)

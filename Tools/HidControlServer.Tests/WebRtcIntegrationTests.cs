@@ -50,6 +50,13 @@ public sealed class WebRtcIntegrationTests
         public int EnsureHelperStartedCalls { get; private set; }
 
         public int StopHelperCalls { get; private set; }
+        public string? LastQualityPreset { get; private set; }
+
+        public bool StopHelperOk { get; set; } = true;
+
+        public bool StopHelperStopped { get; set; } = true;
+
+        public string? StopHelperError { get; set; }
 
         public void SetRoomPeers(string room, int peers) => _peers[room] = peers;
 
@@ -63,9 +70,10 @@ public sealed class WebRtcIntegrationTests
 
         public IReadOnlySet<string> GetHelperRoomsSnapshot() => new HashSet<string>(_helperRooms, StringComparer.OrdinalIgnoreCase);
 
-        public (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room)
+        public (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room, string? qualityPreset = null)
         {
             EnsureHelperStartedCalls++;
+            LastQualityPreset = qualityPreset;
             _helperRooms.Add(room);
             // Simulate helper itself joining as a peer.
             _peers[room] = Math.Max(_peers.TryGetValue(room, out var c) ? c : 0, 1);
@@ -76,7 +84,7 @@ public sealed class WebRtcIntegrationTests
         {
             StopHelperCalls++;
             _helperRooms.Remove(room);
-            return (true, true, null);
+            return (StopHelperOk, StopHelperStopped, StopHelperError);
         }
 
         public string? GetDeviceIdHex() => DeviceIdHex;
@@ -228,7 +236,7 @@ public sealed class WebRtcIntegrationTests
         var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
 
-        var res = await uc.Execute(null, CancellationToken.None);
+        var res = await uc.Execute(null, null, CancellationToken.None);
 
         Assert.True(res.Ok);
         Assert.NotNull(res.Room);
@@ -244,12 +252,26 @@ public sealed class WebRtcIntegrationTests
         var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
 
-        var res = await uc.Execute("hb-v-50443405-demo", CancellationToken.None);
+        var res = await uc.Execute("hb-v-50443405-demo", null, CancellationToken.None);
 
         Assert.True(res.Ok);
         Assert.Equal("hb-v-50443405-demo", res.Room);
         Assert.True(res.Started);
         Assert.Equal(1, backend.EnsureHelperStartedCalls);
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_WithQualityPreset_ForwardsPresetToBackend()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
+
+        var res = await uc.Execute("hb-v-50443405-demo", "high", CancellationToken.None);
+
+        Assert.True(res.Ok);
+        Assert.Equal("high", backend.LastQualityPreset);
     }
 
     [Fact]
@@ -411,6 +433,55 @@ public sealed class WebRtcIntegrationTests
     }
 
     [Fact]
+    public async Task DeleteRoom_RemovesPersistedEntry_EvenWhenStopFails()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"hidbridge-rtc-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        string storePath = Path.Combine(tempDir, "webrtc_rooms.json");
+
+        try
+        {
+            var backendA = new FakeBackend(deviceIdHex: "50443405deadbeef")
+            {
+                RoomsPersistenceEnabled = true,
+                RoomsPersistencePath = storePath,
+                RoomsPersistenceTtlSeconds = 3600
+            };
+            var roomIdsA = new WebRtcRoomIdService(backendA);
+            var roomsSvcA = new WebRtcRoomsService(backendA, roomIdsA);
+            var createUc = new CreateWebRtcRoomUseCase(roomsSvcA);
+            var created = await createUc.Execute("hb-50443405-stale", CancellationToken.None);
+            Assert.True(created.Ok);
+
+            backendA.StopHelperOk = false;
+            backendA.StopHelperStopped = false;
+            backendA.StopHelperError = "stop_failed";
+
+            var deleteUc = new DeleteWebRtcRoomUseCase(roomsSvcA);
+            var deleted = await deleteUc.Execute("hb-50443405-stale", CancellationToken.None);
+            Assert.False(deleted.Ok);
+            Assert.Equal("stop_failed", deleted.Error);
+
+            var backendB = new FakeBackend(deviceIdHex: "50443405deadbeef")
+            {
+                RoomsPersistenceEnabled = true,
+                RoomsPersistencePath = storePath,
+                RoomsPersistenceTtlSeconds = 3600
+            };
+            var roomIdsB = new WebRtcRoomIdService(backendB);
+            var roomsSvcB = new WebRtcRoomsService(backendB, roomIdsB);
+            var listUc = new ListWebRtcRoomsUseCase(roomsSvcB);
+            var snap = await listUc.Execute(CancellationToken.None);
+
+            Assert.DoesNotContain(snap.Rooms, r => string.Equals(r.Room, "hb-50443405-stale", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task ClientConfig_UsesBackendTimeouts()
     {
         var backend = new FakeBackend
@@ -447,7 +518,7 @@ public sealed class WebRtcIntegrationTests
         var validateSignal = new ValidateWebRtcSignalUseCase(signaling);
         var leave = new LeaveWebRtcSignalingUseCase(signaling);
 
-        var created = await createVideo.Execute(null, CancellationToken.None);
+        var created = await createVideo.Execute(null, null, CancellationToken.None);
         Assert.True(created.Ok);
         Assert.NotNull(created.Room);
         Assert.StartsWith("hb-v-50443405-", created.Room!, StringComparison.OrdinalIgnoreCase);

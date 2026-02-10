@@ -128,6 +128,10 @@ public static class Hex
 /// <param name="WebRtcVideoPeerAutoStart">WebRtcVideoPeerAutoStart.</param>
 /// <param name="WebRtcVideoPeerRoom">WebRtcVideoPeerRoom.</param>
 /// <param name="WebRtcVideoPeerStun">WebRtcVideoPeerStun.</param>
+/// <param name="WebRtcVideoPeerSourceMode">WebRtcVideoPeerSourceMode.</param>
+/// <param name="WebRtcVideoPeerQualityPreset">WebRtcVideoPeerQualityPreset.</param>
+/// <param name="WebRtcVideoPeerCaptureInput">WebRtcVideoPeerCaptureInput.</param>
+/// <param name="WebRtcVideoPeerFfmpegArgs">WebRtcVideoPeerFfmpegArgs.</param>
 /// <param name="WebRtcRoomsCleanupIntervalSeconds">WebRtcRoomsCleanupIntervalSeconds.</param>
 /// <param name="WebRtcRoomIdleStopSeconds">WebRtcRoomIdleStopSeconds.</param>
 /// <param name="WebRtcRoomsMaxHelpers">WebRtcRoomsMaxHelpers.</param>
@@ -218,6 +222,10 @@ public sealed record Options(
     bool WebRtcVideoPeerAutoStart,
     string WebRtcVideoPeerRoom,
     string WebRtcVideoPeerStun,
+    string WebRtcVideoPeerSourceMode,
+    string WebRtcVideoPeerQualityPreset,
+    string? WebRtcVideoPeerCaptureInput,
+    string? WebRtcVideoPeerFfmpegArgs,
     int WebRtcRoomsCleanupIntervalSeconds,
     int WebRtcRoomIdleStopSeconds,
     int WebRtcRoomsMaxHelpers,
@@ -550,6 +558,10 @@ public sealed record Options(
         bool? WebRtcVideoPeerAutoStart,
         string? WebRtcVideoPeerRoom,
         string? WebRtcVideoPeerStun,
+        string? WebRtcVideoPeerSourceMode,
+        string? WebRtcVideoPeerQualityPreset,
+        string? WebRtcVideoPeerCaptureInput,
+        string? WebRtcVideoPeerFfmpegArgs,
         int? WebRtcRoomsCleanupIntervalSeconds,
         int? WebRtcRoomIdleStopSeconds,
         int? WebRtcRoomsMaxHelpers,
@@ -795,6 +807,18 @@ public sealed record Options(
         bool webRtcVideoPeerAutoStart = cfg?.WebRtcVideoPeerAutoStart ?? false;
         string webRtcVideoPeerRoom = cfg?.WebRtcVideoPeerRoom ?? "video";
         string webRtcVideoPeerStun = cfg?.WebRtcVideoPeerStun ?? webRtcControlPeerStun;
+        string webRtcVideoPeerSourceMode = string.IsNullOrWhiteSpace(cfg?.WebRtcVideoPeerSourceMode)
+            ? "testsrc"
+            : (cfg?.WebRtcVideoPeerSourceMode?.Trim() ?? "testsrc");
+        string webRtcVideoPeerQualityPreset = string.IsNullOrWhiteSpace(cfg?.WebRtcVideoPeerQualityPreset)
+            ? "balanced"
+            : (cfg?.WebRtcVideoPeerQualityPreset?.Trim().ToLowerInvariant() ?? "balanced");
+        string? webRtcVideoPeerCaptureInput = string.IsNullOrWhiteSpace(cfg?.WebRtcVideoPeerCaptureInput)
+            ? null
+            : cfg?.WebRtcVideoPeerCaptureInput?.Trim();
+        string? webRtcVideoPeerFfmpegArgs = string.IsNullOrWhiteSpace(cfg?.WebRtcVideoPeerFfmpegArgs)
+            ? null
+            : cfg?.WebRtcVideoPeerFfmpegArgs?.Trim();
         int webRtcRoomsCleanupIntervalSeconds = cfg?.WebRtcRoomsCleanupIntervalSeconds ?? 5;
         int webRtcRoomIdleStopSeconds = cfg?.WebRtcRoomIdleStopSeconds ?? 30;
         int webRtcRoomsMaxHelpers = cfg?.WebRtcRoomsMaxHelpers ?? 5;
@@ -805,7 +829,7 @@ public sealed record Options(
         // Intentionally small defaults for fast-fail on LAN. Increase for TURN/TCP-heavy environments.
         int webRtcClientJoinTimeoutMs = cfg?.WebRtcClientJoinTimeoutMs ?? 250;
         int webRtcClientConnectTimeoutMs = cfg?.WebRtcClientConnectTimeoutMs ?? 5000;
-        bool webRtcRoomsPersistEnabled = cfg?.WebRtcRoomsPersistEnabled ?? true;
+        bool webRtcRoomsPersistEnabled = cfg?.WebRtcRoomsPersistEnabled ?? false;
         string webRtcRoomsStorePath = ResolvePath(baseDir, cfg?.WebRtcRoomsStorePath, "webrtc_rooms.json");
         int webRtcRoomsPersistTtlSeconds = cfg?.WebRtcRoomsPersistTtlSeconds ?? 86_400;
 
@@ -1265,6 +1289,10 @@ public sealed record Options(
             webRtcVideoPeerAutoStart,
             webRtcVideoPeerRoom,
             webRtcVideoPeerStun,
+            webRtcVideoPeerSourceMode,
+            webRtcVideoPeerQualityPreset,
+            webRtcVideoPeerCaptureInput,
+            webRtcVideoPeerFfmpegArgs,
             webRtcRoomsCleanupIntervalSeconds,
             webRtcRoomIdleStopSeconds,
             webRtcRoomsMaxHelpers,

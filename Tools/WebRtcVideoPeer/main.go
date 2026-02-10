@@ -11,9 +11,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/rtp"
@@ -23,7 +27,7 @@ import (
 // This tool runs next to HidControlServer and acts as a WebRTC "video peer":
 // - joins a signaling room via /ws/webrtc
 // - accepts offers from browser clients
-// - publishes a synthetic VP8 video track (ffmpeg test source -> RTP -> Pion track)
+// - publishes a VP8 video track from ffmpeg (test source by default, capture mode optional)
 // - opens/accepts a DataChannel and echoes text messages back (debug/control)
 //
 // Later, this helper will publish real media tracks (video).
@@ -56,10 +60,14 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	var (
-		serverURL = flag.String("server", envOr("HIDBRIDGE_SERVER_URL", "http://127.0.0.1:8080"), "HidControlServer base URL (http://host:port)")
-		token     = flag.String("token", envOr("HIDBRIDGE_TOKEN", ""), "Server token (X-HID-Token)")
-		room      = flag.String("room", envOr("HIDBRIDGE_WEBRTC_ROOM", "video"), "Signaling room name")
-		stun      = flag.String("stun", envOr("HIDBRIDGE_STUN", "stun:stun.l.google.com:19302"), "STUN server URL (stun:host:port)")
+		serverURL    = flag.String("server", envOr("HIDBRIDGE_SERVER_URL", "http://127.0.0.1:8080"), "HidControlServer base URL (http://host:port)")
+		token        = flag.String("token", envOr("HIDBRIDGE_TOKEN", ""), "Server token (X-HID-Token)")
+		room         = flag.String("room", envOr("HIDBRIDGE_WEBRTC_ROOM", "video"), "Signaling room name")
+		stun         = flag.String("stun", envOr("HIDBRIDGE_STUN", "stun:stun.l.google.com:19302"), "STUN server URL (stun:host:port)")
+		sourceMode   = flag.String("source-mode", envOr("HIDBRIDGE_VIDEO_SOURCE_MODE", "testsrc"), "Video source mode: testsrc|capture")
+		qualityPreset = flag.String("quality-preset", envOr("HIDBRIDGE_VIDEO_QUALITY_PRESET", "balanced"), "Video quality preset: low|balanced|high")
+		ffmpegArgs   = flag.String("ffmpeg-args", envOr("HIDBRIDGE_VIDEO_FFMPEG_ARGS", ""), "Optional FFmpeg pipeline args (overrides built-in mode pipeline)")
+		captureInput = flag.String("capture-input", envOr("HIDBRIDGE_VIDEO_CAPTURE_INPUT", ""), "Optional capture input args (used in capture mode)")
 	)
 	flag.Parse()
 
@@ -68,13 +76,17 @@ func main() {
 		log.Fatalf("bad --server: %v", err)
 	}
 
+	mode := normalizeSourceMode(*sourceMode)
+	preset := normalizeQualityPreset(*qualityPreset)
 	log.Printf("webrtc video peer starting")
-	log.Printf("server=%s room=%s stun=%s", base.String(), *room, *stun)
+	log.Printf("server=%s room=%s stun=%s sourceMode=%s qualityPreset=%s", base.String(), *room, *stun, mode, preset)
+	cleanupPidFile := registerHelperPidFile()
+	defer cleanupPidFile()
 
 	// Long-running loop: reconnect on transport failures instead of exiting.
 	backoff := 1 * time.Second
 	for {
-		err := runSession(base, *token, *room, *stun)
+		err := runSession(base, *token, *room, *stun, mode, preset, *ffmpegArgs, *captureInput)
 		if err != nil {
 			log.Printf("session ended: %v", err)
 		} else {
@@ -87,7 +99,7 @@ func main() {
 	}
 }
 
-func runSession(base *url.URL, token string, room string, stun string) error {
+func runSession(base *url.URL, token string, room string, stun string, sourceMode string, qualityPreset string, ffmpegArgs string, captureInput string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -101,7 +113,7 @@ func runSession(base *url.URL, token string, room string, stun string) error {
 		return fmt.Errorf("join room: %w", err)
 	}
 
-	peer := newPeerState(stun, room, sigWS)
+	peer := newPeerState(stun, room, sourceMode, qualityPreset, ffmpegArgs, captureInput, sigWS)
 	for {
 		_, b, err := sigWS.ReadMessage()
 		if err != nil {
@@ -132,6 +144,12 @@ type peerState struct {
 	sigWS *websocket.Conn
 	sigMu sync.Mutex
 
+	stun         string
+	sourceMode   string
+	qualityPreset string
+	ffmpegArgs   string
+	captureInput string
+
 	pcMu         sync.Mutex
 	pc           *webrtc.PeerConnection
 	streamCancel context.CancelFunc
@@ -139,11 +157,15 @@ type peerState struct {
 	activePeerId string
 }
 
-func newPeerState(stun, room string, sigWS *websocket.Conn) *peerState {
-	_ = stun
+func newPeerState(stun, room, sourceMode, qualityPreset, ffmpegArgs, captureInput string, sigWS *websocket.Conn) *peerState {
 	return &peerState{
 		room:         room,
 		sigWS:        sigWS,
+		stun:         stun,
+		sourceMode:   normalizeSourceMode(sourceMode),
+		qualityPreset: normalizeQualityPreset(qualityPreset),
+		ffmpegArgs:   ffmpegArgs,
+		captureInput: captureInput,
 		pc:           nil,
 		activePeerId: "",
 	}
@@ -192,7 +214,7 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	p.streamCancel = streamCancel
 	go func() {
-		if err := runSyntheticVideoStream(streamCtx, videoTrack); err != nil && streamCtx.Err() == nil {
+		if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.ffmpegArgs, p.captureInput); err != nil && streamCtx.Err() == nil {
 			log.Printf("video stream ended: %v", err)
 		}
 	}()
@@ -302,7 +324,7 @@ func (p *peerState) tryAdoptPeer(from string) bool {
 }
 
 func (p *peerState) onOffer(ctx context.Context, offer webrtc.SessionDescription) {
-	pc, err := p.ensurePC(envOr("HIDBRIDGE_STUN", "stun:stun.l.google.com:19302"))
+	pc, err := p.ensurePC(p.stun)
 	if err != nil {
 		log.Printf("ensurePC: %v", err)
 		return
@@ -332,7 +354,7 @@ func (p *peerState) onOffer(ctx context.Context, offer webrtc.SessionDescription
 }
 
 func (p *peerState) onCandidate(ctx context.Context, cand webrtc.ICECandidateInit) {
-	pc, err := p.ensurePC(envOr("HIDBRIDGE_STUN", "stun:stun.l.google.com:19302"))
+	pc, err := p.ensurePC(p.stun)
 	if err != nil {
 		return
 	}
@@ -343,7 +365,7 @@ func (p *peerState) onCandidate(ctx context.Context, cand webrtc.ICECandidateIni
 	_ = ctx
 }
 
-func runSyntheticVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP) error {
+func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, rawFFmpegArgs string, rawCaptureInput string) error {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		return fmt.Errorf("listen udp: %w", err)
@@ -358,19 +380,19 @@ func runSyntheticVideoStream(ctx context.Context, track *webrtc.TrackLocalStatic
 		"-hide_banner",
 		"-loglevel", "warning",
 		"-re",
-		"-f", "lavfi",
-		"-i", "testsrc=size=1280x720:rate=30",
-		"-an",
-		"-c:v", "libvpx",
-		"-deadline", "realtime",
-		"-cpu-used", "8",
-		"-g", "60",
-		"-b:v", "1200k",
-		"-pix_fmt", "yuv420p",
+	}
+	pipelineArgs, err := buildVideoPipelineArgs(sourceMode, qualityPreset, rawFFmpegArgs, rawCaptureInput)
+	if err != nil {
+		return err
+	}
+	args = append(args, pipelineArgs...)
+	args = append(args,
 		"-f", "rtp",
 		"-payload_type", "96",
 		outURL,
-	}
+	)
+	log.Printf("video pipeline mode=%s ffmpeg=%s", sourceMode, ffmpegPath)
+	log.Printf("video ffmpeg args: %s", strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	cmd.Stdout = os.Stdout
@@ -429,6 +451,277 @@ func runSyntheticVideoStream(ctx context.Context, track *webrtc.TrackLocalStatic
 	}
 }
 
+func buildVideoPipelineArgs(sourceMode string, qualityPreset string, rawFFmpegArgs string, rawCaptureInput string) ([]string, error) {
+	customArgs := strings.TrimSpace(rawFFmpegArgs)
+	if customArgs != "" {
+		parsed, err := splitCommandLine(customArgs)
+		if err != nil {
+			return nil, fmt.Errorf("parse HIDBRIDGE_VIDEO_FFMPEG_ARGS: %w", err)
+		}
+		if len(parsed) == 0 {
+			return nil, fmt.Errorf("empty HIDBRIDGE_VIDEO_FFMPEG_ARGS")
+		}
+		if runtime.GOOS == "windows" {
+			parsed = normalizeDshowInputArgs(parsed)
+		}
+		return parsed, nil
+	}
+
+	switch normalizeSourceMode(sourceMode) {
+	case "capture":
+		inputArgs, err := buildCaptureInputArgs(rawCaptureInput)
+		if err != nil {
+			return nil, err
+		}
+		args := append([]string{}, inputArgs...)
+		args = append(args, "-an")
+		args = append(args, defaultVp8EncoderArgs(qualityPreset)...)
+		return args, nil
+	case "testsrc":
+		args := []string{
+			"-f", "lavfi",
+			"-i", "testsrc=size=1280x720:rate=30",
+			"-an",
+		}
+		args = append(args, defaultVp8EncoderArgs(qualityPreset)...)
+		return args, nil
+	default:
+		return nil, fmt.Errorf("unsupported source mode: %s", sourceMode)
+	}
+}
+
+func buildCaptureInputArgs(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) != "" {
+		parsed, err := splitCommandLine(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse HIDBRIDGE_VIDEO_CAPTURE_INPUT: %w", err)
+		}
+		if len(parsed) == 0 {
+			return nil, fmt.Errorf("empty HIDBRIDGE_VIDEO_CAPTURE_INPUT")
+		}
+		if runtime.GOOS == "windows" {
+			parsed = normalizeDshowInputArgs(parsed)
+		}
+		return parsed, nil
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		// Default device name matches current HidBridge setups.
+		return []string{"-f", "dshow", "-i", "video=USB3.0 Video"}, nil
+	case "linux":
+		return []string{"-f", "v4l2", "-framerate", "30", "-video_size", "1280x720", "-i", "/dev/video0"}, nil
+	case "darwin":
+		return []string{"-f", "avfoundation", "-framerate", "30", "-i", "0:none"}, nil
+	default:
+		return nil, fmt.Errorf("capture mode is unsupported on %s without HIDBRIDGE_VIDEO_CAPTURE_INPUT", runtime.GOOS)
+	}
+}
+
+func normalizeDshowInputArgs(args []string) []string {
+	if len(args) < 4 {
+		return args
+	}
+
+	usesDshow := false
+	for i := 0; i+1 < len(args); i++ {
+		if strings.EqualFold(args[i], "-f") && strings.EqualFold(args[i+1], "dshow") {
+			usesDshow = true
+			break
+		}
+	}
+	if !usesDshow {
+		return args
+	}
+
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if strings.EqualFold(args[i], "-i") && i+1 < len(args) {
+			inputVal := args[i+1]
+			out = append(out, args[i])
+
+			// Repair unquoted Windows dshow input like:
+			// -i video=USB3.0 Video
+			// which would otherwise be tokenized as ["video=USB3.0", "Video"].
+			if strings.HasPrefix(strings.ToLower(inputVal), "video=") {
+				j := i + 2
+				for j < len(args) {
+					next := args[j]
+					if strings.HasPrefix(next, "-") {
+						break
+					}
+					// Stop before another key=value (e.g. audio=...).
+					if strings.Contains(next, "=") {
+						break
+					}
+					inputVal += " " + next
+					j++
+				}
+				inputVal = normalizeDshowDeviceSelector(inputVal)
+				out = append(out, inputVal)
+				i = j - 1
+				continue
+			}
+
+			out = append(out, inputVal)
+			i++
+			continue
+		}
+
+		out = append(out, args[i])
+	}
+
+	return out
+}
+
+func normalizeDshowDeviceSelector(inputVal string) string {
+	lc := strings.ToLower(inputVal)
+	if !strings.HasPrefix(lc, "video=") {
+		return inputVal
+	}
+
+	val := strings.TrimSpace(inputVal[len("video="):])
+	if val == "" {
+		return inputVal
+	}
+
+	// Some launch paths can pass escaped wrappers (e.g. \"USB3.0 Video\").
+	// Normalize to raw device name because exec.Command passes argv directly.
+	val = strings.ReplaceAll(val, `\"`, `"`)
+	val = strings.ReplaceAll(val, `\'`, `'`)
+	for len(val) >= 2 {
+		if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") {
+			val = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(val, "\""), "\""))
+			continue
+		}
+		if strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'") {
+			val = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(val, "'"), "'"))
+			continue
+		}
+		break
+	}
+
+	return "video=" + val
+}
+
+func defaultVp8EncoderArgs(preset string) []string {
+	switch normalizeQualityPreset(preset) {
+	case "low":
+		return []string{
+			"-c:v", "libvpx",
+			"-deadline", "realtime",
+			"-cpu-used", "10",
+			"-g", "60",
+			"-b:v", "700k",
+			"-maxrate", "800k",
+			"-bufsize", "1400k",
+			"-pix_fmt", "yuv420p",
+		}
+	case "high":
+		return []string{
+			"-c:v", "libvpx",
+			"-deadline", "realtime",
+			"-cpu-used", "6",
+			"-g", "60",
+			"-b:v", "2400k",
+			"-maxrate", "2800k",
+			"-bufsize", "4800k",
+			"-pix_fmt", "yuv420p",
+		}
+	default:
+		return []string{
+			"-c:v", "libvpx",
+			"-deadline", "realtime",
+			"-cpu-used", "8",
+			"-g", "60",
+			"-b:v", "1200k",
+			"-maxrate", "1400k",
+			"-bufsize", "2400k",
+			"-pix_fmt", "yuv420p",
+		}
+	}
+}
+
+func normalizeSourceMode(sourceMode string) string {
+	switch strings.ToLower(strings.TrimSpace(sourceMode)) {
+	case "", "testsrc":
+		return "testsrc"
+	case "capture":
+		return "capture"
+	default:
+		return strings.ToLower(strings.TrimSpace(sourceMode))
+	}
+}
+
+func normalizeQualityPreset(qualityPreset string) string {
+	switch strings.ToLower(strings.TrimSpace(qualityPreset)) {
+	case "low":
+		return "low"
+	case "high":
+		return "high"
+	default:
+		return "balanced"
+	}
+}
+
+func splitCommandLine(raw string) ([]string, error) {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	escape := false
+
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+
+	for _, r := range raw {
+		if escape {
+			cur.WriteRune(r)
+			escape = false
+			continue
+		}
+		if quote != 0 {
+			if r == '\\' {
+				escape = true
+				continue
+			}
+			if r == quote {
+				quote = 0
+				continue
+			}
+			cur.WriteRune(r)
+			continue
+		}
+
+		if unicode.IsSpace(r) {
+			flush()
+			continue
+		}
+		if r == '"' || r == '\'' {
+			quote = r
+			continue
+		}
+		if r == '\\' {
+			escape = true
+			continue
+		}
+		cur.WriteRune(r)
+	}
+
+	if escape {
+		cur.WriteRune('\\')
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quote in command line")
+	}
+	flush()
+	return out, nil
+}
+
 func dialWS(ctx context.Context, base *url.URL, path string, token string) (*websocket.Conn, error) {
 	wsURL := *base
 	if wsURL.Scheme == "https" {
@@ -471,4 +764,32 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func registerHelperPidFile() func() {
+	pidFile := strings.TrimSpace(os.Getenv("HIDBRIDGE_HELPER_PIDFILE"))
+	if pidFile == "" {
+		return func() {}
+	}
+
+	dir := filepath.Dir(pidFile)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Printf("pidfile mkdir failed: %v", err)
+			return func() {}
+		}
+	}
+
+	pid := os.Getpid()
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+		log.Printf("pidfile write failed: %v", err)
+		return func() {}
+	}
+	log.Printf("pidfile: %s pid=%d", pidFile, pid)
+
+	return func() {
+		if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("pidfile remove failed: %v", err)
+		}
+	}
 }

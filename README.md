@@ -69,6 +69,21 @@ Notes:
 - WebSocket control protocol: `Docs/ws_control_protocol.md`
 - Video endpoints mapping: `Docs/video_streams.md`
 
+## Test Runner
+
+Use the root script to run all main test suites in one command:
+
+```powershell
+.\run_all_tests.ps1
+```
+
+Useful options:
+- `-Configuration Debug|Release`
+- `-DotnetVerbosity quiet|minimal|normal|detailed|diagnostic`
+- `-SkipDotnet`
+- `-SkipGo`
+- `-StopOnFailure`
+
 ## Commercial Licensing
 
 If you want to legally use HidBridge in a product/service, you need a commercial license. See `COMMERCIAL_LICENSE.md`.

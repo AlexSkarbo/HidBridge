@@ -17,8 +17,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
 
     private readonly Options _opt;
     private readonly IWebRtcSignalingService _signaling;
+    private readonly HidControl.UseCases.Video.IVideoRuntime _videoRuntime;
     private readonly object _lock = new();
     private readonly Dictionary<string, ProcState> _procs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _manualStopsByRoom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _cleanupTimer;
 
     private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc, DateTimeOffset? IdleSinceUtc);
@@ -28,10 +30,15 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     /// </summary>
     /// <param name="opt">Server options.</param>
     /// <param name="signaling">Signaling room state service.</param>
-    public WebRtcVideoPeerSupervisor(Options opt, IWebRtcSignalingService signaling)
+    public WebRtcVideoPeerSupervisor(
+        Options opt,
+        IWebRtcSignalingService signaling,
+        HidControl.UseCases.Video.IVideoRuntime videoRuntime)
     {
         _opt = opt;
         _signaling = signaling;
+        _videoRuntime = videoRuntime;
+        CleanupOrphansFromPidFiles();
         _cleanupTimer = new Timer(_ => CleanupTick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(Math.Max(1, _opt.WebRtcRoomsCleanupIntervalSeconds)));
     }
 
@@ -54,6 +61,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     /// </summary>
     public void Stop()
     {
+        string? toolDir = null;
+        _ = TryFindToolDir(out toolDir!, out _);
         lock (_lock)
         {
             foreach (var kvp in _procs.ToArray())
@@ -70,15 +79,22 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 {
                     try { kvp.Value.Process.Dispose(); } catch { }
                     _procs.Remove(kvp.Key);
+                    if (!string.IsNullOrWhiteSpace(toolDir))
+                    {
+                        DeletePidFile(toolDir!, kvp.Key);
+                    }
+                    ReleaseManualStopsForRoom(kvp.Key);
                 }
             }
+            ReleaseAllManualStops();
         }
+        CleanupOrphansFromPidFiles();
     }
 
     /// <summary>
     /// Ensures a helper is running for the specified room.
     /// </summary>
-    public (bool ok, bool started, int? pid, string? error) EnsureStarted(string room)
+    public (bool ok, bool started, int? pid, string? error) EnsureStarted(string room, string? qualityPreset = null)
     {
         if (string.IsNullOrWhiteSpace(room))
         {
@@ -97,11 +113,13 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 if (!existing.Process.HasExited)
                 {
+                    EnsureCaptureManualStops(room);
                     return (true, false, existing.Process.Id, null);
                 }
 
                 try { existing.Process.Dispose(); } catch { }
                 _procs.Remove(room);
+                ReleaseManualStopsForRoom(room);
             }
 
             if (!TryFindToolDir(out string toolDir, out string toolHint))
@@ -110,24 +128,47 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 return (false, false, null, "tool_not_found");
             }
 
+            if (TryGetRunningPidFromFile(BuildPidFilePath(toolDir, room), out int existingPid))
+            {
+                EnsureCaptureManualStops(room);
+                return (true, false, existingPid, null);
+            }
+
             string serverUrl = BuildLocalServerUrl(_opt.Url);
             string token = _opt.Token ?? string.Empty;
 
-            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcVideoPeerStun);
+            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcVideoPeerStun, qualityPreset);
             if (psi is null)
             {
                 ServerEventLog.Log("webrtc.videopeer", "autostart_skipped", new { reason = "unsupported_os", os = Environment.OSVersion.Platform.ToString() });
                 return (false, false, null, "unsupported_os");
             }
+            string pidPath = BuildPidFilePath(toolDir, room);
+            psi.Environment["HIDBRIDGE_HELPER_PIDFILE"] = pidPath;
 
             try
             {
+                if (string.Equals(_opt.WebRtcVideoPeerSourceMode, "capture", StringComparison.OrdinalIgnoreCase))
+                {
+                    EnsureCaptureManualStops(room);
+                    // Capture mode competes with legacy ffmpeg/capture workers for the same camera.
+                    // Stop them first so dshow/v4l2 can open the device reliably.
+                    IReadOnlyList<string> stoppedHelpers = StopTrackedCaptureHelpers(room, toolDir);
+                    IReadOnlyList<string> stoppedWorkers = _videoRuntime.StopCaptureWorkersAsync(null, CancellationToken.None).GetAwaiter().GetResult();
+                    IReadOnlyList<string> stoppedFfmpeg = _videoRuntime.StopFfmpegProcesses();
+                    if (stoppedHelpers.Count > 0 || stoppedWorkers.Count > 0 || stoppedFfmpeg.Count > 0)
+                    {
+                        ServerEventLog.Log("webrtc.videopeer", "capture_released", new { room, stoppedHelpers, stoppedWorkers, stoppedFfmpeg });
+                    }
+                }
+
                 var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 p.Exited += (_, __) =>
                 {
                     int code = -1;
                     try { code = p.ExitCode; } catch { }
                     ServerEventLog.Log("webrtc.videopeer", "exit", new { room, code });
+                    DeletePidFile(toolDir, room);
 
                     lock (_lock)
                     {
@@ -135,6 +176,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                         {
                             _procs.Remove(room);
                         }
+                        ReleaseManualStopsForRoom(room);
                     }
                 };
 
@@ -150,6 +192,24 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     int code = -1;
                     try { code = p.ExitCode; } catch { }
                     string earlyLogPath = BuildHelperLogPath(toolDir, room);
+                    if (code == 0)
+                    {
+                        // If the shell exits with 0 but helper is still alive (PID file), keep it.
+                        if (TryGetRunningPidFromFile(BuildPidFilePath(toolDir, room), out int livePid))
+                        {
+                            EnsureCaptureManualStops(room);
+                            ServerEventLog.Log("webrtc.videopeer", "autostart_early_exit_zero", new { room, code, probeMs = EarlyExitProbeMs, pid = livePid, logPath = earlyLogPath });
+                            try { p.Dispose(); } catch { }
+                            return (true, false, livePid, null);
+                        }
+
+                        ReleaseManualStopsForRoom(room);
+                        ServerEventLog.Log("webrtc.videopeer", "autostart_failed", new { room, reason = "exited_early", code, probeMs = EarlyExitProbeMs, logPath = earlyLogPath });
+                        try { p.Dispose(); } catch { }
+                        return (false, false, null, "exit_0");
+                    }
+
+                    ReleaseManualStopsForRoom(room);
                     ServerEventLog.Log("webrtc.videopeer", "autostart_failed", new { room, reason = "exited_early", code, probeMs = EarlyExitProbeMs, logPath = earlyLogPath });
                     try { p.Dispose(); } catch { }
                     return (false, false, null, $"exit_{code}");
@@ -162,15 +222,21 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     serverUrl,
                     room,
                     stun = _opt.WebRtcVideoPeerStun,
+                    sourceMode = _opt.WebRtcVideoPeerSourceMode,
+                    qualityPreset = NormalizeQualityPresetForEnv(qualityPreset) ?? _opt.WebRtcVideoPeerQualityPreset,
+                    captureInputSet = !string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput),
+                    ffmpegArgsSet = !string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerFfmpegArgs),
                     pid = p.Id,
                     exe = psi.FileName,
                     args = psi.Arguments,
+                    pidPath,
                     logPath
                 });
                 return (true, true, p.Id, null);
             }
             catch (Exception ex)
             {
+                ReleaseManualStopsForRoom(room);
                 ServerEventLog.Log("webrtc.videopeer", "autostart_failed", new { room, error = ex.Message });
                 return (false, false, null, ex.Message);
             }
@@ -187,32 +253,85 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             return (false, false, "room_required");
         }
 
-        lock (_lock)
+        string toolDir = string.Empty;
+        bool hasToolDir = TryFindToolDir(out toolDir, out _);
+        bool stoppedByPid = false;
+        if (hasToolDir)
         {
-            if (!_procs.TryGetValue(room, out var st))
+            string pidPath = BuildPidFilePath(toolDir, room);
+            if (TryGetRunningPidFromFile(pidPath, out int pid) && TryKillByPid(pid))
             {
-                return (true, false, null);
+                stoppedByPid = true;
             }
-
-            try
-            {
-                if (!st.Process.HasExited)
-                {
-                    st.Process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                return (false, false, ex.Message);
-            }
-            finally
-            {
-                try { st.Process.Dispose(); } catch { }
-                _procs.Remove(room);
-            }
-
-            return (true, true, null);
+            DeletePidFile(toolDir, room);
         }
+
+        ProcState? tracked = null;
+        bool lockTaken = false;
+        try
+        {
+            if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(5)))
+            {
+                // Avoid long API hangs when helper startup/cleanup currently holds the lock.
+                return (true, stoppedByPid, null);
+            }
+            lockTaken = true;
+
+            if (!_procs.TryGetValue(room, out tracked))
+            {
+                ReleaseManualStopsForRoom(room);
+                return (true, stoppedByPid, null);
+            }
+
+            _procs.Remove(room);
+            ReleaseManualStopsForRoom(room);
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                Monitor.Exit(_lock);
+            }
+        }
+
+        if (tracked is null)
+        {
+            return (true, stoppedByPid, null);
+        }
+
+        bool stoppedTracked = false;
+        string? killError = null;
+        try
+        {
+            if (!tracked.Process.HasExited)
+            {
+                tracked.Process.Kill(entireProcessTree: true);
+                stoppedTracked = true;
+            }
+            else
+            {
+                stoppedTracked = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            killError = ex.Message;
+        }
+        finally
+        {
+            try { tracked.Process.Dispose(); } catch { }
+            if (hasToolDir)
+            {
+                DeletePidFile(toolDir, room);
+            }
+        }
+
+        if (!stoppedTracked && !stoppedByPid && !string.IsNullOrWhiteSpace(killError))
+        {
+            return (false, false, killError);
+        }
+
+        return (true, stoppedTracked || stoppedByPid, null);
     }
 
     /// <summary>
@@ -271,6 +390,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 {
                     try { proc.Dispose(); } catch { }
                     _procs.Remove(room);
+                    ReleaseManualStopsForRoom(room);
                     continue;
                 }
 
@@ -294,6 +414,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                         try { proc.Kill(entireProcessTree: true); } catch { }
                         try { proc.Dispose(); } catch { }
                         _procs.Remove(room);
+                        ReleaseManualStopsForRoom(room);
                         ServerEventLog.Log("webrtc.videopeer", "autostop_idle", new { room, idleStopSeconds = idleStop });
                     }
                 }
@@ -345,8 +466,9 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         }
     }
 
-    private ProcessStartInfo? BuildStartInfo(string toolDir, string serverUrl, string room, string token, string stun)
+    private ProcessStartInfo? BuildStartInfo(string toolDir, string serverUrl, string room, string token, string stun, string? qualityPreset)
     {
+        string effectiveQualityPreset = NormalizeQualityPresetForEnv(qualityPreset) ?? _opt.WebRtcVideoPeerQualityPreset;
         if (OperatingSystem.IsWindows())
         {
             string ps1 = Path.Combine(toolDir, "run.ps1");
@@ -369,6 +491,21 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 WorkingDirectory = toolDir
             };
             psi.Environment["HIDBRIDGE_STUN"] = stun;
+            psi.Environment["HIDBRIDGE_VIDEO_SOURCE_MODE"] = string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerSourceMode)
+                ? "testsrc"
+                : _opt.WebRtcVideoPeerSourceMode;
+            if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_CAPTURE_INPUT"] = _opt.WebRtcVideoPeerCaptureInput;
+            }
+            if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerFfmpegArgs))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_FFMPEG_ARGS"] = _opt.WebRtcVideoPeerFfmpegArgs;
+            }
+            if (!string.IsNullOrWhiteSpace(effectiveQualityPreset))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_QUALITY_PRESET"] = effectiveQualityPreset;
+            }
             if (!string.IsNullOrWhiteSpace(_opt.FfmpegPath))
             {
                 psi.Environment["HIDBRIDGE_FFMPEG"] = _opt.FfmpegPath;
@@ -393,6 +530,21 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 WorkingDirectory = toolDir
             };
             psi.Environment["HIDBRIDGE_STUN"] = stun;
+            psi.Environment["HIDBRIDGE_VIDEO_SOURCE_MODE"] = string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerSourceMode)
+                ? "testsrc"
+                : _opt.WebRtcVideoPeerSourceMode;
+            if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_CAPTURE_INPUT"] = _opt.WebRtcVideoPeerCaptureInput;
+            }
+            if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerFfmpegArgs))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_FFMPEG_ARGS"] = _opt.WebRtcVideoPeerFfmpegArgs;
+            }
+            if (!string.IsNullOrWhiteSpace(effectiveQualityPreset))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_QUALITY_PRESET"] = effectiveQualityPreset;
+            }
             if (!string.IsNullOrWhiteSpace(_opt.FfmpegPath))
             {
                 psi.Environment["HIDBRIDGE_FFMPEG"] = _opt.FfmpegPath;
@@ -403,11 +555,313 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         return null;
     }
 
+    private static string? NormalizeQualityPresetForEnv(string? qualityPreset)
+    {
+        if (string.IsNullOrWhiteSpace(qualityPreset))
+        {
+            return null;
+        }
+
+        return qualityPreset.Trim().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Stops other tracked video helpers before starting capture mode to avoid camera lock conflicts.
+    /// </summary>
+    private IReadOnlyList<string> StopTrackedCaptureHelpers(string roomToKeep, string toolDir)
+    {
+        var stopped = new List<string>();
+        foreach (var kvp in _procs.ToArray())
+        {
+            string room = kvp.Key;
+            if (string.Equals(room, roomToKeep, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            Process p = kvp.Value.Process;
+            try
+            {
+                if (!p.HasExited)
+                {
+                    p.Kill(entireProcessTree: true);
+                }
+                stopped.Add(room);
+            }
+            catch { }
+            finally
+            {
+                try { p.Dispose(); } catch { }
+                _procs.Remove(room);
+                DeletePidFile(toolDir, room);
+                ReleaseManualStopsForRoom(room);
+            }
+        }
+
+        return stopped;
+    }
+
+    /// <summary>
+    /// Ensures capture-mode manual-stop flags are set for enabled sources in this room.
+    /// </summary>
+    private void EnsureCaptureManualStops(string room)
+    {
+        if (!string.Equals(_opt.WebRtcVideoPeerSourceMode, "capture", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!_manualStopsByRoom.TryGetValue(room, out var tracked))
+        {
+            tracked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _manualStopsByRoom[room] = tracked;
+        }
+
+        var newlyTracked = new List<string>();
+        foreach (var src in _opt.VideoSources.Where(s => s.Enabled))
+        {
+            if (string.IsNullOrWhiteSpace(src.Id))
+            {
+                continue;
+            }
+
+            if (tracked.Contains(src.Id))
+            {
+                continue;
+            }
+
+            bool wasManual = _videoRuntime.IsManualStop(src.Id);
+            if (!wasManual)
+            {
+                _videoRuntime.SetManualStop(src.Id, true);
+            }
+
+            tracked.Add(src.Id);
+            newlyTracked.Add(src.Id);
+        }
+
+        if (newlyTracked.Count > 0)
+        {
+            ServerEventLog.Log("webrtc.videopeer", "capture_manualstop_acquired", new { room, sourceIds = newlyTracked });
+        }
+    }
+
+    /// <summary>
+    /// Releases manual-stop flags previously acquired for a room if no other room still needs them.
+    /// </summary>
+    private void ReleaseManualStopsForRoom(string room)
+    {
+        if (!_manualStopsByRoom.TryGetValue(room, out var tracked) || tracked.Count == 0)
+        {
+            _manualStopsByRoom.Remove(room);
+            return;
+        }
+
+        _manualStopsByRoom.Remove(room);
+        var stillNeeded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ids in _manualStopsByRoom.Values)
+        {
+            stillNeeded.UnionWith(ids);
+        }
+
+        var released = new List<string>();
+        foreach (var id in tracked)
+        {
+            if (stillNeeded.Contains(id))
+            {
+                continue;
+            }
+
+            _videoRuntime.SetManualStop(id, false);
+            released.Add(id);
+        }
+
+        if (released.Count > 0)
+        {
+            ServerEventLog.Log("webrtc.videopeer", "capture_manualstop_released", new { room, sourceIds = released });
+        }
+    }
+
+    /// <summary>
+    /// Releases all manual-stop flags tracked by this supervisor.
+    /// </summary>
+    private void ReleaseAllManualStops()
+    {
+        if (_manualStopsByRoom.Count == 0)
+        {
+            return;
+        }
+
+        var release = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ids in _manualStopsByRoom.Values)
+        {
+            release.UnionWith(ids);
+        }
+        _manualStopsByRoom.Clear();
+
+        foreach (var id in release)
+        {
+            _videoRuntime.SetManualStop(id, false);
+        }
+
+        if (release.Count > 0)
+        {
+            ServerEventLog.Log("webrtc.videopeer", "capture_manualstop_released_all", new { sourceIds = release.ToArray() });
+        }
+    }
+
     private static string BuildHelperLogPath(string toolDir, string room)
     {
         string safe = new string(room.Select(ch =>
             (char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == '.') ? ch : '_').ToArray());
         return Path.Combine(toolDir, "logs", $"videopeer_{safe}.log");
+    }
+
+    private static string BuildPidFilePath(string toolDir, string room)
+    {
+        string safe = new string(room.Select(ch =>
+            (char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == '.') ? ch : '_').ToArray());
+        return Path.Combine(toolDir, "pids", $"videopeer_{safe}.pid");
+    }
+
+    private static bool TryGetRunningPidFromFile(string pidFilePath, out int pid)
+    {
+        pid = 0;
+        try
+        {
+            if (!File.Exists(pidFilePath))
+            {
+                return false;
+            }
+
+            string raw = File.ReadAllText(pidFilePath).Trim();
+            if (!int.TryParse(raw, out pid) || pid <= 0)
+            {
+                return false;
+            }
+
+            Process p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryKillByPid(int pid)
+    {
+        try
+        {
+            Process p = Process.GetProcessById(pid);
+            if (!p.HasExited)
+            {
+                p.Kill(entireProcessTree: true);
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void DeletePidFile(string toolDir, string room)
+    {
+        try
+        {
+            string pidPath = BuildPidFilePath(toolDir, room);
+            if (File.Exists(pidPath))
+            {
+                File.Delete(pidPath);
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Best-effort orphan cleanup for helper PIDs persisted on disk.
+    /// </summary>
+    private void CleanupOrphansFromPidFiles()
+    {
+        if (!TryFindToolDir(out string toolDir, out _))
+        {
+            return;
+        }
+
+        string pidsDir = Path.Combine(toolDir, "pids");
+        if (!Directory.Exists(pidsDir))
+        {
+            return;
+        }
+
+        int removedFiles = 0;
+        int killed = 0;
+        foreach (string file in Directory.EnumerateFiles(pidsDir, "videopeer_*.pid"))
+        {
+            try
+            {
+                string raw = File.ReadAllText(file).Trim();
+                if (int.TryParse(raw, out int pid) && pid > 0 && TryKillByPid(pid))
+                {
+                    killed++;
+                }
+            }
+            catch { }
+            finally
+            {
+                try
+                {
+                    File.Delete(file);
+                    removedFiles++;
+                }
+                catch { }
+            }
+        }
+
+        int killedByName = KillLegacyByProcessNames("webrtcvideopeer", "WebRtcVideoPeer");
+        if (removedFiles > 0 || killed > 0 || killedByName > 0)
+        {
+            ServerEventLog.Log("webrtc.videopeer", "orphan_cleanup", new { removedFiles, killed, killedByName });
+        }
+    }
+
+    private static int KillLegacyByProcessNames(params string[] names)
+    {
+        int killed = 0;
+        foreach (string name in names)
+        {
+            Process[] procs;
+            try
+            {
+                procs = Process.GetProcessesByName(name);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Process p in procs)
+            {
+                try
+                {
+                    if (p.HasExited)
+                    {
+                        continue;
+                    }
+
+                    p.Kill(entireProcessTree: true);
+                    killed++;
+                }
+                catch { }
+                finally
+                {
+                    try { p.Dispose(); } catch { }
+                }
+            }
+        }
+
+        return killed;
     }
 
     /// <inheritdoc />

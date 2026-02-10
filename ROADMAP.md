@@ -118,6 +118,7 @@ Setup instructions live in `Docs/turn_setup.md`.
 - `Docs/webrtc_control_peer.md`: Control MVP usage + troubleshooting (`room_full`, connect timeouts).
 - `Docs/turn_setup.md`: coturn Docker command + when TURN is needed.
 - `Docs/text_input_i18n.md`: why “type any language in any OS” is not generally solvable with pure HID.
+- Root test runner: `run_all_tests.ps1` (single command for .NET and Go tests).
 
 ## Next Steps (Do These In Order)
 

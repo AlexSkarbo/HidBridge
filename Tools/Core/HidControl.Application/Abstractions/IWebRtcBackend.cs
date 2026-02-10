@@ -22,8 +22,9 @@ public interface IWebRtcBackend
     /// Ensures a helper peer exists for a room.
     /// </summary>
     /// <param name="room">Room id.</param>
+    /// <param name="qualityPreset">Optional video quality preset (used for video rooms only).</param>
     /// <returns>Start result.</returns>
-    (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room);
+    (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room, string? qualityPreset = null);
 
     /// <summary>
     /// Stops a helper peer for a room.

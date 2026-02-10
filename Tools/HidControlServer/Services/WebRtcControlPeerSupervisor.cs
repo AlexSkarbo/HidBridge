@@ -29,6 +29,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     {
         _opt = opt;
         _signaling = signaling;
+        CleanupOrphansFromPidFiles();
         _cleanupTimer = new Timer(_ => CleanupTick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(Math.Max(1, _opt.WebRtcRoomsCleanupIntervalSeconds)));
     }
 
@@ -51,6 +52,8 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     /// </summary>
     public void Stop()
     {
+        string? toolDir = null;
+        _ = TryFindToolDir(out toolDir!, out _);
         lock (_lock)
         {
             foreach (var kvp in _procs.ToArray())
@@ -67,9 +70,14 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 {
                     try { kvp.Value.Process.Dispose(); } catch { }
                     _procs.Remove(kvp.Key);
+                    if (!string.IsNullOrWhiteSpace(toolDir))
+                    {
+                        DeletePidFile(toolDir!, kvp.Key);
+                    }
                 }
             }
         }
+        CleanupOrphansFromPidFiles();
     }
 
     /// <summary>
@@ -107,6 +115,11 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 return (false, false, null, "tool_not_found");
             }
 
+            if (TryGetRunningPidFromFile(BuildPidFilePath(toolDir, room), out int existingPid))
+            {
+                return (true, false, existingPid, null);
+            }
+
             string serverUrl = BuildLocalServerUrl(_opt.Url);
             string token = _opt.Token ?? string.Empty;
 
@@ -116,6 +129,8 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 ServerEventLog.Log("webrtc.peer", "autostart_skipped", new { reason = "unsupported_os", os = Environment.OSVersion.Platform.ToString() });
                 return (false, false, null, "unsupported_os");
             }
+            string pidPath = BuildPidFilePath(toolDir, room);
+            psi.Environment["HIDBRIDGE_HELPER_PIDFILE"] = pidPath;
 
             try
             {
@@ -125,6 +140,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     int code = -1;
                     try { code = p.ExitCode; } catch { }
                     ServerEventLog.Log("webrtc.peer", "exit", new { room, code });
+                    DeletePidFile(toolDir, room);
 
                     lock (_lock)
                     {
@@ -146,6 +162,20 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 {
                     int code = -1;
                     try { code = p.ExitCode; } catch { }
+                    if (code == 0)
+                    {
+                        if (TryGetRunningPidFromFile(pidPath, out int livePid))
+                        {
+                            ServerEventLog.Log("webrtc.peer", "autostart_early_exit_zero", new { room, code, probeMs = EarlyExitProbeMs, pid = livePid });
+                            try { p.Dispose(); } catch { }
+                            return (true, false, livePid, null);
+                        }
+
+                        ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "exited_early", code, probeMs = EarlyExitProbeMs });
+                        try { p.Dispose(); } catch { }
+                        return (false, false, null, "exit_0");
+                    }
+
                     ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "exited_early", code, probeMs = EarlyExitProbeMs });
                     try { p.Dispose(); } catch { }
                     return (false, false, null, $"exit_{code}");
@@ -159,7 +189,8 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     stun = _opt.WebRtcControlPeerStun,
                     pid = p.Id,
                     exe = psi.FileName,
-                    args = psi.Arguments
+                    args = psi.Arguments,
+                    pidPath
                 });
                 return (true, true, p.Id, null);
             }
@@ -181,32 +212,83 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
             return (false, false, "room_required");
         }
 
-        lock (_lock)
+        string toolDir = string.Empty;
+        bool hasToolDir = TryFindToolDir(out toolDir, out _);
+        bool stoppedByPid = false;
+        if (hasToolDir)
         {
-            if (!_procs.TryGetValue(room, out var st))
+            string pidPath = BuildPidFilePath(toolDir, room);
+            if (TryGetRunningPidFromFile(pidPath, out int pid) && TryKillByPid(pid))
             {
-                return (true, false, null);
+                stoppedByPid = true;
             }
-
-            try
-            {
-                if (!st.Process.HasExited)
-                {
-                    st.Process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                return (false, false, ex.Message);
-            }
-            finally
-            {
-                try { st.Process.Dispose(); } catch { }
-                _procs.Remove(room);
-            }
-
-            return (true, true, null);
+            DeletePidFile(toolDir, room);
         }
+
+        ProcState? tracked = null;
+        bool lockTaken = false;
+        try
+        {
+            if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(5)))
+            {
+                // Avoid long API hangs when helper startup/cleanup currently holds the lock.
+                return (true, stoppedByPid, null);
+            }
+            lockTaken = true;
+
+            if (!_procs.TryGetValue(room, out tracked))
+            {
+                return (true, stoppedByPid, null);
+            }
+
+            _procs.Remove(room);
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                Monitor.Exit(_lock);
+            }
+        }
+
+        if (tracked is null)
+        {
+            return (true, stoppedByPid, null);
+        }
+
+        bool stoppedTracked = false;
+        string? killError = null;
+        try
+        {
+            if (!tracked.Process.HasExited)
+            {
+                tracked.Process.Kill(entireProcessTree: true);
+                stoppedTracked = true;
+            }
+            else
+            {
+                stoppedTracked = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            killError = ex.Message;
+        }
+        finally
+        {
+            try { tracked.Process.Dispose(); } catch { }
+            if (hasToolDir)
+            {
+                DeletePidFile(toolDir, room);
+            }
+        }
+
+        if (!stoppedTracked && !stoppedByPid && !string.IsNullOrWhiteSpace(killError))
+        {
+            return (false, false, killError);
+        }
+
+        return (true, stoppedTracked || stoppedByPid, null);
     }
 
     /// <summary>
@@ -384,6 +466,153 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
 
         hint = $"searched up from '{start}' for 'Tools/WebRtcControlPeer'";
         return false;
+    }
+
+    private static string BuildPidFilePath(string toolDir, string room)
+    {
+        string safe = new string(room.Select(ch =>
+            (char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == '.') ? ch : '_').ToArray());
+        return Path.Combine(toolDir, "pids", $"controlpeer_{safe}.pid");
+    }
+
+    private static bool TryGetRunningPidFromFile(string pidFilePath, out int pid)
+    {
+        pid = 0;
+        try
+        {
+            if (!File.Exists(pidFilePath))
+            {
+                return false;
+            }
+
+            string raw = File.ReadAllText(pidFilePath).Trim();
+            if (!int.TryParse(raw, out pid) || pid <= 0)
+            {
+                return false;
+            }
+
+            Process p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryKillByPid(int pid)
+    {
+        try
+        {
+            Process p = Process.GetProcessById(pid);
+            if (!p.HasExited)
+            {
+                p.Kill(entireProcessTree: true);
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void DeletePidFile(string toolDir, string room)
+    {
+        try
+        {
+            string pidPath = BuildPidFilePath(toolDir, room);
+            if (File.Exists(pidPath))
+            {
+                File.Delete(pidPath);
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Best-effort orphan cleanup for helper PIDs persisted on disk.
+    /// </summary>
+    private void CleanupOrphansFromPidFiles()
+    {
+        if (!TryFindToolDir(out string toolDir, out _))
+        {
+            return;
+        }
+
+        string pidsDir = Path.Combine(toolDir, "pids");
+        if (!Directory.Exists(pidsDir))
+        {
+            return;
+        }
+
+        int removedFiles = 0;
+        int killed = 0;
+        foreach (string file in Directory.EnumerateFiles(pidsDir, "controlpeer_*.pid"))
+        {
+            try
+            {
+                string raw = File.ReadAllText(file).Trim();
+                if (int.TryParse(raw, out int pid) && pid > 0 && TryKillByPid(pid))
+                {
+                    killed++;
+                }
+            }
+            catch { }
+            finally
+            {
+                try
+                {
+                    File.Delete(file);
+                    removedFiles++;
+                }
+                catch { }
+            }
+        }
+
+        int killedByName = KillLegacyByProcessNames("webrtccontrolpeer", "WebRtcControlPeer");
+        if (removedFiles > 0 || killed > 0 || killedByName > 0)
+        {
+            ServerEventLog.Log("webrtc.peer", "orphan_cleanup", new { removedFiles, killed, killedByName });
+        }
+    }
+
+    private static int KillLegacyByProcessNames(params string[] names)
+    {
+        int killed = 0;
+        foreach (string name in names)
+        {
+            Process[] procs;
+            try
+            {
+                procs = Process.GetProcessesByName(name);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Process p in procs)
+            {
+                try
+                {
+                    if (p.HasExited)
+                    {
+                        continue;
+                    }
+
+                    p.Kill(entireProcessTree: true);
+                    killed++;
+                }
+                catch { }
+                finally
+                {
+                    try { p.Dispose(); } catch { }
+                }
+            }
+        }
+
+        return killed;
     }
 
     /// <inheritdoc/>

@@ -25,12 +25,12 @@ public sealed class CreateWebRtcVideoRoomUseCase
     /// Executes the use-case.
     /// </summary>
     /// <param name="room">Optional room id.</param>
+    /// <param name="qualityPreset">Optional video quality preset.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create result.</returns>
-    public Task<WebRtcRoomCreateResult> Execute(string? room, CancellationToken ct)
+    public Task<WebRtcRoomCreateResult> Execute(string? room, string? qualityPreset, CancellationToken ct)
     {
         string? r = string.IsNullOrWhiteSpace(room) ? _roomIds.GenerateVideoRoomId() : room;
-        return _rooms.CreateAsync(r, ct);
+        return _rooms.CreateVideoAsync(r, qualityPreset, ct);
     }
 }
-

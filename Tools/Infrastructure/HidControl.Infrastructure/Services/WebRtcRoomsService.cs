@@ -58,6 +58,63 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     /// <inheritdoc />
     public Task<WebRtcRoomCreateResult> CreateAsync(string? room, CancellationToken ct)
     {
+        return CreateInternalAsync(room, qualityPreset: null, persist: true, ct);
+    }
+
+    /// <inheritdoc />
+    public Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, CancellationToken ct)
+    {
+        return CreateInternalAsync(room, qualityPreset, persist: false, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<WebRtcRoomDeleteResult> DeleteAsync(string room, CancellationToken ct)
+    {
+        if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
+        {
+            return new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_control");
+        }
+        if (string.Equals(room, "video", StringComparison.OrdinalIgnoreCase))
+        {
+            return new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_video");
+        }
+
+        (bool ok, bool stopped, string? error) stop = (false, false, "delete_failed");
+        for (int i = 0; i < 3; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            stop = _backend.StopHelper(room);
+            if (stop.ok)
+            {
+                break;
+            }
+
+            await Task.Delay(150 * (i + 1), ct);
+        }
+
+        // Explicit delete should always remove persisted room metadata,
+        // even if backend stop returns a transient/process-race error.
+        RemovePersistedRoom(room);
+
+        if (!stop.ok)
+        {
+            // Reconcile races: if helper is no longer known and no peers remain,
+            // treat delete as successful even if StopHelper reported a transient error.
+            var peers = _backend.GetRoomPeerCountsSnapshot();
+            var helperRooms = _backend.GetHelperRoomsSnapshot();
+            bool hasHelper = helperRooms.Contains(room);
+            bool hasPeers = peers.TryGetValue(room, out int peerCount) && peerCount > 0;
+            if (!hasHelper && !hasPeers)
+            {
+                return new WebRtcRoomDeleteResult(true, room, stop.stopped, null);
+            }
+        }
+
+        return new WebRtcRoomDeleteResult(stop.ok, room, stop.stopped, stop.error);
+    }
+
+    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, bool persist, CancellationToken ct)
+    {
         _ = ct;
         RestorePersistedRoomsIfNeeded();
 
@@ -67,34 +124,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             return Task.FromResult(new WebRtcRoomCreateResult(false, roomId, false, null, err ?? "bad_room"));
         }
 
-        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized);
-        if (ok)
+        string? normalizedPreset = NormalizeQualityPreset(qualityPreset);
+        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset);
+        if (ok && persist)
         {
             TouchPersistedRoom(normalized);
         }
         return Task.FromResult(new WebRtcRoomCreateResult(ok, normalized, started, pid, error));
-    }
-
-    /// <inheritdoc />
-    public Task<WebRtcRoomDeleteResult> DeleteAsync(string room, CancellationToken ct)
-    {
-        _ = ct;
-        if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
-        {
-            return Task.FromResult(new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_control"));
-        }
-        if (string.Equals(room, "video", StringComparison.OrdinalIgnoreCase))
-        {
-            return Task.FromResult(new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_video"));
-        }
-
-        var (ok, stopped, error) = _backend.StopHelper(room);
-        if (ok)
-        {
-            RemovePersistedRoom(room);
-        }
-
-        return Task.FromResult(new WebRtcRoomDeleteResult(ok, room, stopped, error));
     }
 
     private void LoadPersistedRooms()
@@ -138,6 +174,11 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
                 if (IsBuiltInRoom(normalized))
                 {
+                    continue;
+                }
+                if (IsVideoRoom(normalized))
+                {
+                    // Video rooms are ephemeral per session and should not be restored from disk.
                     continue;
                 }
 
@@ -193,7 +234,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
     private void TouchPersistedRoom(string room)
     {
-        if (!_backend.RoomsPersistenceEnabled || IsBuiltInRoom(room))
+        if (!_backend.RoomsPersistenceEnabled || IsBuiltInRoom(room) || IsVideoRoom(room))
         {
             return;
         }
@@ -389,6 +430,28 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     {
         return string.Equals(room, "control", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(room, "video", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeQualityPreset(string? qualityPreset)
+    {
+        if (string.IsNullOrWhiteSpace(qualityPreset))
+        {
+            return null;
+        }
+
+        return qualityPreset.Trim().ToLowerInvariant();
+    }
+
+    private static bool IsVideoRoom(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return false;
+        }
+
+        return string.Equals(room, "video", StringComparison.OrdinalIgnoreCase) ||
+               room.StartsWith("video-", StringComparison.OrdinalIgnoreCase) ||
+               room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryNormalizeRoomId(string room, out string normalized, out string? error)

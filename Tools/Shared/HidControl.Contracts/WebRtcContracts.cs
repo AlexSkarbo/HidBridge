@@ -57,6 +57,13 @@ public sealed record WebRtcRoomDto(string Room, int Peers, bool HasHelper, bool 
 public sealed record WebRtcCreateRoomRequest(string? Room);
 
 /// <summary>
+/// Create video room request body.
+/// </summary>
+/// <param name="Room">Optional room id.</param>
+/// <param name="QualityPreset">Optional video quality preset (for example: low, balanced, high).</param>
+public sealed record WebRtcCreateVideoRoomRequest(string? Room, string? QualityPreset);
+
+/// <summary>
 /// Create room response.
 /// </summary>
 /// <param name="Ok">Ok.</param>
@@ -74,4 +81,3 @@ public sealed record WebRtcCreateRoomResponse(bool Ok, string? Room, bool Starte
 /// <param name="Stopped">True if helper was stopped.</param>
 /// <param name="Error">Error code if failed.</param>
 public sealed record WebRtcDeleteRoomResponse(bool Ok, string Room, bool Stopped, string? Error);
-

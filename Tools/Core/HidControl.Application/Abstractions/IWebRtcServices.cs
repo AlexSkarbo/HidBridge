@@ -21,6 +21,15 @@ public interface IWebRtcRoomsService
     Task<WebRtcRoomCreateResult> CreateAsync(string? room, CancellationToken ct);
 
     /// <summary>
+    /// Creates a video room (or normalizes a provided room id) and ensures a video helper peer is started.
+    /// </summary>
+    /// <param name="room">Optional room id. If null/empty, a room id is generated.</param>
+    /// <param name="qualityPreset">Optional video quality preset.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Create result.</returns>
+    Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, CancellationToken ct);
+
+    /// <summary>
     /// Stops a room helper and removes the room (where applicable).
     /// </summary>
     /// <param name="room">Room id.</param>

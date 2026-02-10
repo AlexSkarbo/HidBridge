@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,6 +66,8 @@ func main() {
 
 	log.Printf("webrtc control peer starting")
 	log.Printf("server=%s room=%s stun=%s", base.String(), *room, *stun)
+	cleanupPidFile := registerHelperPidFile()
+	defer cleanupPidFile()
 
 	// Long-running loop: reconnect on transport failures instead of exiting the helper process.
 	backoff := 1 * time.Second
@@ -393,4 +397,32 @@ func envOr(name, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func registerHelperPidFile() func() {
+	pidFile := strings.TrimSpace(os.Getenv("HIDBRIDGE_HELPER_PIDFILE"))
+	if pidFile == "" {
+		return func() {}
+	}
+
+	dir := filepath.Dir(pidFile)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Printf("pidfile mkdir failed: %v", err)
+			return func() {}
+		}
+	}
+
+	pid := os.Getpid()
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+		log.Printf("pidfile write failed: %v", err)
+		return func() {}
+	}
+	log.Printf("pidfile: %s pid=%d", pidFile, pid)
+
+	return func() {
+		if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("pidfile remove failed: %v", err)
+		}
+	}
 }

@@ -138,13 +138,13 @@
   "videoModesCacheTtlSeconds": 300,
   "devicesCacheMaxAgeSeconds": 600,
 
-  "webRtcControlPeerAutoStart": false,
-  "webRtcControlPeerRoom": "control",
-  "webRtcControlPeerStun": "stun:stun.l.google.com:19302",
-
   "webRtcVideoPeerAutoStart": false,
   "webRtcVideoPeerRoom": "video",
   "webRtcVideoPeerStun": "stun:stun.l.google.com:19302",
+  "webRtcVideoPeerSourceMode": "testsrc",
+  "webRtcVideoPeerQualityPreset": "balanced",
+  "webRtcVideoPeerCaptureInput": "",
+  "webRtcVideoPeerFfmpegArgs": "",
 
   "webRtcRoomsCleanupIntervalSeconds": 5,
   "webRtcRoomIdleStopSeconds": 30,
@@ -152,7 +152,7 @@
 
   "webRtcClientJoinTimeoutMs": 250,
   "webRtcClientConnectTimeoutMs": 5000,
-  "webRtcRoomsPersistEnabled": true,
+  "webRtcRoomsPersistEnabled": false,
   "webRtcRoomsStorePath": "webrtc_rooms.json",
   "webRtcRoomsPersistTtlSeconds": 86400,
 

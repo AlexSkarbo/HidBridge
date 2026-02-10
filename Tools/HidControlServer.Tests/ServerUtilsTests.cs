@@ -95,4 +95,53 @@ public sealed class ServerUtilsTests
         string hash = ComputeReportDescHash(new byte[] { 1, 2, 3 });
         Assert.Equal(64, hash.Length);
     }
+
+    [Fact]
+    /// <summary>
+    /// Parses webrtc video helper source options from config.
+    /// </summary>
+    public void Parse_Config_WebRtcVideoPeerSourceOptions_AreLoaded()
+    {
+        string cfgPath = Path.Combine(Path.GetTempPath(), $"hidcontrol_webrtc_video_{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(cfgPath, """
+            {
+              "webRtcVideoPeerSourceMode": "capture",
+              "webRtcVideoPeerCaptureInput": "-f dshow -i video=USB3.0 Video",
+              "webRtcVideoPeerFfmpegArgs": "-f lavfi -i testsrc=size=640x360:rate=30 -an -c:v libvpx -deadline realtime -cpu-used 8 -g 60 -b:v 1200k -pix_fmt yuv420p"
+            }
+            """);
+
+            var opt = Options.Parse(new[] { "--config", cfgPath });
+            Assert.Equal("capture", opt.WebRtcVideoPeerSourceMode);
+            Assert.Equal("-f dshow -i video=USB3.0 Video", opt.WebRtcVideoPeerCaptureInput);
+            Assert.Contains("-f lavfi", opt.WebRtcVideoPeerFfmpegArgs, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try { File.Delete(cfgPath); } catch { }
+        }
+    }
+
+    [Fact]
+    /// <summary>
+    /// Uses default webrtc video helper source mode when config omits it.
+    /// </summary>
+    public void Parse_Config_WebRtcVideoPeerSourceMode_DefaultsToTestsrc()
+    {
+        string cfgPath = Path.Combine(Path.GetTempPath(), $"hidcontrol_webrtc_video_default_{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(cfgPath, "{}");
+            var opt = Options.Parse(new[] { "--config", cfgPath });
+            Assert.Equal("testsrc", opt.WebRtcVideoPeerSourceMode);
+            Assert.Null(opt.WebRtcVideoPeerCaptureInput);
+            Assert.Null(opt.WebRtcVideoPeerFfmpegArgs);
+        }
+        finally
+        {
+            try { File.Delete(cfgPath); } catch { }
+        }
+    }
 }
