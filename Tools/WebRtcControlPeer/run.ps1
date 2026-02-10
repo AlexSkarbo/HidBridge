@@ -14,5 +14,14 @@ $env:HIDBRIDGE_WEBRTC_ROOM = $Room
 Write-Host "HIDBRIDGE_SERVER_URL=$env:HIDBRIDGE_SERVER_URL"
 Write-Host "HIDBRIDGE_WEBRTC_ROOM=$env:HIDBRIDGE_WEBRTC_ROOM"
 
-go run .
+if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+  Write-Error "go command not found in PATH"
+  exit 127
+}
 
+go run .
+$code = $LASTEXITCODE
+if ($null -eq $code) {
+  $code = if ($?) { 0 } else { 1 }
+}
+exit $code

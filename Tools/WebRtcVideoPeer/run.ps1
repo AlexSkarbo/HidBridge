@@ -20,7 +20,15 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $logPath = Join-Path $logDir ("videopeer_{0}.log" -f $safeRoom)
 Write-Host "HIDBRIDGE_LOG_PATH=$logPath"
 
+if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+  Write-Error "go command not found in PATH"
+  exit 127
+}
+
 & go run . *>> $logPath
 $code = $LASTEXITCODE
-if ($null -eq $code) { $code = 0 }
+if ($null -eq $code) {
+  # LASTEXITCODE can stay null for some PowerShell command failures.
+  $code = if ($?) { 0 } else { 1 }
+}
 exit $code
