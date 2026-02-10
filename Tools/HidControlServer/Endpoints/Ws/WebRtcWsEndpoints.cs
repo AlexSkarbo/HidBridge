@@ -147,6 +147,15 @@ public static class WebRtcWsEndpoints
                         if (roomId is not null)
                         {
                             signaling.Leave(roomId, clientId);
+                            int peersLeft = signaling.GetRoomPeerCountsSnapshot().TryGetValue(roomId, out int c) ? c : 0;
+                            await BroadcastAsync(signaling, roomId, clientId, new
+                            {
+                                ok = true,
+                                type = "webrtc.peer_left",
+                                room = roomId,
+                                peerId = clientId,
+                                peers = peersLeft
+                            }, ctx.RequestAborted);
                             roomId = null;
                         }
                         await client.SendJsonAsync(new { ok = true, type = "webrtc.left", clientId }, ctx.RequestAborted);
@@ -169,6 +178,15 @@ public static class WebRtcWsEndpoints
                 if (roomId is not null)
                 {
                     signaling.Leave(roomId, clientId);
+                    int peersLeft = signaling.GetRoomPeerCountsSnapshot().TryGetValue(roomId, out int c) ? c : 0;
+                    await BroadcastAsync(signaling, roomId, clientId, new
+                    {
+                        ok = true,
+                        type = "webrtc.peer_left",
+                        room = roomId,
+                        peerId = clientId,
+                        peers = peersLeft
+                    }, CancellationToken.None);
                 }
                 Clients.TryRemove(clientId, out _);
             }

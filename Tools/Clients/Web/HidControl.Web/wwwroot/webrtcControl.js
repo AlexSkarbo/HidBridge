@@ -105,7 +105,7 @@
           return;
         }
 
-        if (msg.type === "webrtc.hello" || msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined") {
+        if (msg.type === "webrtc.hello" || msg.type === "webrtc.joined" || msg.type === "webrtc.peer_joined" || msg.type === "webrtc.peer_left") {
           log(msg.type, msg);
           if (msg.type === "webrtc.joined" && msg.room === room) {
             joined = true;
@@ -114,6 +114,13 @@
               joinWaiter.resolve(true);
               clearTimeout(joinWaiter.timerId);
               joinWaiter = null;
+            }
+          }
+          if (msg.type === "webrtc.peer_left" && msg.room === room) {
+            if (typeof msg.peers === "number") lastJoinedPeers = msg.peers;
+            if (remotePeerId && msg.peerId && remotePeerId === msg.peerId) {
+              remotePeerId = null;
+              setStatus("peer left: " + msg.peerId);
             }
           }
           return;
@@ -290,8 +297,8 @@
         joinWaiter = null;
       }, Math.max(250, joinTimeoutMs | 0));
       await wsSend({ type: "join", room });
-      setStatus("joined room: " + room);
       await joinWaiter.promise;
+      setStatus("joined room: " + room);
     }
 
     async function call() {
