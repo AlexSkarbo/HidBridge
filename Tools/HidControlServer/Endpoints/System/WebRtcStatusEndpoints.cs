@@ -1,0 +1,115 @@
+using HidControl.Application.UseCases.WebRtc;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+
+namespace HidControlServer.Endpoints.Sys;
+
+/// <summary>
+/// Registers WebRTC status endpoints under <c>/status/webrtc/*</c>.
+/// </summary>
+public static class WebRtcStatusEndpoints
+{
+    /// <summary>
+    /// Maps WebRTC status endpoints.
+    /// </summary>
+    /// <param name="app">The application builder.</param>
+    public static void MapWebRtcStatusEndpoints(this WebApplication app)
+    {
+        app.MapGet("/status/webrtc/ice", async (GetWebRtcIceConfigUseCase uc, CancellationToken ct) =>
+        {
+            var cfg = await uc.Execute(ct);
+            var iceServers = cfg.IceServers
+                .Select(s => new
+                {
+                    urls = s.Urls,
+                    username = s.Username,
+                    credential = s.Credential,
+                    credentialType = s.CredentialType
+                })
+                .ToArray();
+
+            return Results.Ok(new { ok = true, ttlSeconds = cfg.TtlSeconds, iceServers });
+        });
+
+        app.MapGet("/status/webrtc/config", async (GetWebRtcClientConfigUseCase uc, CancellationToken ct) =>
+        {
+            var cfg = await uc.Execute(ct);
+            return Results.Ok(new
+            {
+                ok = true,
+                joinTimeoutMs = cfg.JoinTimeoutMs,
+                connectTimeoutMs = cfg.ConnectTimeoutMs,
+                roomsCleanupIntervalSeconds = cfg.RoomsCleanupIntervalSeconds,
+                roomIdleStopSeconds = cfg.RoomIdleStopSeconds,
+                roomsMaxHelpers = cfg.RoomsMaxHelpers
+            });
+        });
+
+        app.MapGet("/status/webrtc/rooms", async (ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        {
+            var snap = await uc.Execute(ct);
+            var rooms = snap.Rooms
+                .Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper, isControl = r.IsControl })
+                .ToArray();
+            return Results.Ok(new { ok = true, rooms });
+        });
+
+        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, CreateWebRtcRoomUseCase uc, CancellationToken ct) =>
+        {
+            string? roomId = await ReadRequestedRoomIdAsync(req, ct);
+            var res = await uc.Execute(roomId, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
+        });
+
+        app.MapDelete("/status/webrtc/rooms/{room}", async (string room, DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
+        {
+            var res = await uc.Execute(room, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
+        });
+
+        app.MapGet("/status/webrtc/video/rooms", async (ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        {
+            var snap = await uc.Execute(ct);
+            var rooms = snap.Rooms
+                .Where(r =>
+                    string.Equals(r.Room, "video", StringComparison.OrdinalIgnoreCase) ||
+                    r.Room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase) ||
+                    r.Room.StartsWith("video-", StringComparison.OrdinalIgnoreCase))
+                .Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper })
+                .ToArray();
+            return Results.Ok(new { ok = true, rooms });
+        });
+
+        app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        {
+            string? roomId = await ReadRequestedRoomIdAsync(req, ct);
+            var res = await uc.Execute(roomId, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
+        });
+
+        app.MapDelete("/status/webrtc/video/rooms/{room}", async (string room, DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        {
+            var res = await uc.Execute(room, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
+        });
+    }
+
+    /// <summary>
+    /// Reads optional WebRTC room id from request body.
+    /// </summary>
+    /// <param name="req">Incoming request.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Requested room id or null when absent/invalid.</returns>
+    private static async Task<string?> ReadRequestedRoomIdAsync(HttpRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateRoomRequest>(cancellationToken: ct);
+            return body?.Room;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
