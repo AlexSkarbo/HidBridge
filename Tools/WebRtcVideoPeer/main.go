@@ -155,6 +155,9 @@ type peerState struct {
 	streamCancel context.CancelFunc
 
 	activePeerId string
+	dcMu         sync.Mutex
+	dc           *webrtc.DataChannel
+	pendingNotice string
 }
 
 func newPeerState(stun, room, sourceMode, qualityPreset, ffmpegArgs, captureInput string, sigWS *websocket.Conn) *peerState {
@@ -214,7 +217,7 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	p.streamCancel = streamCancel
 	go func() {
-		if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.ffmpegArgs, p.captureInput); err != nil && streamCtx.Err() == nil {
+		if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.ffmpegArgs, p.captureInput, p.notifyVideoStatus); err != nil && streamCtx.Err() == nil {
 			log.Printf("video stream ended: %v", err)
 		}
 	}()
@@ -248,9 +251,25 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		label := dc.Label()
 		log.Printf("datachannel: %s", label)
+		p.dcMu.Lock()
+		p.dc = dc
+		p.dcMu.Unlock()
 
-		dc.OnOpen(func() { log.Printf("datachannel open: %s", label) })
-		dc.OnClose(func() { log.Printf("datachannel close: %s", label) })
+		dc.OnOpen(func() {
+			log.Printf("datachannel open: %s", label)
+			p.dcMu.Lock()
+			notice := p.pendingNotice
+			p.dcMu.Unlock()
+			if strings.TrimSpace(notice) != "" {
+				_ = dc.SendText(notice)
+			}
+		})
+		dc.OnClose(func() {
+			log.Printf("datachannel close: %s", label)
+			p.dcMu.Lock()
+			p.dc = nil
+			p.dcMu.Unlock()
+		})
 		dc.OnMessage(func(m webrtc.DataChannelMessage) {
 			if !m.IsString {
 				_ = dc.SendText(`{"ok":false,"error":"binary_not_supported"}`)
@@ -263,6 +282,28 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 
 	p.pc = pc
 	return pc, nil
+}
+
+func (p *peerState) notifyVideoStatus(event string, mode string, detail string) {
+	payload := map[string]string{
+		"type":  "video.status",
+		"event": event,
+		"mode":  mode,
+	}
+	if strings.TrimSpace(detail) != "" {
+		payload["detail"] = detail
+	}
+	raw, _ := json.Marshal(payload)
+	msg := string(raw)
+
+	p.dcMu.Lock()
+	p.pendingNotice = msg
+	dc := p.dc
+	p.dcMu.Unlock()
+
+	if dc != nil {
+		_ = dc.SendText(msg)
+	}
 }
 
 func (p *peerState) handleSignal(ctx context.Context, from string, data json.RawMessage) {
@@ -365,7 +406,7 @@ func (p *peerState) onCandidate(ctx context.Context, cand webrtc.ICECandidateIni
 	_ = ctx
 }
 
-func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, rawFFmpegArgs string, rawCaptureInput string) error {
+func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, rawFFmpegArgs string, rawCaptureInput string, onStatus func(event string, mode string, detail string)) error {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		return fmt.Errorf("listen udp: %w", err)
@@ -375,36 +416,50 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	ffmpegPath := envOr("HIDBRIDGE_FFMPEG", "ffmpeg")
 	port := conn.LocalAddr().(*net.UDPAddr).Port
 	outURL := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=1200", port)
+	modeInUse := normalizeSourceMode(sourceMode)
+	customPipeline := strings.TrimSpace(rawFFmpegArgs) != ""
+	canFallback := modeInUse == "capture" && !customPipeline
+	fallbackUsed := false
+	var cmd *exec.Cmd
+	var waitCh chan error
 
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-re",
+	startFfmpeg := func(mode string) error {
+		args := []string{
+			"-hide_banner",
+			"-loglevel", "warning",
+			"-re",
+		}
+		pipelineArgs, buildErr := buildVideoPipelineArgs(mode, qualityPreset, rawFFmpegArgs, rawCaptureInput)
+		if buildErr != nil {
+			return buildErr
+		}
+		args = append(args, pipelineArgs...)
+		args = append(args,
+			"-f", "rtp",
+			"-payload_type", "96",
+			outURL,
+		)
+		log.Printf("video pipeline mode=%s ffmpeg=%s", mode, ffmpegPath)
+		log.Printf("video ffmpeg args: %s", strings.Join(args, " "))
+
+		localCmd := exec.CommandContext(ctx, ffmpegPath, args...)
+		localCmd.Stdout = os.Stdout
+		localCmd.Stderr = os.Stderr
+		if startErr := localCmd.Start(); startErr != nil {
+			return fmt.Errorf("start ffmpeg (%s): %w", ffmpegPath, startErr)
+		}
+
+		cmd = localCmd
+		waitCh = make(chan error, 1)
+		go func() { waitCh <- localCmd.Wait() }()
+		return nil
 	}
-	pipelineArgs, err := buildVideoPipelineArgs(sourceMode, qualityPreset, rawFFmpegArgs, rawCaptureInput)
-	if err != nil {
+
+	if err := startFfmpeg(modeInUse); err != nil {
 		return err
 	}
-	args = append(args, pipelineArgs...)
-	args = append(args,
-		"-f", "rtp",
-		"-payload_type", "96",
-		outURL,
-	)
-	log.Printf("video pipeline mode=%s ffmpeg=%s", sourceMode, ffmpegPath)
-	log.Printf("video ffmpeg args: %s", strings.Join(args, " "))
-
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start ffmpeg (%s): %w", ffmpegPath, err)
-	}
-
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
 	defer func() {
-		if cmd.Process != nil {
+		if cmd != nil && cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
 	}()
@@ -417,6 +472,18 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		case ffErr := <-waitCh:
 			if ctx.Err() != nil {
 				return nil
+			}
+			if ffErr != nil && canFallback && !fallbackUsed && modeInUse == "capture" {
+				fallbackUsed = true
+				modeInUse = "testsrc"
+				log.Printf("capture pipeline failed, switching to fallback source mode=%s: %v", modeInUse, ffErr)
+				if onStatus != nil {
+					onStatus("fallback", modeInUse, "capture_failed")
+				}
+				if err := startFfmpeg(modeInUse); err != nil {
+					return fmt.Errorf("fallback start failed: %w", err)
+				}
+				continue
 			}
 			if ffErr != nil {
 				return fmt.Errorf("ffmpeg exited: %w", ffErr)

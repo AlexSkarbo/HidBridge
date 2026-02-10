@@ -7,6 +7,8 @@ Current status:
 - It accepts offers from browser clients
 - It publishes a VP8 video track from `ffmpeg` (`testsrc` by default, `capture` optional)
 - It opens/accepts a `DataChannel` and echoes text messages back (debug/control)
+- If capture startup fails, it auto-falls back to `testsrc` and sends:
+  - `{"type":"video.status","event":"fallback","mode":"testsrc","detail":"capture_failed"}`
 
 Next step is replacing synthetic source with real capture pipeline.
 

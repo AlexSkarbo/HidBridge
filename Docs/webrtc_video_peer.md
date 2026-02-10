@@ -29,6 +29,10 @@ Where:
 - Delete a video room helper: `DELETE /status/webrtc/video/rooms/{room}`
   - Note: deleting the default room `video` is blocked (`cannot_delete_video`).
 
+Web UI note:
+- In `HidControl.Web`, video quality defaults to `high` on LAN/localhost hosts.
+- `high` uses more CPU and bandwidth; switch to `balanced` or `low` on weak hosts.
+
 ## Helper Auto-Start
 
 `HidControlServer` can auto-start the video helper on boot:
@@ -58,6 +62,9 @@ Notes:
 - Helper publishes VP8 video track from FFmpeg:
   - default mode: `testsrc` (synthetic generator)
   - optional mode: `capture` (real capture input)
+- If `capture` fails to start (device busy/not found), helper falls back to `testsrc` automatically
+  and sends a DataChannel status event:
+  - `{"type":"video.status","event":"fallback","mode":"testsrc","detail":"capture_failed"}`
 - Helper keeps DataChannel echo for control/debug payloads.
 - Helper process is long-running and reconnects to signaling after transient transport failures.
 

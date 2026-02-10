@@ -202,6 +202,7 @@ app.MapGet("/", () =>
 	          <option value="balanced" selected>balanced</option>
 	          <option value="high">high</option>
 	        </select>
+	        <span class="muted" title="High quality uses more CPU and bandwidth">high = more CPU</span>
 	      </span>
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
@@ -483,6 +484,27 @@ app.MapGet("/", () =>
 	      return x === "video" || x.startsWith("hb-v-") || x.startsWith("video-");
 	    }
 	    function getMode() { return (document.getElementById("rtcMode").value || "control"); }
+	    function isLanOrLocalHost(hostname) {
+	      const h = String(hostname || "").trim().toLowerCase();
+	      if (!h) return false;
+	      if (h === "localhost" || h.endsWith(".local")) return true;
+	      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
+	        const p = h.split(".").map(x => parseInt(x, 10));
+	        if (p[0] === 127 || p[0] === 10) return true;
+	        if (p[0] === 192 && p[1] === 168) return true;
+	        if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+	      }
+	      return false;
+	    }
+	    function applyDefaultVideoQualityForLan() {
+	      const el = document.getElementById("rtcVideoQuality");
+	      if (!el) return;
+	      const host = window.location && window.location.hostname ? window.location.hostname : "";
+	      if (isLanOrLocalHost(host)) {
+	        // Prefer higher quality by default on LAN/local setups.
+	        el.value = "high";
+	      }
+	    }
 	    function getVideoQualityPreset() {
 	      const v = (document.getElementById("rtcVideoQuality")?.value || "balanced").trim().toLowerCase();
 	      if (v === "low" || v === "balanced" || v === "high") return v;
@@ -527,7 +549,22 @@ app.MapGet("/", () =>
 	        receiveVideo: mode === "video",
 	        onLog: rtcLog,
 	        onStatus: setRtcStatus,
-	        onMessage: (data) => show({ webrtc: "message", data }),
+	        onMessage: (data) => {
+	          try {
+	            const parsed = (typeof data === "string") ? JSON.parse(data) : data;
+	            if (parsed && parsed.type === "video.status") {
+	              const event = String(parsed.event || "");
+	              const mode = String(parsed.mode || "");
+	              const detail = String(parsed.detail || "");
+	              if (rtcVideoMeta) {
+	                rtcVideoMeta.textContent = `video status: ${event} (${mode})${detail ? " - " + detail : ""}`;
+	              }
+	              rtcLog({ webrtc: "video.status", payload: parsed });
+	              return;
+	            }
+	          } catch {}
+	          show({ webrtc: "message", data });
+	        },
 	        onTrack: (ev) => {
 	          try {
 	            const stream = (ev && ev.streams && ev.streams.length > 0)
@@ -547,6 +584,7 @@ app.MapGet("/", () =>
 	        }
 	      });
 	    }
+	    applyDefaultVideoQualityForLan();
 	    updateRtcModeUi();
 	    resetWebRtcClient();
 
