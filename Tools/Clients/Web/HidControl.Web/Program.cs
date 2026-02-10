@@ -202,6 +202,10 @@ app.MapGet("/", () =>
 	          <option value="balanced" selected>balanced</option>
 	          <option value="high">high</option>
 	        </select>
+	        <label class="muted">Bitrate kbps</label>
+	        <input id="rtcVideoBitrateKbps" type="number" min="200" max="12000" step="50" value="" style="width: 120px" placeholder="auto" />
+	        <label class="muted">FPS</label>
+	        <input id="rtcVideoFps" type="number" min="5" max="60" step="1" value="" style="width: 90px" placeholder="auto" />
 	        <span class="muted" title="High quality uses more CPU and bandwidth">high = more CPU</span>
 	      </span>
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
@@ -510,6 +514,20 @@ app.MapGet("/", () =>
 	      if (v === "low" || v === "balanced" || v === "high") return v;
 	      return "balanced";
 	    }
+	    function getVideoBitrateKbps() {
+	      const raw = (document.getElementById("rtcVideoBitrateKbps")?.value || "").trim();
+	      if (!raw) return null;
+	      const n = Number.parseInt(raw, 10);
+	      if (!Number.isFinite(n)) return null;
+	      return n;
+	    }
+	    function getVideoFps() {
+	      const raw = (document.getElementById("rtcVideoFps")?.value || "").trim();
+	      if (!raw) return null;
+	      const n = Number.parseInt(raw, 10);
+	      if (!Number.isFinite(n)) return null;
+	      return n;
+	    }
 	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
 	    function setRoom(r) {
 	      if (!r) return;
@@ -694,7 +712,16 @@ app.MapGet("/", () =>
 	      if (act === "start") {
 	        try {
 	          const prefix = getRoomsApiPrefix(room);
-	          const res = await fetch(prefix, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room }) });
+	          const res = await fetch(prefix, {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify({
+	              room,
+	              qualityPreset: getVideoQualityPreset(),
+	              bitrateKbps: getVideoBitrateKbps(),
+	              fps: getVideoFps()
+	            })
+	          });
 	          const j = await res.json().catch(() => null);
 	          rtcLog({ webrtc: "ui.room_started", room, endpoint: prefix, payload: j });
 	          show(j || { ok: false, error: "start_failed" });
@@ -721,6 +748,21 @@ app.MapGet("/", () =>
 	          const j = await res.json().catch(() => null);
 	          rtcLog({ webrtc: "ui.room_deleted", room, endpoint: prefix, payload: j });
 	          show(j || { ok: false, error: "delete_failed" });
+	          if (j && j.ok) {
+	            // If we deleted the room currently bound to the client, disconnect immediately so
+	            // the room does not reappear from our own active peer session.
+	            if (getRoom().toLowerCase() === room.toLowerCase()) {
+	              resetWebRtcClient();
+	              clearRemoteVideo();
+	              setRtcStatus("disconnected");
+	              // Keep UX predictable by switching to default room after deletion.
+	              setRoom("control");
+	            }
+	            // Remove stale row immediately; refresh below will reconcile authoritative state.
+	            const rowBtn = document.querySelector(`#rtcRoomsBody button[data-act="delete"][data-room="${CSS.escape(room)}"]`);
+	            const tr = rowBtn ? rowBtn.closest("tr") : null;
+	            if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+	          }
 	          await refreshRooms();
 	        } catch (e) {
 	          rtcLog({ webrtc: "ui.room_delete_error", room, error: String(e) });
@@ -734,7 +776,11 @@ app.MapGet("/", () =>
 	        const mode = getMode();
 	        const createUrl = (mode === "video") ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
 	        const body = (mode === "video")
-	          ? { qualityPreset: getVideoQualityPreset() }
+	          ? {
+	              qualityPreset: getVideoQualityPreset(),
+	              bitrateKbps: getVideoBitrateKbps(),
+	              fps: getVideoFps()
+	            }
 	          : {};
 	        const res = await fetch(createUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 	        const j = await res.json().catch(() => null);
@@ -848,7 +894,12 @@ app.MapGet("/", () =>
 	          const createRes = await fetch(prefix, {
 	            method: "POST",
 	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify({ room: wanted, qualityPreset: getVideoQualityPreset() })
+	            body: JSON.stringify({
+	              room: wanted,
+	              qualityPreset: getVideoQualityPreset(),
+	              bitrateKbps: getVideoBitrateKbps(),
+	              fps: getVideoFps()
+	            })
 	          });
 	          const created = await createRes.json().catch(() => null);
 	          rtcLog({ webrtc: "ui.ensure_helper_video_create", room: wanted, endpoint: prefix, payload: created });
@@ -862,7 +913,12 @@ app.MapGet("/", () =>
 	        }
 
 	        const body = isVideoRoomId(wanted)
-	          ? { room: wanted, qualityPreset: getVideoQualityPreset() }
+	          ? {
+	              room: wanted,
+	              qualityPreset: getVideoQualityPreset(),
+	              bitrateKbps: getVideoBitrateKbps(),
+	              fps: getVideoFps()
+	            }
 	          : { room: wanted };
 	        const res = await fetch(prefix, {
 	          method: "POST",
@@ -1249,8 +1305,14 @@ app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
         var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct)
-            ?? new HidControl.Contracts.WebRtcCreateVideoRoomRequest(null, null);
-        var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcVideoRoomAsync(client, body.Room, body.QualityPreset, ct);
+            ?? new HidControl.Contracts.WebRtcCreateVideoRoomRequest(null, null, null, null);
+        var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcVideoRoomAsync(
+            client,
+            body.Room,
+            body.QualityPreset,
+            body.BitrateKbps,
+            body.Fps,
+            ct);
         return Results.Json(res ?? new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "create_failed"));
     }
     catch (TaskCanceledException)

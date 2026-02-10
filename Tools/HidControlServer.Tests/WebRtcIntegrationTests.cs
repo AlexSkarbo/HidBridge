@@ -70,7 +70,11 @@ public sealed class WebRtcIntegrationTests
 
         public IReadOnlySet<string> GetHelperRoomsSnapshot() => new HashSet<string>(_helperRooms, StringComparer.OrdinalIgnoreCase);
 
-        public (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(string room, string? qualityPreset = null)
+        public (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(
+            string room,
+            string? qualityPreset = null,
+            int? bitrateKbps = null,
+            int? fps = null)
         {
             EnsureHelperStartedCalls++;
             LastQualityPreset = qualityPreset;
@@ -236,7 +240,7 @@ public sealed class WebRtcIntegrationTests
         var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
 
-        var res = await uc.Execute(null, null, CancellationToken.None);
+        var res = await uc.Execute(null, null, null, null, CancellationToken.None);
 
         Assert.True(res.Ok);
         Assert.NotNull(res.Room);
@@ -252,7 +256,7 @@ public sealed class WebRtcIntegrationTests
         var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
 
-        var res = await uc.Execute("hb-v-50443405-demo", null, CancellationToken.None);
+        var res = await uc.Execute("hb-v-50443405-demo", null, null, null, CancellationToken.None);
 
         Assert.True(res.Ok);
         Assert.Equal("hb-v-50443405-demo", res.Room);
@@ -268,7 +272,7 @@ public sealed class WebRtcIntegrationTests
         var roomsSvc = new WebRtcRoomsService(backend, roomIds);
         var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
 
-        var res = await uc.Execute("hb-v-50443405-demo", "high", CancellationToken.None);
+        var res = await uc.Execute("hb-v-50443405-demo", "high", null, null, CancellationToken.None);
 
         Assert.True(res.Ok);
         Assert.Equal("high", backend.LastQualityPreset);
@@ -518,7 +522,7 @@ public sealed class WebRtcIntegrationTests
         var validateSignal = new ValidateWebRtcSignalUseCase(signaling);
         var leave = new LeaveWebRtcSignalingUseCase(signaling);
 
-        var created = await createVideo.Execute(null, null, CancellationToken.None);
+        var created = await createVideo.Execute(null, null, null, null, CancellationToken.None);
         Assert.True(created.Ok);
         Assert.NotNull(created.Room);
         Assert.StartsWith("hb-v-50443405-", created.Room!, StringComparison.OrdinalIgnoreCase);

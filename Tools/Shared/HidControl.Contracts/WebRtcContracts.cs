@@ -61,7 +61,9 @@ public sealed record WebRtcCreateRoomRequest(string? Room);
 /// </summary>
 /// <param name="Room">Optional room id.</param>
 /// <param name="QualityPreset">Optional video quality preset (for example: low, balanced, high).</param>
-public sealed record WebRtcCreateVideoRoomRequest(string? Room, string? QualityPreset);
+/// <param name="BitrateKbps">Optional target bitrate (kbps).</param>
+/// <param name="Fps">Optional target frames per second.</param>
+public sealed record WebRtcCreateVideoRoomRequest(string? Room, string? QualityPreset, int? BitrateKbps, int? Fps);
 
 /// <summary>
 /// Create room response.

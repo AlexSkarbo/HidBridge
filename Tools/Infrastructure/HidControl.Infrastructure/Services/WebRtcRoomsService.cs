@@ -58,13 +58,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     /// <inheritdoc />
     public Task<WebRtcRoomCreateResult> CreateAsync(string? room, CancellationToken ct)
     {
-        return CreateInternalAsync(room, qualityPreset: null, persist: true, ct);
+        return CreateInternalAsync(room, qualityPreset: null, bitrateKbps: null, fps: null, persist: true, ct);
     }
 
     /// <inheritdoc />
-    public Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, CancellationToken ct)
+    public Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, CancellationToken ct)
     {
-        return CreateInternalAsync(room, qualityPreset, persist: false, ct);
+        return CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, persist: false, ct);
     }
 
     /// <inheritdoc />
@@ -113,7 +113,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         return new WebRtcRoomDeleteResult(stop.ok, room, stop.stopped, stop.error);
     }
 
-    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, bool persist, CancellationToken ct)
+    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, bool persist, CancellationToken ct)
     {
         _ = ct;
         RestorePersistedRoomsIfNeeded();
@@ -125,7 +125,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
 
         string? normalizedPreset = NormalizeQualityPreset(qualityPreset);
-        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset);
+        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset, bitrateKbps, fps);
         if (ok && persist)
         {
             TouchPersistedRoom(normalized);

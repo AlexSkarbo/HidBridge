@@ -69,10 +69,21 @@ public static class WebRtcClientExtensions
     /// <param name="client">Client.</param>
     /// <param name="room">Optional room id.</param>
     /// <param name="qualityPreset">Optional video quality preset.</param>
+    /// <param name="bitrateKbps">Optional target bitrate (kbps).</param>
+    /// <param name="fps">Optional target FPS.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create response.</returns>
-    public static Task<WebRtcCreateRoomResponse?> CreateWebRtcVideoRoomAsync(this HidControlClient client, string? room = null, string? qualityPreset = null, CancellationToken ct = default)
-        => client.PostAsync<WebRtcCreateVideoRoomRequest, WebRtcCreateRoomResponse>("/status/webrtc/video/rooms", new WebRtcCreateVideoRoomRequest(room, qualityPreset), ct);
+    public static Task<WebRtcCreateRoomResponse?> CreateWebRtcVideoRoomAsync(
+        this HidControlClient client,
+        string? room = null,
+        string? qualityPreset = null,
+        int? bitrateKbps = null,
+        int? fps = null,
+        CancellationToken ct = default)
+        => client.PostAsync<WebRtcCreateVideoRoomRequest, WebRtcCreateRoomResponse>(
+            "/status/webrtc/video/rooms",
+            new WebRtcCreateVideoRoomRequest(room, qualityPreset, bitrateKbps, fps),
+            ct);
 
     /// <summary>
     /// Deletes a WebRTC video room (stops its helper peer).

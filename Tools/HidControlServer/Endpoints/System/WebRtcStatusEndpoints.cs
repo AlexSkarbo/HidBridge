@@ -83,8 +83,8 @@ public static class WebRtcStatusEndpoints
 
         app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
-            (string? roomId, string? qualityPreset) = await ReadRequestedVideoRoomAsync(req, ct);
-            var res = await uc.Execute(roomId, qualityPreset, ct);
+            (string? roomId, string? qualityPreset, int? bitrateKbps, int? fps) = await ReadRequestedVideoRoomAsync(req, ct);
+            var res = await uc.Execute(roomId, qualityPreset, bitrateKbps, fps, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
         });
 
@@ -143,16 +143,16 @@ public static class WebRtcStatusEndpoints
     /// <param name="req">Incoming request.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Tuple of room id and quality preset.</returns>
-    private static async Task<(string? Room, string? QualityPreset)> ReadRequestedVideoRoomAsync(HttpRequest req, CancellationToken ct)
+    private static async Task<(string? Room, string? QualityPreset, int? BitrateKbps, int? Fps)> ReadRequestedVideoRoomAsync(HttpRequest req, CancellationToken ct)
     {
         try
         {
             var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct);
-            return (body?.Room, body?.QualityPreset);
+            return (body?.Room, body?.QualityPreset, body?.BitrateKbps, body?.Fps);
         }
         catch
         {
-            return (null, null);
+            return (null, null, null, null);
         }
     }
 }
