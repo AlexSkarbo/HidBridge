@@ -231,6 +231,22 @@ public sealed class WebRtcIntegrationTests
     }
 
     [Fact]
+    public async Task CreateVideoRoom_WithExplicitRoomId_PreservesRequestedRoom()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
+
+        var res = await uc.Execute("hb-v-50443405-demo", CancellationToken.None);
+
+        Assert.True(res.Ok);
+        Assert.Equal("hb-v-50443405-demo", res.Room);
+        Assert.True(res.Started);
+        Assert.Equal(1, backend.EnsureHelperStartedCalls);
+    }
+
+    [Fact]
     public void JoinSignalingUseCase_JoinsControlRoom_AndClassifiesKind()
     {
         var signaling = new WebRtcSignalingService();

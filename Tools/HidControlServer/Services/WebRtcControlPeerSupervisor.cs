@@ -137,6 +137,16 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     return (false, false, null, "start_failed");
                 }
 
+                // Fail fast if helper exits immediately (missing deps, broken toolchain, bad args).
+                if (p.WaitForExit(300))
+                {
+                    int code = -1;
+                    try { code = p.ExitCode; } catch { }
+                    ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "exited_early", code });
+                    try { p.Dispose(); } catch { }
+                    return (false, false, null, $"exit_{code}");
+                }
+
                 _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, IdleSinceUtc: null);
                 ServerEventLog.Log("webrtc.peer", "autostart_started", new
                 {

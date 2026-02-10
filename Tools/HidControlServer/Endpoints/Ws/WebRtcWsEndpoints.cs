@@ -91,22 +91,23 @@ public static class WebRtcWsEndpoints
                             continue;
                         }
 
-                        roomId = join.Room;
+                        string joinedRoom = join.Room!;
+                        roomId = joinedRoom;
                         await client.SendJsonAsync(new
                         {
                             ok = true,
                             type = "webrtc.joined",
-                            room = roomId,
+                            room = joinedRoom,
                             kind = join.Kind.Value.ToString().ToLowerInvariant(),
                             clientId,
                             peers = join.Peers
                         }, ctx.RequestAborted);
 
-                        await BroadcastAsync(signaling, roomId, clientId, new
+                        await BroadcastAsync(signaling, joinedRoom, clientId, new
                         {
                             ok = true,
                             type = "webrtc.peer_joined",
-                            room = roomId,
+                            room = joinedRoom,
                             kind = join.Kind.Value.ToString().ToLowerInvariant(),
                             peerId = clientId,
                             peers = join.Peers
@@ -130,7 +131,7 @@ public static class WebRtcWsEndpoints
                             continue;
                         }
 
-                        string signalRoom = roomId;
+                        string signalRoom = roomId!;
                         await BroadcastAsync(signaling, signalRoom, clientId, new
                         {
                             ok = true,
@@ -147,12 +148,13 @@ public static class WebRtcWsEndpoints
                     {
                         if (roomId is not null)
                         {
-                            LeaveWebRtcSignalingResult leave = leaveUseCase.Execute(roomId, clientId);
-                            await BroadcastAsync(signaling, roomId, clientId, new
+                            string leavingRoom = roomId;
+                            LeaveWebRtcSignalingResult leave = leaveUseCase.Execute(leavingRoom, clientId);
+                            await BroadcastAsync(signaling, leavingRoom, clientId, new
                             {
                                 ok = true,
                                 type = "webrtc.peer_left",
-                                room = roomId,
+                                room = leavingRoom,
                                 kind = leave.Kind.ToString().ToLowerInvariant(),
                                 peerId = clientId,
                                 peers = leave.PeersLeft
@@ -184,12 +186,13 @@ public static class WebRtcWsEndpoints
             {
                 if (roomId is not null)
                 {
-                    LeaveWebRtcSignalingResult leave = leaveUseCase.Execute(roomId, clientId);
-                    await BroadcastAsync(signaling, roomId, clientId, new
+                    string finalRoom = roomId;
+                    LeaveWebRtcSignalingResult leave = leaveUseCase.Execute(finalRoom, clientId);
+                    await BroadcastAsync(signaling, finalRoom, clientId, new
                     {
                         ok = true,
                         type = "webrtc.peer_left",
-                        room = roomId,
+                        room = finalRoom,
                         kind = leave.Kind.ToString().ToLowerInvariant(),
                         peerId = clientId,
                         peers = leave.PeersLeft
