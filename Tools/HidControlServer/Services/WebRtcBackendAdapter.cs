@@ -1,5 +1,4 @@
 using HidControl.Application.Abstractions;
-using HidControlServer.Endpoints.Ws;
 
 namespace HidControlServer.Services;
 
@@ -12,6 +11,7 @@ public sealed class WebRtcBackendAdapter : IWebRtcBackend
     private readonly WebRtcControlPeerSupervisor _controlSup;
     private readonly WebRtcVideoPeerSupervisor _videoSup;
     private readonly HidUartClient _uart;
+    private readonly IWebRtcSignalingService _signaling;
 
     /// <summary>
     /// Creates an instance.
@@ -20,16 +20,23 @@ public sealed class WebRtcBackendAdapter : IWebRtcBackend
     /// <param name="controlSup">Control helper supervisor.</param>
     /// <param name="videoSup">Video helper supervisor.</param>
     /// <param name="uart">UART client.</param>
-    public WebRtcBackendAdapter(Options opt, WebRtcControlPeerSupervisor controlSup, WebRtcVideoPeerSupervisor videoSup, HidUartClient uart)
+    /// <param name="signaling">WebRTC signaling room state service.</param>
+    public WebRtcBackendAdapter(
+        Options opt,
+        WebRtcControlPeerSupervisor controlSup,
+        WebRtcVideoPeerSupervisor videoSup,
+        HidUartClient uart,
+        IWebRtcSignalingService signaling)
     {
         _opt = opt;
         _controlSup = controlSup;
         _videoSup = videoSup;
         _uart = uart;
+        _signaling = signaling;
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, int> GetRoomPeerCountsSnapshot() => WebRtcWsEndpoints.GetRoomPeerCountsSnapshot();
+    public IReadOnlyDictionary<string, int> GetRoomPeerCountsSnapshot() => _signaling.GetRoomPeerCountsSnapshot();
 
     /// <inheritdoc />
     public IReadOnlySet<string> GetHelperRoomsSnapshot()

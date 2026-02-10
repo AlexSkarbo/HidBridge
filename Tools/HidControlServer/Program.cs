@@ -75,6 +75,7 @@ builder.Services.AddSingleton(new MouseMappingStore(options.PgConnectionString))
 builder.Services.AddSingleton(new KeyboardMappingStore(options.PgConnectionString));
 builder.Services.AddSingleton(new VideoSourceStore(options.VideoSources));
 builder.Services.AddSingleton(new VideoProfileStore(options.VideoProfiles, options.ActiveVideoProfile));
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcSignalingService, HidControl.Infrastructure.Services.WebRtcSignalingService>();
 builder.Services.AddSingleton<WebRtcControlPeerSupervisor>();
 builder.Services.AddSingleton<WebRtcVideoPeerSupervisor>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcBackend, HidControlServer.Services.WebRtcBackendAdapter>();

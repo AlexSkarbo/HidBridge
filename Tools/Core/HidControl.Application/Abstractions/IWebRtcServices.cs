@@ -74,6 +74,57 @@ public interface IWebRtcConfigService
 }
 
 /// <summary>
+/// Provides in-memory WebRTC signaling room state operations (join/leave/peers).
+/// This service is transport-agnostic and does not depend on WebSocket types.
+/// </summary>
+public interface IWebRtcSignalingService
+{
+    /// <summary>
+    /// Returns a point-in-time snapshot of room peer counts.
+    /// </summary>
+    /// <returns>Room id to peer count mapping.</returns>
+    IReadOnlyDictionary<string, int> GetRoomPeerCountsSnapshot();
+
+    /// <summary>
+    /// Validates and normalizes a room id.
+    /// </summary>
+    /// <param name="room">Room id candidate.</param>
+    /// <returns>Normalization result.</returns>
+    WebRtcRoomNormalizationResult NormalizeRoom(string? room);
+
+    /// <summary>
+    /// Attempts to join a client into a room.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="clientId">Client id.</param>
+    /// <returns>Join result.</returns>
+    WebRtcJoinResult TryJoin(string room, string clientId);
+
+    /// <summary>
+    /// Returns peer ids currently present in the room.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="excludeClientId">Optional client id to exclude.</param>
+    /// <returns>Peer ids snapshot.</returns>
+    IReadOnlyList<string> GetPeerIds(string room, string? excludeClientId = null);
+
+    /// <summary>
+    /// Checks whether a client is currently a member of a room.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="clientId">Client id.</param>
+    /// <returns>True when the client is joined.</returns>
+    bool IsJoined(string room, string clientId);
+
+    /// <summary>
+    /// Removes a client from a room if present.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="clientId">Client id.</param>
+    void Leave(string room, string clientId);
+}
+
+/// <summary>
 /// Snapshot of WebRTC rooms for UI display.
 /// </summary>
 /// <param name="Rooms">Rooms.</param>
@@ -137,3 +188,19 @@ public sealed record WebRtcClientConfig(
     int RoomsCleanupIntervalSeconds,
     int RoomIdleStopSeconds,
     int RoomsMaxHelpers);
+
+/// <summary>
+/// Result of room id normalization/validation.
+/// </summary>
+/// <param name="Ok">True when room id is valid.</param>
+/// <param name="Room">Normalized room id when valid.</param>
+/// <param name="Error">Error code when invalid.</param>
+public sealed record WebRtcRoomNormalizationResult(bool Ok, string? Room, string? Error);
+
+/// <summary>
+/// Result of joining a signaling room.
+/// </summary>
+/// <param name="Ok">True when join succeeded.</param>
+/// <param name="Peers">Peer count in room after operation (or current count on failure).</param>
+/// <param name="Error">Error code when failed.</param>
+public sealed record WebRtcJoinResult(bool Ok, int Peers, string? Error);

@@ -2,6 +2,8 @@ using global::System.Collections.Concurrent;
 using global::System.Net.WebSockets;
 using global::System.Text;
 using global::System.Text.Json;
+using HidControl.Application.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HidControlServer.Endpoints.Ws;
 
@@ -13,17 +15,7 @@ namespace HidControlServer.Endpoints.Ws;
 /// </summary>
 public static class WebRtcWsEndpoints
 {
-    private static readonly ConcurrentDictionary<string, RoomState> Rooms = new(StringComparer.OrdinalIgnoreCase);
-    private const int DefaultRoomMaxPeers = 2;
-
-    /// <summary>
-    /// Returns a snapshot of active room peer counts.
-    /// </summary>
-    public static IReadOnlyDictionary<string, int> GetRoomPeerCountsSnapshot()
-    {
-        // Concurrent enumeration gives a point-in-time snapshot.
-        return Rooms.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Clients.Count, StringComparer.OrdinalIgnoreCase);
-    }
+    private static readonly ConcurrentDictionary<string, ClientState> Clients = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Maps the WebRTC signaling endpoint at <c>/ws/webrtc</c>.
@@ -33,6 +25,7 @@ public static class WebRtcWsEndpoints
     {
         app.Map("/ws/webrtc", async ctx =>
         {
+            var signaling = ctx.RequestServices.GetRequiredService<IWebRtcSignalingService>();
             if (!ctx.WebSockets.IsWebSocketRequest)
             {
                 ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -45,6 +38,7 @@ public static class WebRtcWsEndpoints
             string clientId = Guid.NewGuid().ToString("N");
             string? roomId = null;
             var client = new ClientState(clientId, ws);
+            Clients[clientId] = client;
 
             try
             {
@@ -78,38 +72,34 @@ public static class WebRtcWsEndpoints
 
                     if (string.Equals(mType, "join", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!TryNormalizeRoomId(mRoom, out string normalized, out string? err))
+                        WebRtcRoomNormalizationResult normalized = signaling.NormalizeRoom(mRoom);
+                        if (!normalized.Ok || string.IsNullOrWhiteSpace(normalized.Room))
                         {
-                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = err ?? "bad_room" }, ctx.RequestAborted);
+                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = normalized.Error ?? "bad_room" }, ctx.RequestAborted);
                             continue;
                         }
 
                         // Leave previous room, if any.
                         if (roomId is not null)
                         {
-                            LeaveRoom(roomId, clientId);
+                            signaling.Leave(roomId, clientId);
                         }
 
-                        roomId = normalized;
-                        RoomState room = Rooms.GetOrAdd(roomId, _ => new RoomState());
-
-                        // Control MVP policy: 1 controller + 1 helper per room (max 2 peers).
-                        // This prevents multi-controller races and makes "room_full" deterministic.
-                        if (room.Clients.Count >= DefaultRoomMaxPeers)
+                        roomId = normalized.Room;
+                        WebRtcJoinResult join = signaling.TryJoin(roomId, clientId);
+                        if (!join.Ok)
                         {
                             await client.SendJsonAsync(new
                             {
                                 ok = false,
                                 type = "webrtc.error",
-                                error = "room_full",
+                                error = join.Error ?? "join_failed",
                                 room = roomId,
-                                peers = room.Clients.Count
+                                peers = join.Peers
                             }, ctx.RequestAborted);
                             roomId = null;
                             continue;
                         }
-
-                        room.Clients[clientId] = client;
 
                         await client.SendJsonAsync(new
                         {
@@ -117,16 +107,16 @@ public static class WebRtcWsEndpoints
                             type = "webrtc.joined",
                             room = roomId,
                             clientId,
-                            peers = room.Clients.Count
+                            peers = join.Peers
                         }, ctx.RequestAborted);
 
-                        await BroadcastAsync(roomId, clientId, new
+                        await BroadcastAsync(signaling, roomId, clientId, new
                         {
                             ok = true,
                             type = "webrtc.peer_joined",
                             room = roomId,
                             peerId = clientId,
-                            peers = room.Clients.Count
+                            peers = join.Peers
                         }, ctx.RequestAborted);
 
                         continue;
@@ -134,13 +124,13 @@ public static class WebRtcWsEndpoints
 
                     if (string.Equals(mType, "signal", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (roomId is null)
+                        if (roomId is null || !signaling.IsJoined(roomId, clientId))
                         {
                             await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = "not_joined" }, ctx.RequestAborted);
                             continue;
                         }
 
-                        await BroadcastAsync(roomId, clientId, new
+                        await BroadcastAsync(signaling, roomId, clientId, new
                         {
                             ok = true,
                             type = "webrtc.signal",
@@ -156,7 +146,7 @@ public static class WebRtcWsEndpoints
                     {
                         if (roomId is not null)
                         {
-                            LeaveRoom(roomId, clientId);
+                            signaling.Leave(roomId, clientId);
                             roomId = null;
                         }
                         await client.SendJsonAsync(new { ok = true, type = "webrtc.left", clientId }, ctx.RequestAborted);
@@ -178,76 +168,22 @@ public static class WebRtcWsEndpoints
             {
                 if (roomId is not null)
                 {
-                    LeaveRoom(roomId, clientId);
+                    signaling.Leave(roomId, clientId);
                 }
+                Clients.TryRemove(clientId, out _);
             }
         });
     }
 
-    private static void LeaveRoom(string roomId, string clientId)
+    private static async Task BroadcastAsync(IWebRtcSignalingService signaling, string roomId, string senderId, object payload, CancellationToken ct)
     {
-        if (!Rooms.TryGetValue(roomId, out RoomState? room))
+        foreach (string peerId in signaling.GetPeerIds(roomId, senderId))
         {
-            return;
-        }
-
-        room.Clients.TryRemove(clientId, out _);
-        if (room.Clients.IsEmpty)
-        {
-            Rooms.TryRemove(roomId, out _);
-        }
-    }
-
-    private static async Task BroadcastAsync(string roomId, string senderId, object payload, CancellationToken ct)
-    {
-        if (!Rooms.TryGetValue(roomId, out RoomState? room))
-        {
-            return;
-        }
-
-        foreach (var kvp in room.Clients)
-        {
-            if (string.Equals(kvp.Key, senderId, StringComparison.OrdinalIgnoreCase))
+            if (Clients.TryGetValue(peerId, out ClientState? peer))
             {
-                continue;
-            }
-            await kvp.Value.SendJsonAsync(payload, ct);
-        }
-    }
-
-    private static bool TryNormalizeRoomId(string? room, out string normalized, out string? error)
-    {
-        normalized = string.Empty;
-        error = null;
-        if (string.IsNullOrWhiteSpace(room))
-        {
-            error = "room_required";
-            return false;
-        }
-
-        string r = room.Trim();
-        if (r.Length > 64)
-        {
-            error = "room_too_long";
-            return false;
-        }
-
-        // Very small allowlist: letters, digits, '_' and '-'.
-        foreach (char ch in r)
-        {
-            bool ok = (ch >= 'a' && ch <= 'z') ||
-                      (ch >= 'A' && ch <= 'Z') ||
-                      (ch >= '0' && ch <= '9') ||
-                      ch == '_' || ch == '-';
-            if (!ok)
-            {
-                error = "room_invalid_chars";
-                return false;
+                await peer.SendJsonAsync(payload, ct);
             }
         }
-
-        normalized = r;
-        return true;
     }
 
     private static bool TryParseMessage(string json, out string type, out string? room, out JsonElement data, out string? error)
@@ -324,12 +260,6 @@ public static class WebRtcWsEndpoints
                 return sb.ToString();
             }
         }
-    }
-
-    private sealed class RoomState
-    {
-        /// <summary>Active clients in the room, keyed by server-generated client id.</summary>
-        public ConcurrentDictionary<string, ClientState> Clients { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed class ClientState

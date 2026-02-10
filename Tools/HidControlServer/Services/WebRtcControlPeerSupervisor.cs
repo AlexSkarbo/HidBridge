@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using HidControlServer.Endpoints.Ws;
+using HidControl.Application.Abstractions;
 
 namespace HidControlServer.Services;
 
@@ -9,6 +9,7 @@ namespace HidControlServer.Services;
 public sealed class WebRtcControlPeerSupervisor : IDisposable
 {
     private readonly Options _opt;
+    private readonly IWebRtcSignalingService _signaling;
     private readonly object _lock = new();
     private readonly Dictionary<string, ProcState> _procs = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _cleanupTimer;
@@ -19,9 +20,11 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     /// Creates an instance.
     /// </summary>
     /// <param name="opt">Server options.</param>
-    public WebRtcControlPeerSupervisor(Options opt)
+    /// <param name="signaling">Signaling room state service.</param>
+    public WebRtcControlPeerSupervisor(Options opt, IWebRtcSignalingService signaling)
     {
         _opt = opt;
+        _signaling = signaling;
         _cleanupTimer = new Timer(_ => CleanupTick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(Math.Max(1, _opt.WebRtcRoomsCleanupIntervalSeconds)));
     }
 
@@ -225,7 +228,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
         }
 
         // "control" should be stable; don't auto-stop it.
-        var peers = WebRtcWsEndpoints.GetRoomPeerCountsSnapshot();
+        var peers = _signaling.GetRoomPeerCountsSnapshot();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
         lock (_lock)
