@@ -71,6 +71,7 @@
     let lastJoinedPeers = null;
     let joined = false;
     let joinWaiter = null; // { resolve, reject, timerId }
+    let heartbeatTimer = null;
     let seq = 0;
 
     function log(kind, payload) {
@@ -83,12 +84,38 @@
       log("status", s);
     }
 
+    function stopHeartbeat() {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    }
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      heartbeatTimer = setInterval(() => {
+        try {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        } catch {
+          // Keepalive is best-effort only.
+        }
+      }, 15000);
+    }
+
     async function ensureWsOpen() {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
       ws = new WebSocket(signalingUrl);
-      ws.onopen = () => setStatus("signaling: open");
-      ws.onclose = () => setStatus("signaling: closed");
+      ws.onopen = () => {
+        startHeartbeat();
+        setStatus("signaling: open");
+      };
+      ws.onclose = () => {
+        stopHeartbeat();
+        setStatus("signaling: closed");
+      };
       ws.onerror = () => setStatus("signaling: error");
       ws.onmessage = (ev) => {
         const msg = safeJsonParse(ev.data);
@@ -123,6 +150,10 @@
               setStatus("peer left: " + msg.peerId);
             }
           }
+          return;
+        }
+
+        if (msg.type === "webrtc.pong") {
           return;
         }
 
@@ -335,6 +366,7 @@
     }
 
     function hangup() {
+      stopHeartbeat();
       try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "leave" })); } catch { }
       try { if (dc) dc.close(); } catch { }
       try { if (pc) pc.close(); } catch { }

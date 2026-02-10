@@ -3,6 +3,7 @@ using global::System.Net.WebSockets;
 using global::System.Text;
 using global::System.Text.Json;
 using HidControl.Application.Abstractions;
+using HidControl.Application.UseCases.WebRtc;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HidControlServer.Endpoints.Ws;
@@ -26,6 +27,9 @@ public static class WebRtcWsEndpoints
         app.Map("/ws/webrtc", async ctx =>
         {
             var signaling = ctx.RequestServices.GetRequiredService<IWebRtcSignalingService>();
+            var joinUseCase = ctx.RequestServices.GetRequiredService<JoinWebRtcSignalingUseCase>();
+            var validateSignalUseCase = ctx.RequestServices.GetRequiredService<ValidateWebRtcSignalUseCase>();
+            var leaveUseCase = ctx.RequestServices.GetRequiredService<LeaveWebRtcSignalingUseCase>();
             if (!ctx.WebSockets.IsWebSocketRequest)
             {
                 ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -72,42 +76,28 @@ public static class WebRtcWsEndpoints
 
                     if (string.Equals(mType, "join", StringComparison.OrdinalIgnoreCase))
                     {
-                        WebRtcRoomNormalizationResult normalized = signaling.NormalizeRoom(mRoom);
-                        if (!normalized.Ok || string.IsNullOrWhiteSpace(normalized.Room))
-                        {
-                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = normalized.Error ?? "bad_room" }, ctx.RequestAborted);
-                            continue;
-                        }
-
-                        // Leave previous room, if any.
-                        if (roomId is not null)
-                        {
-                            signaling.Leave(roomId, clientId);
-                        }
-
-                        roomId = normalized.Room;
-                        WebRtcRoomKind roomKind = signaling.GetRoomKind(roomId);
-                        WebRtcJoinResult join = signaling.TryJoin(roomId, clientId);
-                        if (!join.Ok)
+                        JoinWebRtcSignalingResult join = joinUseCase.Execute(roomId, mRoom, clientId);
+                        if (!join.Ok || string.IsNullOrWhiteSpace(join.Room) || join.Kind is null)
                         {
                             await client.SendJsonAsync(new
                             {
                                 ok = false,
                                 type = "webrtc.error",
                                 error = join.Error ?? "join_failed",
-                                room = roomId,
+                                room = join.Room,
                                 peers = join.Peers
                             }, ctx.RequestAborted);
                             roomId = null;
                             continue;
                         }
 
+                        roomId = join.Room;
                         await client.SendJsonAsync(new
                         {
                             ok = true,
                             type = "webrtc.joined",
                             room = roomId,
-                            kind = roomKind.ToString().ToLowerInvariant(),
+                            kind = join.Kind.Value.ToString().ToLowerInvariant(),
                             clientId,
                             peers = join.Peers
                         }, ctx.RequestAborted);
@@ -117,7 +107,7 @@ public static class WebRtcWsEndpoints
                             ok = true,
                             type = "webrtc.peer_joined",
                             room = roomId,
-                            kind = roomKind.ToString().ToLowerInvariant(),
+                            kind = join.Kind.Value.ToString().ToLowerInvariant(),
                             peerId = clientId,
                             peers = join.Peers
                         }, ctx.RequestAborted);
@@ -127,17 +117,25 @@ public static class WebRtcWsEndpoints
 
                     if (string.Equals(mType, "signal", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (roomId is null || !signaling.IsJoined(roomId, clientId))
+                        ValidateWebRtcSignalResult canSignal = validateSignalUseCase.Execute(roomId, clientId);
+                        if (!canSignal.Ok)
+                        {
+                            await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = canSignal.Error ?? "not_joined" }, ctx.RequestAborted);
+                            continue;
+                        }
+
+                        if (roomId is null)
                         {
                             await client.SendJsonAsync(new { ok = false, type = "webrtc.error", error = "not_joined" }, ctx.RequestAborted);
                             continue;
                         }
 
-                        await BroadcastAsync(signaling, roomId, clientId, new
+                        string signalRoom = roomId;
+                        await BroadcastAsync(signaling, signalRoom, clientId, new
                         {
                             ok = true,
                             type = "webrtc.signal",
-                            room = roomId,
+                            room = signalRoom,
                             from = clientId,
                             data = mData
                         }, ctx.RequestAborted);
@@ -149,20 +147,25 @@ public static class WebRtcWsEndpoints
                     {
                         if (roomId is not null)
                         {
-                            signaling.Leave(roomId, clientId);
-                            int peersLeft = signaling.GetRoomPeerCountsSnapshot().TryGetValue(roomId, out int c) ? c : 0;
+                            LeaveWebRtcSignalingResult leave = leaveUseCase.Execute(roomId, clientId);
                             await BroadcastAsync(signaling, roomId, clientId, new
                             {
                                 ok = true,
                                 type = "webrtc.peer_left",
                                 room = roomId,
-                                kind = signaling.GetRoomKind(roomId).ToString().ToLowerInvariant(),
+                                kind = leave.Kind.ToString().ToLowerInvariant(),
                                 peerId = clientId,
-                                peers = peersLeft
+                                peers = leave.PeersLeft
                             }, ctx.RequestAborted);
                             roomId = null;
                         }
                         await client.SendJsonAsync(new { ok = true, type = "webrtc.left", clientId }, ctx.RequestAborted);
+                        continue;
+                    }
+
+                    if (string.Equals(mType, "ping", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await client.SendJsonAsync(new { ok = true, type = "webrtc.pong", clientId }, ctx.RequestAborted);
                         continue;
                     }
 
@@ -181,16 +184,15 @@ public static class WebRtcWsEndpoints
             {
                 if (roomId is not null)
                 {
-                    signaling.Leave(roomId, clientId);
-                    int peersLeft = signaling.GetRoomPeerCountsSnapshot().TryGetValue(roomId, out int c) ? c : 0;
+                    LeaveWebRtcSignalingResult leave = leaveUseCase.Execute(roomId, clientId);
                     await BroadcastAsync(signaling, roomId, clientId, new
                     {
                         ok = true,
                         type = "webrtc.peer_left",
                         room = roomId,
-                        kind = signaling.GetRoomKind(roomId).ToString().ToLowerInvariant(),
+                        kind = leave.Kind.ToString().ToLowerInvariant(),
                         peerId = clientId,
-                        peers = peersLeft
+                        peers = leave.PeersLeft
                     }, CancellationToken.None);
                 }
                 Clients.TryRemove(clientId, out _);

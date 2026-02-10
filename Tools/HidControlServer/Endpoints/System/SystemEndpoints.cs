@@ -161,10 +161,17 @@ public static class SystemEndpoints
             string? roomId = null;
             try
             {
-                var body = await req.ReadFromJsonAsync<Dictionary<string, string?>>();
-                if (body is not null && body.TryGetValue("room", out var r))
+                var raw = await req.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: ct);
+                if (raw.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
-                    roomId = r;
+                    if (raw.TryGetProperty("room", out var lower) && lower.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        roomId = lower.GetString();
+                    }
+                    else if (raw.TryGetProperty("Room", out var upper) && upper.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        roomId = upper.GetString();
+                    }
                 }
             }
             catch { }
@@ -200,10 +207,17 @@ public static class SystemEndpoints
             string? roomId = null;
             try
             {
-                var body = await req.ReadFromJsonAsync<Dictionary<string, string?>>();
-                if (body is not null && body.TryGetValue("room", out var r))
+                var raw = await req.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: ct);
+                if (raw.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
-                    roomId = r;
+                    if (raw.TryGetProperty("room", out var lower) && lower.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        roomId = lower.GetString();
+                    }
+                    else if (raw.TryGetProperty("Room", out var upper) && upper.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        roomId = upper.GetString();
+                    }
                 }
             }
             catch { }

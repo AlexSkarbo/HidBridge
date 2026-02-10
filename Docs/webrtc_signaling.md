@@ -8,6 +8,9 @@ This is intentionally a skeleton:
 - No TURN/STUN configuration on the server (client controls ICE servers)
 - Meant to validate that SDP/ICE exchange works before integrating real media pipelines
 
+See also:
+- `Docs/webrtc_signaling_paths.md` for control/video room path split and endpoint mapping.
+
 ## Server Endpoint
 
 - WebSocket: `GET /ws/webrtc`
@@ -29,13 +32,13 @@ The server assigns a `clientId` and replies:
 Server replies:
 
 ```json
-{ "ok": true, "type": "webrtc.joined", "room": "demo", "clientId": "...", "peers": 2 }
+{ "ok": true, "type": "webrtc.joined", "room": "demo", "kind": "control", "clientId": "...", "peers": 2 }
 ```
 
 Other peers in the room receive:
 
 ```json
-{ "ok": true, "type": "webrtc.peer_joined", "room": "demo", "peerId": "...", "peers": 2 }
+{ "ok": true, "type": "webrtc.peer_joined", "room": "demo", "kind": "control", "peerId": "...", "peers": 2 }
 ```
 
 ### Relay Signaling Data
@@ -76,4 +79,3 @@ Use the same format for:
 - open the page in **two tabs**
 - use the same room id
 - click **Call** in one tab to establish a **DataChannel**
-

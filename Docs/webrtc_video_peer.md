@@ -7,6 +7,7 @@ Goal: move towards real-time video via WebRTC. For now we only ship the **skelet
 - `HidControlServer`: signaling relay (`/ws/webrtc`) + room/ICE/config endpoints under `/status/*`
 - `WebRtcVideoPeer` (helper): `Tools/WebRtcVideoPeer` (Go + Pion)
 - `HidControl.Web`: demo UI (rooms browser + DataChannel tester)
+- Signaling path split details: `Docs/webrtc_signaling_paths.md`
 
 ## Rooms
 
@@ -43,4 +44,3 @@ Where:
 
 - The helper does **not** publish any media tracks yet.
 - For now, it only accepts offers and opens a DataChannel (echo mode) to prove the path end-to-end.
-

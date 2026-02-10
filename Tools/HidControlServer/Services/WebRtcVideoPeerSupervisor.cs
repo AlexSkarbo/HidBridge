@@ -141,6 +141,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 }
 
                 _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, IdleSinceUtc: null);
+                string logPath = BuildHelperLogPath(toolDir, room);
                 ServerEventLog.Log("webrtc.videopeer", "autostart_started", new
                 {
                     serverUrl,
@@ -148,7 +149,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     stun = _opt.WebRtcVideoPeerStun,
                     pid = p.Id,
                     exe = psi.FileName,
-                    args = psi.Arguments
+                    args = psi.Arguments,
+                    logPath
                 });
                 return (true, true, p.Id, null);
             }
@@ -229,6 +231,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         {
             return;
         }
+        const int startupGraceSeconds = 20;
 
         // "video" should be stable; don't auto-stop it.
         var peers = _signaling.GetRoomPeerCountsSnapshot();
@@ -253,6 +256,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 {
                     try { proc.Dispose(); } catch { }
                     _procs.Remove(room);
+                    continue;
+                }
+
+                // Give newly started helpers time to complete signaling/join before idle auto-stop kicks in.
+                if ((now - st.StartedAtUtc).TotalSeconds < startupGraceSeconds)
+                {
                     continue;
                 }
 
@@ -367,6 +376,13 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         }
 
         return null;
+    }
+
+    private static string BuildHelperLogPath(string toolDir, string room)
+    {
+        string safe = new string(room.Select(ch =>
+            (char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == '.') ? ch : '_').ToArray());
+        return Path.Combine(toolDir, "logs", $"videopeer_{safe}.log");
     }
 
     /// <inheritdoc />

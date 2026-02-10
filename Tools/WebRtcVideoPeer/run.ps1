@@ -14,5 +14,13 @@ $env:HIDBRIDGE_WEBRTC_ROOM = $Room
 Write-Host "HIDBRIDGE_SERVER_URL=$env:HIDBRIDGE_SERVER_URL"
 Write-Host "HIDBRIDGE_WEBRTC_ROOM=$env:HIDBRIDGE_WEBRTC_ROOM"
 
-go run .
+$safeRoom = ($Room -replace '[^A-Za-z0-9_.-]', '_')
+$logDir = Join-Path $PSScriptRoot "logs"
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$logPath = Join-Path $logDir ("videopeer_{0}.log" -f $safeRoom)
+Write-Host "HIDBRIDGE_LOG_PATH=$logPath"
 
+& go run . *>> $logPath
+$code = $LASTEXITCODE
+if ($null -eq $code) { $code = 0 }
+exit $code

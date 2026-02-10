@@ -208,13 +208,14 @@ app.MapGet("/", () =>
 	    </div>
 	    <div class="row" style="width: 100%">
 	      <table style="width: 100%; border-collapse: collapse">
-	        <thead>
-	          <tr class="muted">
-	            <th style="text-align:left; padding: 6px 4px">Room</th>
-	            <th style="text-align:left; padding: 6px 4px">Peers</th>
-	            <th style="text-align:left; padding: 6px 4px">Tags</th>
-	            <th style="text-align:left; padding: 6px 4px">Status</th>
-	            <th style="text-align:left; padding: 6px 4px">Actions</th>
+		        <thead>
+		          <tr class="muted">
+		            <th style="text-align:left; padding: 6px 4px">Room</th>
+		            <th style="text-align:left; padding: 6px 4px">Kind</th>
+		            <th style="text-align:left; padding: 6px 4px">Peers</th>
+		            <th style="text-align:left; padding: 6px 4px">Tags</th>
+		            <th style="text-align:left; padding: 6px 4px">Status</th>
+		            <th style="text-align:left; padding: 6px 4px">Actions</th>
 	          </tr>
 	        </thead>
 	        <tbody id="rtcRoomsBody"></tbody>
@@ -279,6 +280,7 @@ app.MapGet("/", () =>
 	  <pre id="out">ready</pre>
 
 	  <script src="/webrtcControl.js"></script>
+	  <script src="/webrtcVideo.js"></script>
 	  <script>
 	    const out = document.getElementById("out");
 	    const rtcOut = document.getElementById("rtcOut");
@@ -459,7 +461,15 @@ app.MapGet("/", () =>
 	      if (webrtcClient) {
 	        try { webrtcClient.hangup(); } catch {}
 	      }
-	      if (!window.hidbridge || !window.hidbridge.webrtcControl || typeof window.hidbridge.webrtcControl.createClient !== "function") {
+	      const mode = getMode();
+	      const module = (mode === "video")
+	        ? (window.hidbridge && window.hidbridge.webrtcVideo ? window.hidbridge.webrtcVideo : null)
+	        : (window.hidbridge && window.hidbridge.webrtcControl ? window.hidbridge.webrtcControl : null);
+	      const fallback = (window.hidbridge && window.hidbridge.webrtcControl) ? window.hidbridge.webrtcControl : null;
+	      const factory = module && typeof module.createClient === "function"
+	        ? module.createClient
+	        : (fallback && typeof fallback.createClient === "function" ? fallback.createClient : null);
+	      if (!factory) {
 	        const err = { ok: false, error: "webrtc_module_missing" };
 	        rtcLog(err);
 	        show(err);
@@ -468,7 +478,7 @@ app.MapGet("/", () =>
 	      }
 	      // Ensure we start from a clean UI state.
 	      setRtcStatus("disconnected");
-	      webrtcClient = window.hidbridge.webrtcControl.createClient({
+	      webrtcClient = factory({
 	        room: getRoom(),
 	        iceServers: getIceServers(),
 	        iceTransportPolicy: rtcRelayOnly.checked ? "relay" : "all",
@@ -502,26 +512,36 @@ app.MapGet("/", () =>
 	        if (!j || !j.ok || !Array.isArray(j.rooms)) return;
 	        const body = document.getElementById("rtcRoomsBody");
 	        body.innerHTML = "";
+	        const mode = getMode();
 	        for (const r of j.rooms) {
+	          const room = String(r.room || "");
+	          const isVideo = isVideoRoomId(room);
+	          const kind = isVideo ? "video" : "control";
+	          if (mode !== "video" && isVideo) continue;
+	          if (mode === "video" && !isVideo) continue;
+
 	          const tags = [];
 	          if (r.isControl) tags.push("control");
-	          if (isVideoRoomId(r.room)) tags.push("video");
+	          if (isVideo) tags.push("video");
 	          if (r.hasHelper) tags.push("helper");
 
 	          const status = (r.peers >= 2) ? "busy" : (r.hasHelper ? "idle" : "empty");
-	          const canDelete = !r.isControl && String(r.room).toLowerCase() !== "video";
+	          const canDelete = !r.isControl && room.toLowerCase() !== "video";
+	          const canStart = !r.hasHelper && status !== "busy";
+	          const canConnect = status !== "busy" || room.toLowerCase() === getRoom().toLowerCase();
 
 	          const tr = document.createElement("tr");
 	          tr.innerHTML = `
-	            <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${r.room}</td>
+	            <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${room}</td>
+	            <td style="padding: 6px 4px"><code>${kind}</code></td>
 	            <td style="padding: 6px 4px">${r.peers}</td>
 	            <td style="padding: 6px 4px" class="muted">${tags.join(", ") || "-"}</td>
 	            <td style="padding: 6px 4px">${status}</td>
 	            <td style="padding: 6px 4px">
-	              <button data-act="start" data-room="${r.room}" ${r.hasHelper ? "disabled" : ""} title="${r.hasHelper ? "helper already started" : "start helper for this room"}">Start</button>
-	              <button data-act="use" data-room="${r.room}">Use</button>
-	              <button data-act="connect" data-room="${r.room}">Connect</button>
-	              <button data-act="delete" data-room="${r.room}" ${canDelete ? "" : "disabled"} title="${canDelete ? "stop helper for this room" : "this room cannot be deleted"}">Delete</button>
+	              <button data-act="start" data-room="${room}" ${canStart ? "" : "disabled"} title="${canStart ? "start helper for this room" : (r.hasHelper ? "helper already started" : "room is busy")}">Start</button>
+	              <button data-act="use" data-room="${room}">Use</button>
+	              <button data-act="connect" data-room="${room}" ${canConnect ? "" : "disabled"} title="${canConnect ? "connect using this room" : "room is busy"}">Connect</button>
+	              <button data-act="delete" data-room="${room}" ${canDelete ? "" : "disabled"} title="${canDelete ? "stop helper for this room" : "default room cannot be deleted"}">Delete</button>
 	            </td>
 	          `;
 	          body.appendChild(tr);
@@ -543,9 +563,10 @@ app.MapGet("/", () =>
 
 	      if (act === "start") {
 	        try {
-	          const res = await fetch("/api/webrtc/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room }) });
+	          const prefix = getRoomsApiPrefix(room);
+	          const res = await fetch(prefix, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room }) });
 	          const j = await res.json().catch(() => null);
-	          rtcLog({ webrtc: "ui.room_started", room, payload: j });
+	          rtcLog({ webrtc: "ui.room_started", room, endpoint: prefix, payload: j });
 	          show(j || { ok: false, error: "start_failed" });
 	          await refreshRooms();
 	        } catch (e) {
@@ -565,9 +586,10 @@ app.MapGet("/", () =>
 	      }
 	      if (act === "delete") {
 	        try {
-	          const res = await fetch("/api/webrtc/rooms/" + encodeURIComponent(room), { method: "DELETE" });
+	          const prefix = getRoomsApiPrefix(room);
+	          const res = await fetch(prefix + "/" + encodeURIComponent(room), { method: "DELETE" });
 	          const j = await res.json().catch(() => null);
-	          rtcLog({ webrtc: "ui.room_deleted", room, payload: j });
+	          rtcLog({ webrtc: "ui.room_deleted", room, endpoint: prefix, payload: j });
 	          show(j || { ok: false, error: "delete_failed" });
 	          await refreshRooms();
 	        } catch (e) {
@@ -617,6 +639,9 @@ app.MapGet("/", () =>
 	    })();
 	    refreshWebRtcConfig();
 	    refreshRooms();
+	    document.getElementById("rtcMode").addEventListener("change", () => {
+	      refreshRooms();
+	    });
 
 	    // Room list auto-refresh (best-effort).
 	    const rtcAutoRefresh = document.getElementById("rtcAutoRefresh");
@@ -650,12 +675,61 @@ app.MapGet("/", () =>
 	      return false;
 	    }
 
+	    function getRoomsApiPrefix(room) {
+	      if (isVideoRoomId(room)) return "/api/webrtc/video/rooms";
+	      return "/api/webrtc/rooms";
+	    }
+
 	    async function ensureHelper(room) {
 	      try {
-	        const res = await fetch("/api/webrtc/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room }) });
+	        const wanted = (room || "").trim();
+	        const wantedLc = wanted.toLowerCase();
+	        const prefix = getRoomsApiPrefix(wanted);
+
+	        // "control" is expected to exist from startup defaults; do not create here to avoid accidental room drift.
+	        if (wantedLc === "control") {
+	          const listRes = await fetch(prefix);
+	          const list = await listRes.json().catch(() => null);
+	          rtcLog({ webrtc: "ui.ensure_helper_builtin", room: wanted, endpoint: prefix, payload: list });
+	          if (list && list.ok && Array.isArray(list.rooms)) {
+	            const rr = list.rooms.find(x => x && x.room && String(x.room).toLowerCase() === wantedLc);
+	            if (rr && rr.hasHelper) return true;
+	            show({ ok: false, error: "helper_missing_builtin_room", room: wanted });
+	            return false;
+	          }
+	          show(list || { ok: false, error: "ensure_helper_failed" });
+	          return false;
+	        }
+
+	        // "video" may be absent until first use; auto-create helper when missing.
+	        if (wantedLc === "video") {
+	          const listRes = await fetch(prefix);
+	          const list = await listRes.json().catch(() => null);
+	          rtcLog({ webrtc: "ui.ensure_helper_builtin", room: wanted, endpoint: prefix, payload: list });
+	          if (list && list.ok && Array.isArray(list.rooms)) {
+	            const rr = list.rooms.find(x => x && x.room && String(x.room).toLowerCase() === wantedLc);
+	            if (rr && rr.hasHelper) return true;
+	          }
+	          const createRes = await fetch(prefix, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room: wanted }) });
+	          const created = await createRes.json().catch(() => null);
+	          rtcLog({ webrtc: "ui.ensure_helper_video_create", room: wanted, endpoint: prefix, payload: created });
+	          if (created && created.ok && created.room && String(created.room).toLowerCase() === wantedLc) return true;
+	          if (created && created.ok && created.room && String(created.room).toLowerCase() !== wantedLc) {
+	            show({ ok: false, error: "room_mismatch", requested: wanted, actual: created.room });
+	            return false;
+	          }
+	          show(created || { ok: false, error: "ensure_helper_failed" });
+	          return false;
+	        }
+
+	        const res = await fetch(prefix, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ room: wanted }) });
 	        const j = await res.json().catch(() => null);
-	        rtcLog({ webrtc: "ui.ensure_helper", room, payload: j });
-	        if (j && j.ok) return true;
+	        rtcLog({ webrtc: "ui.ensure_helper", room: wanted, endpoint: prefix, payload: j });
+	        if (j && j.ok && j.room && String(j.room).toLowerCase() === wantedLc) return true;
+	        if (j && j.ok && j.room && String(j.room).toLowerCase() !== wantedLc) {
+	          show({ ok: false, error: "room_mismatch", requested: wanted, actual: j.room });
+	          return false;
+	        }
 	        show(j || { ok: false, error: "ensure_helper_failed" });
 	      } catch (e) {
 	        rtcLog({ webrtc: "ui.ensure_helper_error", room, error: String(e) });
@@ -665,10 +739,11 @@ app.MapGet("/", () =>
 	    }
 
 	    async function waitForHelperPeer(room, timeoutMs) {
+	      const prefix = getRoomsApiPrefix(room);
 	      const start = Date.now();
 	      while (Date.now() - start < timeoutMs) {
 	        try {
-	          const res = await fetch("/api/webrtc/rooms");
+	          const res = await fetch(prefix);
 	          if (res.ok) {
 	            const j = await res.json().catch(() => null);
 	            if (j && j.ok && Array.isArray(j.rooms)) {
@@ -682,11 +757,21 @@ app.MapGet("/", () =>
 	      return false;
 	    }
 
+	    function getHelperReadyTimeoutMs(room) {
+	      const r = (room || "").toLowerCase();
+	      const base = Math.max(1000, rtcCfg.connectTimeoutMs || 0);
+	      // Video helper often starts slower on first run (go toolchain warm-up).
+	      if (r === "video" || r.startsWith("hb-v-") || r.startsWith("video-")) {
+	        return Math.min(60000, Math.max(20000, base * 4));
+	      }
+	      return Math.min(30000, Math.max(10000, base * 2));
+	    }
+
 	    document.getElementById("rtcStartHelper").addEventListener("click", async () => {
 	      const room = getRoom();
 	      const ok = await ensureHelper(room);
 	      if (ok) {
-	        const ready = await waitForHelperPeer(room, Math.min(10_000, Math.max(1000, rtcCfg.connectTimeoutMs)));
+	        const ready = await waitForHelperPeer(room, getHelperReadyTimeoutMs(room));
 	        rtcLog({ webrtc: "ui.helper_ready", room, ready });
 	      }
 	      await refreshRooms();
@@ -701,9 +786,16 @@ app.MapGet("/", () =>
 	        const helperOk = await ensureHelper(room);
 	        if (!helperOk) return;
 	        // Important: signaling is a relay. If we send an offer before the helper joins the room, it will be lost.
-	        const ready = await waitForHelperPeer(room, Math.min(10_000, Math.max(1000, rtcCfg.connectTimeoutMs)));
+	        const helperReadyTimeoutMs = getHelperReadyTimeoutMs(room);
+	        const ready = await waitForHelperPeer(room, helperReadyTimeoutMs);
 	        if (!ready) {
-	          show({ ok: false, error: "helper_not_ready", hint: "Helper did not join the room in time. Try again or increase timeouts.", room });
+	          show({
+	            ok: false,
+	            error: "helper_not_ready",
+	            hint: "Helper did not join the room in time. On first start this may take longer; retry once.",
+	            room,
+	            helperReadyTimeoutMs
+	          });
 	          return;
 	        }
 	        await webrtcClient.call();

@@ -231,6 +231,61 @@ public sealed class WebRtcIntegrationTests
     }
 
     [Fact]
+    public void JoinSignalingUseCase_JoinsControlRoom_AndClassifiesKind()
+    {
+        var signaling = new WebRtcSignalingService();
+        var uc = new JoinWebRtcSignalingUseCase(signaling);
+
+        var res = uc.Execute(null, "control", "client-a");
+
+        Assert.True(res.Ok);
+        Assert.Equal("control", res.Room);
+        Assert.Equal(WebRtcRoomKind.Control, res.Kind);
+        Assert.Equal(1, res.Peers);
+    }
+
+    [Fact]
+    public void JoinSignalingUseCase_JoinsVideoRoom_AndClassifiesKind()
+    {
+        var signaling = new WebRtcSignalingService();
+        var uc = new JoinWebRtcSignalingUseCase(signaling);
+
+        var res = uc.Execute(null, "hb-v-a1b2c3d4-demo", "client-v");
+
+        Assert.True(res.Ok);
+        Assert.Equal("hb-v-a1b2c3d4-demo", res.Room);
+        Assert.Equal(WebRtcRoomKind.Video, res.Kind);
+        Assert.Equal(1, res.Peers);
+    }
+
+    [Fact]
+    public void ValidateSignalUseCase_DeniesWhenNotJoined()
+    {
+        var signaling = new WebRtcSignalingService();
+        var uc = new ValidateWebRtcSignalUseCase(signaling);
+
+        var res = uc.Execute("control", "client-a");
+
+        Assert.False(res.Ok);
+        Assert.Equal("not_joined", res.Error);
+    }
+
+    [Fact]
+    public void LeaveSignalingUseCase_ReturnsPeersAfterLeave()
+    {
+        var signaling = new WebRtcSignalingService();
+        Assert.True(signaling.TryJoin("video", "helper").Ok);
+        Assert.True(signaling.TryJoin("video", "client-a").Ok);
+
+        var uc = new LeaveWebRtcSignalingUseCase(signaling);
+        var res = uc.Execute("video", "client-a");
+
+        Assert.Equal("video", res.Room);
+        Assert.Equal(WebRtcRoomKind.Video, res.Kind);
+        Assert.Equal(1, res.PeersLeft);
+    }
+
+    [Fact]
     public async Task DeleteVideoRoom_RejectsDefaultVideoRoom()
     {
         var backend = new FakeBackend();
@@ -266,5 +321,35 @@ public sealed class WebRtcIntegrationTests
         Assert.Equal(3, cfg.RoomsCleanupIntervalSeconds);
         Assert.Equal(4, cfg.RoomIdleStopSeconds);
         Assert.Equal(5, cfg.RoomsMaxHelpers);
+    }
+
+    [Fact]
+    public async Task VideoSignalingMvp_Smoke_CreateJoinSignalLeave()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var signaling = new WebRtcSignalingService();
+
+        var createVideo = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
+        var join = new JoinWebRtcSignalingUseCase(signaling);
+        var validateSignal = new ValidateWebRtcSignalUseCase(signaling);
+        var leave = new LeaveWebRtcSignalingUseCase(signaling);
+
+        var created = await createVideo.Execute(null, CancellationToken.None);
+        Assert.True(created.Ok);
+        Assert.NotNull(created.Room);
+        Assert.StartsWith("hb-v-50443405-", created.Room!, StringComparison.OrdinalIgnoreCase);
+
+        var joined = join.Execute(null, created.Room, "video-client");
+        Assert.True(joined.Ok);
+        Assert.Equal(WebRtcRoomKind.Video, joined.Kind);
+
+        var canSignal = validateSignal.Execute(created.Room, "video-client");
+        Assert.True(canSignal.Ok);
+
+        var left = leave.Execute(created.Room!, "video-client");
+        Assert.Equal(WebRtcRoomKind.Video, left.Kind);
+        Assert.Equal(0, left.PeersLeft);
     }
 }
