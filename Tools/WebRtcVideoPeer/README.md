@@ -1,13 +1,14 @@
-# WebRtcVideoPeer (Skeleton)
+# WebRtcVideoPeer
 
 This helper runs next to `HidControlServer` and acts as a **WebRTC peer for the video plane**.
 
-Current status: **skeleton**.
+Current status:
 - It joins a signaling room via `HidControlServer` (`/ws/webrtc`)
 - It accepts offers from browser clients
-- It opens/accepts a `DataChannel` and **echoes** text messages back (for debugging)
+- It publishes a synthetic VP8 video track (`ffmpeg` test source -> RTP -> WebRTC)
+- It opens/accepts a `DataChannel` and echoes text messages back (debug/control)
 
-Later this tool will publish real media tracks (screen/capture -> WebRTC video).
+Next step is replacing synthetic source with real capture pipeline.
 
 ## Run (Windows)
 
@@ -27,4 +28,4 @@ Later this tool will publish real media tracks (screen/capture -> WebRTC video).
 - `HIDBRIDGE_TOKEN` (optional)
 - `HIDBRIDGE_WEBRTC_ROOM` (default: `video`)
 - `HIDBRIDGE_STUN` (default: `stun:stun.l.google.com:19302`)
-
+- `HIDBRIDGE_FFMPEG` (optional, default: `ffmpeg`)

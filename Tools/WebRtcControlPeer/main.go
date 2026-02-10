@@ -130,6 +130,7 @@ type peerState struct {
 	room      string
 	sigWS     *websocket.Conn
 	sendToHid func(string) (string, error)
+	sigMu     sync.Mutex
 
 	pcMu sync.Mutex
 	pc   *webrtc.PeerConnection
@@ -176,7 +177,7 @@ func (p *peerState) ensurePC(ctx context.Context, stun string) (*webrtc.PeerConn
 			return
 		}
 		payload, _ := json.Marshal(candidatePayload{Kind: "candidate", Candidate: init})
-		_ = sendJSON(p.sigWS, signalMessage{Type: "signal", Room: p.room, Data: payload})
+		_ = p.sendSignal(signalMessage{Type: "signal", Room: p.room, Data: payload})
 	})
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -312,7 +313,7 @@ func (p *peerState) onOffer(ctx context.Context, offer webrtc.SessionDescription
 	}
 
 	payload, _ := json.Marshal(sdpPayload{Kind: "answer", SDP: *pc.LocalDescription()})
-	if err := sendJSON(p.sigWS, signalMessage{Type: "signal", Room: p.room, Data: payload}); err != nil {
+	if err := p.sendSignal(signalMessage{Type: "signal", Room: p.room, Data: payload}); err != nil {
 		log.Printf("send answer: %v", err)
 		return
 	}
@@ -362,6 +363,12 @@ func sendJSON(ws *websocket.Conn, v any) error {
 		return err
 	}
 	return ws.WriteMessage(websocket.TextMessage, b)
+}
+
+func (p *peerState) sendSignal(v any) error {
+	p.sigMu.Lock()
+	defer p.sigMu.Unlock()
+	return sendJSON(p.sigWS, v)
 }
 
 func envOr(name, fallback string) string {

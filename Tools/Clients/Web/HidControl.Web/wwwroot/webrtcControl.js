@@ -55,10 +55,12 @@
     const signalingUrl = opts.signalingUrl || getDefaultSignalingUrl();
     const iceServers = normalizeIceServers(opts.iceServers);
     const iceTransportPolicy = (opts.iceTransportPolicy === "relay") ? "relay" : "all";
+    const receiveVideo = opts.receiveVideo === true;
     const joinTimeoutMs = (typeof opts.joinTimeoutMs === "number" && Number.isFinite(opts.joinTimeoutMs)) ? opts.joinTimeoutMs : 250;
     const onLog = typeof opts.onLog === "function" ? opts.onLog : defaultLogger;
     const onStatus = typeof opts.onStatus === "function" ? opts.onStatus : defaultLogger;
     const onMessage = typeof opts.onMessage === "function" ? opts.onMessage : defaultLogger;
+    const onTrack = typeof opts.onTrack === "function" ? opts.onTrack : defaultLogger;
 
     let ws = null;
     let pc = null;
@@ -241,6 +243,21 @@
         dc = e.channel;
         wireDc();
       };
+      pc.ontrack = (e) => {
+        const payload = {
+          kind: (e.track && e.track.kind) || null,
+          streamCount: (e.streams && e.streams.length) || 0
+        };
+        log("pc.track", payload);
+        onTrack(e);
+      };
+      if (receiveVideo) {
+        try {
+          pc.addTransceiver("video", { direction: "recvonly" });
+        } catch (e) {
+          log("pc.addTransceiver_error", String(e));
+        }
+      }
       return pc;
     }
 

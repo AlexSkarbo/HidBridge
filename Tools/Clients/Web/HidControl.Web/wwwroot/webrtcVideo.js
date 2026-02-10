@@ -10,6 +10,7 @@
 
     const cfg = Object.assign({}, opts || {});
     if (!cfg.room || !String(cfg.room).trim()) cfg.room = "video";
+    cfg.receiveVideo = true;
     return window.hidbridge.webrtcControl.createClient(cfg);
   }
 

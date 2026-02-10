@@ -221,6 +221,13 @@ app.MapGet("/", () =>
 	        <tbody id="rtcRoomsBody"></tbody>
 	      </table>
 	    </div>
+	    <div class="card" id="rtcVideoPane" style="display:none">
+	      <h4>Video Preview</h4>
+	      <div class="row">
+	        <video id="rtcRemoteVideo" autoplay playsinline muted style="width: min(100%, 960px); aspect-ratio: 16 / 9; background: #111; border: 1px solid #2d2d2d; border-radius: 10px;"></video>
+	      </div>
+	      <div class="row muted" id="rtcVideoMeta">waiting for remote video track...</div>
+	    </div>
 	    <div class="card">
 	      <h4>Control Actions (DataChannel)</h4>
 	      <div class="row">
@@ -414,6 +421,9 @@ app.MapGet("/", () =>
 	    const rtcSendTextBtn = document.getElementById("rtcSendTextBtn");
 	    const rtcMouseMoveBtn = document.getElementById("rtcMouseMoveBtn");
 	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
+	    const rtcVideoPane = document.getElementById("rtcVideoPane");
+	    const rtcRemoteVideo = document.getElementById("rtcRemoteVideo");
+	    const rtcVideoMeta = document.getElementById("rtcVideoMeta");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
 	    // Defaults are intentionally minimal.
 	    // Default values are overwritten by /api/webrtc/config on page load. Keep them small for fast fail on LAN.
@@ -443,6 +453,20 @@ app.MapGet("/", () =>
     }
 
 	    let webrtcClient = null;
+	    function clearRemoteVideo() {
+	      if (rtcRemoteVideo) {
+	        try { rtcRemoteVideo.pause(); } catch {}
+	        rtcRemoteVideo.srcObject = null;
+	      }
+	      if (rtcVideoMeta) {
+	        rtcVideoMeta.textContent = "waiting for remote video track...";
+	      }
+	    }
+	    function updateRtcModeUi() {
+	      const videoMode = getMode() === "video";
+	      if (rtcVideoPane) rtcVideoPane.style.display = videoMode ? "block" : "none";
+	      if (!videoMode) clearRemoteVideo();
+	    }
 	    function isVideoRoomId(r) {
 	      if (!r) return false;
 	      const x = String(r).toLowerCase();
@@ -454,6 +478,7 @@ app.MapGet("/", () =>
 	      if (!r) return;
 	      document.getElementById("rtcRoom").value = r;
 	      document.getElementById("rtcMode").value = isVideoRoomId(r) ? "video" : "control";
+	      updateRtcModeUi();
 	      resetWebRtcClient();
 	      rtcLog({ webrtc: "ui.room_selected", room: r });
 	    }
@@ -478,16 +503,36 @@ app.MapGet("/", () =>
 	      }
 	      // Ensure we start from a clean UI state.
 	      setRtcStatus("disconnected");
+	      clearRemoteVideo();
 	      webrtcClient = factory({
 	        room: getRoom(),
 	        iceServers: getIceServers(),
 	        iceTransportPolicy: rtcRelayOnly.checked ? "relay" : "all",
 	        joinTimeoutMs: rtcCfg.joinTimeoutMs,
+	        receiveVideo: mode === "video",
 	        onLog: rtcLog,
 	        onStatus: setRtcStatus,
-	        onMessage: (data) => show({ webrtc: "message", data })
+	        onMessage: (data) => show({ webrtc: "message", data }),
+	        onTrack: (ev) => {
+	          try {
+	            const stream = (ev && ev.streams && ev.streams.length > 0)
+	              ? ev.streams[0]
+	              : new MediaStream(ev && ev.track ? [ev.track] : []);
+	            if (rtcRemoteVideo) {
+	              rtcRemoteVideo.srcObject = stream;
+	              rtcRemoteVideo.play().catch(() => { });
+	            }
+	            if (rtcVideoMeta) {
+	              const kind = (ev && ev.track && ev.track.kind) ? ev.track.kind : "unknown";
+	              rtcVideoMeta.textContent = "remote track: " + kind;
+	            }
+	          } catch (e) {
+	            rtcLog({ webrtc: "ui.track_error", error: String(e) });
+	          }
+	        }
 	      });
 	    }
+	    updateRtcModeUi();
 	    resetWebRtcClient();
 
 	    async function refreshWebRtcConfig() {
@@ -640,6 +685,8 @@ app.MapGet("/", () =>
 	    refreshWebRtcConfig();
 	    refreshRooms();
 	    document.getElementById("rtcMode").addEventListener("change", () => {
+	      updateRtcModeUi();
+	      resetWebRtcClient();
 	      refreshRooms();
 	    });
 
@@ -857,6 +904,7 @@ app.MapGet("/", () =>
 
 	    document.getElementById("rtcHangup").addEventListener("click", async () => {
 	      if (webrtcClient) webrtcClient.hangup();
+	      clearRemoteVideo();
 	      setRtcStatus("disconnected");
 	    });
 

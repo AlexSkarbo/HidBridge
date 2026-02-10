@@ -4,22 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
-// This tool runs next to HidControlServer and acts as a WebRTC "video peer" skeleton:
+// This tool runs next to HidControlServer and acts as a WebRTC "video peer":
 // - joins a signaling room via /ws/webrtc
 // - accepts offers from browser clients
-// - opens/accepts a DataChannel and echoes text messages back (debug)
+// - publishes a synthetic VP8 video track (ffmpeg test source -> RTP -> Pion track)
+// - opens/accepts a DataChannel and echoes text messages back (debug/control)
 //
 // Later, this helper will publish real media tracks (video).
 
@@ -38,7 +43,7 @@ type signalMessage struct {
 }
 
 type sdpPayload struct {
-	Kind string                  `json:"kind"`
+	Kind string                    `json:"kind"`
 	SDP  webrtc.SessionDescription `json:"sdp"`
 }
 
@@ -48,6 +53,8 @@ type candidatePayload struct {
 }
 
 func main() {
+	log.SetOutput(os.Stdout)
+
 	var (
 		serverURL = flag.String("server", envOr("HIDBRIDGE_SERVER_URL", "http://127.0.0.1:8080"), "HidControlServer base URL (http://host:port)")
 		token     = flag.String("token", envOr("HIDBRIDGE_TOKEN", ""), "Server token (X-HID-Token)")
@@ -105,9 +112,11 @@ func main() {
 type peerState struct {
 	room  string
 	sigWS *websocket.Conn
+	sigMu sync.Mutex
 
-	pcMu sync.Mutex
-	pc   *webrtc.PeerConnection
+	pcMu         sync.Mutex
+	pc           *webrtc.PeerConnection
+	streamCancel context.CancelFunc
 
 	activePeerId string
 }
@@ -138,6 +147,38 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 		return nil, err
 	}
 
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
+		"video",
+		"hidbridge",
+	)
+	if err != nil {
+		_ = pc.Close()
+		return nil, err
+	}
+	sender, err := pc.AddTrack(videoTrack)
+	if err != nil {
+		_ = pc.Close()
+		return nil, err
+	}
+	go func() {
+		// Keep draining RTCP so sender stays healthy.
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, readErr := sender.Read(rtcpBuf); readErr != nil {
+				return
+			}
+		}
+	}()
+
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	p.streamCancel = streamCancel
+	go func() {
+		if err := runSyntheticVideoStream(streamCtx, videoTrack); err != nil && streamCtx.Err() == nil {
+			log.Printf("video stream ended: %v", err)
+		}
+	}()
+
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
 			return
@@ -147,7 +188,7 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 			return
 		}
 		payload, _ := json.Marshal(candidatePayload{Kind: "candidate", Candidate: init})
-		_ = sendJSON(p.sigWS, signalMessage{Type: "signal", Room: p.room, Data: payload})
+		_ = p.sendSignal(signalMessage{Type: "signal", Room: p.room, Data: payload})
 	})
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -155,6 +196,10 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 		if s == webrtc.PeerConnectionStateDisconnected || s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
 			p.pcMu.Lock()
 			defer p.pcMu.Unlock()
+			if p.streamCancel != nil {
+				p.streamCancel()
+				p.streamCancel = nil
+			}
 			p.pc = nil
 			p.activePeerId = ""
 		}
@@ -262,7 +307,7 @@ func (p *peerState) onOffer(ctx context.Context, offer webrtc.SessionDescription
 	}
 
 	payload, _ := json.Marshal(sdpPayload{Kind: "answer", SDP: answer})
-	_ = sendJSON(p.sigWS, signalMessage{Type: "signal", Room: p.room, Data: payload})
+	_ = p.sendSignal(signalMessage{Type: "signal", Room: p.room, Data: payload})
 
 	// Give ICE some time to start before returning; we rely on trickle anyway.
 	_ = ctx
@@ -278,6 +323,92 @@ func (p *peerState) onCandidate(ctx context.Context, cand webrtc.ICECandidateIni
 		return
 	}
 	_ = ctx
+}
+
+func runSyntheticVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP) error {
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		return fmt.Errorf("listen udp: %w", err)
+	}
+	defer conn.Close()
+
+	ffmpegPath := envOr("HIDBRIDGE_FFMPEG", "ffmpeg")
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	outURL := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=1200", port)
+
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-re",
+		"-f", "lavfi",
+		"-i", "testsrc=size=1280x720:rate=30",
+		"-an",
+		"-c:v", "libvpx",
+		"-deadline", "realtime",
+		"-cpu-used", "8",
+		"-g", "60",
+		"-b:v", "1200k",
+		"-pix_fmt", "yuv420p",
+		"-f", "rtp",
+		"-payload_type", "96",
+		outURL,
+	}
+
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start ffmpeg (%s): %w", ffmpegPath, err)
+	}
+
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	buf := make([]byte, 2048)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ffErr := <-waitCh:
+			if ctx.Err() != nil {
+				return nil
+			}
+			if ffErr != nil {
+				return fmt.Errorf("ffmpeg exited: %w", ffErr)
+			}
+			return fmt.Errorf("ffmpeg exited")
+		default:
+		}
+
+		_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, _, readErr := conn.ReadFromUDP(buf)
+		if readErr != nil {
+			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("udp read: %w", readErr)
+		}
+
+		var pkt rtp.Packet
+		if unmarshalErr := pkt.Unmarshal(buf[:n]); unmarshalErr != nil {
+			continue
+		}
+
+		if writeErr := track.WriteRTP(&pkt); writeErr != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("track write: %w", writeErr)
+		}
+	}
 }
 
 func dialWS(ctx context.Context, base *url.URL, path string, token string) (*websocket.Conn, error) {
@@ -311,10 +442,15 @@ func sendJSON(ws *websocket.Conn, v any) error {
 	return ws.WriteMessage(websocket.TextMessage, b)
 }
 
+func (p *peerState) sendSignal(v any) error {
+	p.sigMu.Lock()
+	defer p.sigMu.Unlock()
+	return sendJSON(p.sigWS, v)
+}
+
 func envOr(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
 	return def
 }
-
