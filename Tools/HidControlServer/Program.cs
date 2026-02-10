@@ -139,6 +139,7 @@ builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.DeleteWebRt
 builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.JoinWebRtcSignalingUseCase>();
 builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.ValidateWebRtcSignalUseCase>();
 builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.LeaveWebRtcSignalingUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.HandleWebRtcSignalingMessageUseCase>();
 builder.Services.AddSingleton<StartFfmpegUseCase>();
 builder.Services.AddSingleton<StopFfmpegUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoDiagProvider, VideoDiagProviderAdapter>();
