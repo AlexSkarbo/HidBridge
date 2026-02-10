@@ -46,6 +46,8 @@ When `datachannel: open` appears, messages are forwarded to `/ws/hid`.
   - Current implementation keeps `<deviceId>` short (first 8 hex chars) so room ids remain user-friendly.
 - **Room lifecycle signal:** when a peer leaves/disconnects, signaling broadcasts `webrtc.peer_left`.
   - UI uses this to drop stale paired-peer state and make reconnect/handover behavior deterministic.
+- **Room kind in signaling events:** server includes `kind` (`control` or `video`) in `webrtc.joined`, `webrtc.peer_joined`, and `webrtc.peer_left`.
+  - Kind is inferred by room id convention (`video`, `video-*`, `hb-v-*` => `video`; otherwise `control`).
 - STUN is required for many environments. Default: `stun:stun.l.google.com:19302`.
 - Some Chromium-based browsers (Edge/Opera) may produce **0 ICE candidates** in hardened environments.
   - In that case, STUN-only cannot work and you need a TURN relay.

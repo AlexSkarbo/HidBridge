@@ -8,7 +8,8 @@ namespace HidControl.Infrastructure.Services;
 /// </summary>
 public sealed class WebRtcSignalingService : IWebRtcSignalingService
 {
-    private const int DefaultRoomMaxPeers = 2;
+    private const int ControlRoomMaxPeers = 2;
+    private const int VideoRoomMaxPeers = 2;
     private readonly ConcurrentDictionary<string, RoomState> _rooms = new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
@@ -47,6 +48,29 @@ public sealed class WebRtcSignalingService : IWebRtcSignalingService
     }
 
     /// <inheritdoc />
+    public WebRtcRoomKind GetRoomKind(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return WebRtcRoomKind.Control;
+        }
+
+        if (string.Equals(room, "video", StringComparison.OrdinalIgnoreCase) ||
+            room.StartsWith("video-", StringComparison.OrdinalIgnoreCase) ||
+            room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase))
+        {
+            return WebRtcRoomKind.Video;
+        }
+
+        return WebRtcRoomKind.Control;
+    }
+
+    private int GetRoomMaxPeers(string room)
+    {
+        return GetRoomKind(room) == WebRtcRoomKind.Video ? VideoRoomMaxPeers : ControlRoomMaxPeers;
+    }
+
+    /// <inheritdoc />
     public WebRtcJoinResult TryJoin(string room, string clientId)
     {
         WebRtcRoomNormalizationResult normalized = NormalizeRoom(room);
@@ -69,7 +93,8 @@ public sealed class WebRtcSignalingService : IWebRtcSignalingService
                 return new WebRtcJoinResult(true, state.ClientIds.Count, null);
             }
 
-            if (state.ClientIds.Count >= DefaultRoomMaxPeers)
+            int maxPeers = GetRoomMaxPeers(roomId);
+            if (state.ClientIds.Count >= maxPeers)
             {
                 return new WebRtcJoinResult(false, state.ClientIds.Count, "room_full");
             }

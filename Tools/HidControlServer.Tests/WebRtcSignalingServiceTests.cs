@@ -49,4 +49,35 @@ public sealed class WebRtcSignalingServiceTests
 
         Assert.DoesNotContain("control", svc.GetRoomPeerCountsSnapshot().Keys);
     }
+
+    [Fact]
+    public void TryJoin_AllowsHandoverAfterPeerLeaves()
+    {
+        var svc = new WebRtcSignalingService();
+
+        Assert.True(svc.TryJoin("control", "helper").Ok);
+        Assert.True(svc.TryJoin("control", "controller-a").Ok);
+        Assert.False(svc.TryJoin("control", "controller-b").Ok);
+
+        svc.Leave("control", "controller-a");
+        var joinAfterLeave = svc.TryJoin("control", "controller-b");
+
+        Assert.True(joinAfterLeave.Ok);
+        Assert.Equal(2, joinAfterLeave.Peers);
+    }
+
+    [Theory]
+    [InlineData("video", true)]
+    [InlineData("video-demo", true)]
+    [InlineData("hb-v-1234-abcd", true)]
+    [InlineData("control", false)]
+    [InlineData("hb-1234-abcd", false)]
+    public void GetRoomKind_ClassifiesByNamingConvention(string room, bool isVideo)
+    {
+        var svc = new WebRtcSignalingService();
+
+        var kind = svc.GetRoomKind(room);
+
+        Assert.Equal(isVideo, kind == HidControl.Application.Abstractions.WebRtcRoomKind.Video);
+    }
 }

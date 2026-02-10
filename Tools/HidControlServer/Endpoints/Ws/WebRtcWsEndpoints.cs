@@ -86,6 +86,7 @@ public static class WebRtcWsEndpoints
                         }
 
                         roomId = normalized.Room;
+                        WebRtcRoomKind roomKind = signaling.GetRoomKind(roomId);
                         WebRtcJoinResult join = signaling.TryJoin(roomId, clientId);
                         if (!join.Ok)
                         {
@@ -106,6 +107,7 @@ public static class WebRtcWsEndpoints
                             ok = true,
                             type = "webrtc.joined",
                             room = roomId,
+                            kind = roomKind.ToString().ToLowerInvariant(),
                             clientId,
                             peers = join.Peers
                         }, ctx.RequestAborted);
@@ -115,6 +117,7 @@ public static class WebRtcWsEndpoints
                             ok = true,
                             type = "webrtc.peer_joined",
                             room = roomId,
+                            kind = roomKind.ToString().ToLowerInvariant(),
                             peerId = clientId,
                             peers = join.Peers
                         }, ctx.RequestAborted);
@@ -153,6 +156,7 @@ public static class WebRtcWsEndpoints
                                 ok = true,
                                 type = "webrtc.peer_left",
                                 room = roomId,
+                                kind = signaling.GetRoomKind(roomId).ToString().ToLowerInvariant(),
                                 peerId = clientId,
                                 peers = peersLeft
                             }, ctx.RequestAborted);
@@ -184,6 +188,7 @@ public static class WebRtcWsEndpoints
                         ok = true,
                         type = "webrtc.peer_left",
                         room = roomId,
+                        kind = signaling.GetRoomKind(roomId).ToString().ToLowerInvariant(),
                         peerId = clientId,
                         peers = peersLeft
                     }, CancellationToken.None);

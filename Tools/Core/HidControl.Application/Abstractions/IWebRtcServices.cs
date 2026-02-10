@@ -86,6 +86,13 @@ public interface IWebRtcSignalingService
     IReadOnlyDictionary<string, int> GetRoomPeerCountsSnapshot();
 
     /// <summary>
+    /// Returns the room kind inferred from room id naming convention.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <returns>Room kind.</returns>
+    WebRtcRoomKind GetRoomKind(string room);
+
+    /// <summary>
     /// Validates and normalizes a room id.
     /// </summary>
     /// <param name="room">Room id candidate.</param>
@@ -204,3 +211,15 @@ public sealed record WebRtcRoomNormalizationResult(bool Ok, string? Room, string
 /// <param name="Peers">Peer count in room after operation (or current count on failure).</param>
 /// <param name="Error">Error code when failed.</param>
 public sealed record WebRtcJoinResult(bool Ok, int Peers, string? Error);
+
+/// <summary>
+/// Logical WebRTC room kind.
+/// </summary>
+public enum WebRtcRoomKind
+{
+    /// <summary>Control-plane room.</summary>
+    Control = 0,
+
+    /// <summary>Video-plane room.</summary>
+    Video = 1
+}
