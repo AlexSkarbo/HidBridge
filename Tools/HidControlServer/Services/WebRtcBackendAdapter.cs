@@ -106,6 +106,15 @@ public sealed class WebRtcBackendAdapter : IWebRtcBackend
     /// <inheritdoc />
     public int RoomsMaxHelpers => _opt.WebRtcRoomsMaxHelpers;
 
+    /// <inheritdoc />
+    public bool RoomsPersistenceEnabled => _opt.WebRtcRoomsPersistEnabled;
+
+    /// <inheritdoc />
+    public string RoomsPersistencePath => _opt.WebRtcRoomsStorePath;
+
+    /// <inheritdoc />
+    public int RoomsPersistenceTtlSeconds => _opt.WebRtcRoomsPersistTtlSeconds;
+
     private static bool IsVideoRoom(string room)
     {
         if (string.IsNullOrWhiteSpace(room)) return false;

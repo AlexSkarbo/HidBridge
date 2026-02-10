@@ -103,3 +103,15 @@ The WebRTC control UI uses server-provided timeouts (so they are tweakable witho
 ```
 
 Defaults are intentionally small for fast fail on LAN. Increase them if you expect slow TURN/TCP connections.
+
+## Optional Room Registry Persistence
+
+To restore generated rooms after server restart:
+
+```json
+{
+  "webRtcRoomsPersistEnabled": true,
+  "webRtcRoomsStorePath": "webrtc_rooms.json",
+  "webRtcRoomsPersistTtlSeconds": 86400
+}
+```

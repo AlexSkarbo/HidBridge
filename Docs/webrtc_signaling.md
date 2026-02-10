@@ -3,7 +3,7 @@
 HidBridge includes a **minimal WebRTC signaling relay** to bootstrap WebRTC sessions between two browser clients.
 
 This is intentionally a skeleton:
-- In-memory rooms (no persistence)
+- Room registry can be persisted to disk (optional)
 - No auth beyond existing server token middleware
 - No TURN/STUN configuration on the server (client controls ICE servers)
 - Meant to validate that SDP/ICE exchange works before integrating real media pipelines
@@ -79,3 +79,20 @@ Use the same format for:
 - open the page in **two tabs**
 - use the same room id
 - click **Call** in one tab to establish a **DataChannel**
+
+## Optional Room Persistence
+
+To keep generated rooms across server restarts, enable room registry persistence in server config:
+
+```json
+{
+  "webRtcRoomsPersistEnabled": true,
+  "webRtcRoomsStorePath": "webrtc_rooms.json",
+  "webRtcRoomsPersistTtlSeconds": 86400
+}
+```
+
+Behavior:
+- persisted rooms are restored on first room-list/connect flow
+- helper autostart is retried for persisted rooms
+- stale persisted rooms are removed when no peers/helpers are present and TTL expires

@@ -137,6 +137,9 @@ public static class Hex
 /// <param name="WebRtcTurnUsername">WebRtcTurnUsername.</param>
 /// <param name="WebRtcClientJoinTimeoutMs">WebRtcClientJoinTimeoutMs.</param>
 /// <param name="WebRtcClientConnectTimeoutMs">WebRtcClientConnectTimeoutMs.</param>
+/// <param name="WebRtcRoomsPersistEnabled">WebRtcRoomsPersistEnabled.</param>
+/// <param name="WebRtcRoomsStorePath">WebRtcRoomsStorePath.</param>
+/// <param name="WebRtcRoomsPersistTtlSeconds">WebRtcRoomsPersistTtlSeconds.</param>
 public sealed record Options(
     string SerialPort,
     bool SerialAuto,
@@ -223,7 +226,10 @@ public sealed record Options(
     int WebRtcTurnTtlSeconds,
     string WebRtcTurnUsername,
     int WebRtcClientJoinTimeoutMs,
-    int WebRtcClientConnectTimeoutMs)
+    int WebRtcClientConnectTimeoutMs,
+    bool WebRtcRoomsPersistEnabled,
+    string WebRtcRoomsStorePath,
+    int WebRtcRoomsPersistTtlSeconds)
 {
     /// <summary>
     /// Maps server options to minimal video options DTO.
@@ -552,7 +558,10 @@ public sealed record Options(
         int? WebRtcTurnTtlSeconds,
         string? WebRtcTurnUsername,
         int? WebRtcClientJoinTimeoutMs,
-        int? WebRtcClientConnectTimeoutMs);
+        int? WebRtcClientConnectTimeoutMs,
+        bool? WebRtcRoomsPersistEnabled,
+        string? WebRtcRoomsStorePath,
+        int? WebRtcRoomsPersistTtlSeconds);
 
     /// <summary>
     /// Parses parse.
@@ -796,6 +805,9 @@ public sealed record Options(
         // Intentionally small defaults for fast-fail on LAN. Increase for TURN/TCP-heavy environments.
         int webRtcClientJoinTimeoutMs = cfg?.WebRtcClientJoinTimeoutMs ?? 250;
         int webRtcClientConnectTimeoutMs = cfg?.WebRtcClientConnectTimeoutMs ?? 5000;
+        bool webRtcRoomsPersistEnabled = cfg?.WebRtcRoomsPersistEnabled ?? true;
+        string webRtcRoomsStorePath = ResolvePath(baseDir, cfg?.WebRtcRoomsStorePath, "webrtc_rooms.json");
+        int webRtcRoomsPersistTtlSeconds = cfg?.WebRtcRoomsPersistTtlSeconds ?? 86_400;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1261,7 +1273,10 @@ public sealed record Options(
             webRtcTurnTtlSeconds,
             webRtcTurnUsername,
             webRtcClientJoinTimeoutMs,
-            webRtcClientConnectTimeoutMs);
+            webRtcClientConnectTimeoutMs,
+            webRtcRoomsPersistEnabled,
+            webRtcRoomsStorePath,
+            webRtcRoomsPersistTtlSeconds);
     }
 }
 

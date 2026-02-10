@@ -152,6 +152,9 @@
 
   "webRtcClientJoinTimeoutMs": 250,
   "webRtcClientConnectTimeoutMs": 5000,
+  "webRtcRoomsPersistEnabled": true,
+  "webRtcRoomsStorePath": "webrtc_rooms.json",
+  "webRtcRoomsPersistTtlSeconds": 86400,
 
   "webRtcTurnUrls": [
     "turn:localhost:3478?transport=udp",

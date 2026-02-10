@@ -41,6 +41,12 @@ public sealed class WebRtcIntegrationTests
 
         public int RoomsMaxHelpers { get; set; } = 8;
 
+        public bool RoomsPersistenceEnabled { get; set; }
+
+        public string RoomsPersistencePath { get; set; } = Path.Combine(Path.GetTempPath(), $"webrtc_rooms_{Guid.NewGuid():N}.json");
+
+        public int RoomsPersistenceTtlSeconds { get; set; } = 86_400;
+
         public int EnsureHelperStartedCalls { get; private set; }
 
         public int StopHelperCalls { get; private set; }
@@ -313,6 +319,95 @@ public sealed class WebRtcIntegrationTests
 
         Assert.False(res.Ok);
         Assert.Equal("cannot_delete_video", res.Error);
+    }
+
+    [Fact]
+    public async Task RoomsPersistence_RestoresRoomAndStartsHelper_OnNewServiceInstance()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"hidbridge-rtc-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        string storePath = Path.Combine(tempDir, "webrtc_rooms.json");
+
+        try
+        {
+            var backendA = new FakeBackend(deviceIdHex: "50443405deadbeef")
+            {
+                RoomsPersistenceEnabled = true,
+                RoomsPersistencePath = storePath,
+                RoomsPersistenceTtlSeconds = 3600
+            };
+            var roomIdsA = new WebRtcRoomIdService(backendA);
+            var roomsSvcA = new WebRtcRoomsService(backendA, roomIdsA);
+
+            var createUc = new CreateWebRtcRoomUseCase(roomsSvcA);
+            var created = await createUc.Execute("hb-50443405-persist", CancellationToken.None);
+            Assert.True(created.Ok);
+            Assert.True(File.Exists(storePath));
+
+            var backendB = new FakeBackend(deviceIdHex: "50443405deadbeef")
+            {
+                RoomsPersistenceEnabled = true,
+                RoomsPersistencePath = storePath,
+                RoomsPersistenceTtlSeconds = 3600
+            };
+            var roomIdsB = new WebRtcRoomIdService(backendB);
+            var roomsSvcB = new WebRtcRoomsService(backendB, roomIdsB);
+            var listUc = new ListWebRtcRoomsUseCase(roomsSvcB);
+
+            var snap = await listUc.Execute(CancellationToken.None);
+
+            Assert.Equal(1, backendB.EnsureHelperStartedCalls);
+            Assert.Contains(snap.Rooms, r => string.Equals(r.Room, "hb-50443405-persist", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task RoomsPersistence_TtlSkipsExpiredRooms()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"hidbridge-rtc-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        string storePath = Path.Combine(tempDir, "webrtc_rooms.json");
+
+        try
+        {
+            var old = DateTimeOffset.UtcNow.AddHours(-2);
+            var json = $$"""
+            {
+              "version": 1,
+              "rooms": [
+                {
+                  "room": "hb-50443405-old",
+                  "createdAtUtc": "{{old:O}}",
+                  "updatedAtUtc": "{{old:O}}"
+                }
+              ]
+            }
+            """;
+            File.WriteAllText(storePath, json);
+
+            var backend = new FakeBackend(deviceIdHex: "50443405deadbeef")
+            {
+                RoomsPersistenceEnabled = true,
+                RoomsPersistencePath = storePath,
+                RoomsPersistenceTtlSeconds = 60
+            };
+            var roomIds = new WebRtcRoomIdService(backend);
+            var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+            var listUc = new ListWebRtcRoomsUseCase(roomsSvc);
+
+            var snap = await listUc.Execute(CancellationToken.None);
+
+            Assert.DoesNotContain(snap.Rooms, r => string.Equals(r.Room, "hb-50443405-old", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(0, backend.EnsureHelperStartedCalls);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 
     [Fact]

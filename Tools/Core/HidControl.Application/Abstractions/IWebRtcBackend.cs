@@ -87,5 +87,19 @@ public interface IWebRtcBackend
     /// Maximum concurrent helper processes.
     /// </summary>
     int RoomsMaxHelpers { get; }
-}
 
+    /// <summary>
+    /// Enables room registry persistence to disk.
+    /// </summary>
+    bool RoomsPersistenceEnabled { get; }
+
+    /// <summary>
+    /// Path to the room registry file.
+    /// </summary>
+    string RoomsPersistencePath { get; }
+
+    /// <summary>
+    /// TTL in seconds for persisted room entries before cleanup.
+    /// </summary>
+    int RoomsPersistenceTtlSeconds { get; }
+}
