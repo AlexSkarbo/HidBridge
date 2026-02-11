@@ -439,6 +439,36 @@ public sealed class WebRtcIntegrationTests
     }
 
     [Fact]
+    public void VideoRuntimeStatus_WhenStartupTimeoutReported_SetsLastVideoError()
+    {
+        var opt = Options.Parse(Array.Empty<string>());
+        var signaling = new WebRtcSignalingService();
+        var runtime = new FakeVideoRuntime();
+        using var supervisor = new WebRtcVideoPeerSupervisor(opt, signaling, runtime);
+        const string room = "hb-v-50443405-timeout";
+
+        supervisor.ReportRuntimeStatus(
+            room,
+            eventName: "pipeline_started",
+            sourceModeActive: "capture",
+            detail: null,
+            encoder: "cpu",
+            codec: "h264");
+
+        supervisor.ReportRuntimeStatus(
+            room,
+            eventName: "startup_timeout",
+            sourceModeActive: "capture",
+            detail: "startup timeout: no RTP packets");
+
+        var status = supervisor.GetRoomRuntimeStatus(room);
+
+        Assert.NotNull(status);
+        Assert.Equal("startup timeout: no RTP packets", status!.LastVideoError);
+        Assert.Equal("capture", status.SourceModeActive);
+    }
+
+    [Fact]
     public void JoinSignalingUseCase_JoinsControlRoom_AndClassifiesKind()
     {
         var signaling = new WebRtcSignalingService();

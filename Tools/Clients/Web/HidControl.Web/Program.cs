@@ -3,6 +3,7 @@ using System.Linq;
 using HidControl.ClientSdk;
 using System.Net.WebSockets;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.IO;
 using System.Text.Json.Serialization;
 
@@ -972,6 +973,17 @@ app.MapGet("/", () =>
       while (lines.length > 60) lines.shift();
       rtcOut.textContent = lines.join("\n");
     }
+    const rtcLogThrottleState = new Map();
+    function rtcLogMaybe(entry, key, minMs) {
+      try {
+        const now = Date.now();
+        const k = String(key || "");
+        const prev = rtcLogThrottleState.get(k) || 0;
+        if ((now - prev) < minMs) return;
+        rtcLogThrottleState.set(k, now);
+      } catch {}
+      rtcLog(entry);
+    }
 
 	    let webrtcClient = null;
 	    function clearRemoteVideo() {
@@ -1529,7 +1541,8 @@ app.MapGet("/", () =>
 	            const parsed = (typeof data === "string") ? JSON.parse(data) : data;
 	            if (parsed && parsed.type === "video.status") {
 	              renderVideoStatus(parsed);
-	              rtcLog({ webrtc: "video.status", payload: parsed });
+                const ev = String(parsed.event || "status");
+	              rtcLogMaybe({ webrtc: "video.status", payload: parsed }, "video.status." + ev, 1500);
 	              return;
 	            }
 	          } catch {}
@@ -1872,7 +1885,7 @@ app.MapGet("/", () =>
 	        if (!res.ok) return;
 	        const j = await res.json().catch(() => null);
 	        renderVideoPeerRuntime(j);
-	        rtcLog({ webrtc: "ui.video_runtime", room: target, payload: j });
+	        rtcLogMaybe({ webrtc: "ui.video_runtime", room: target, payload: j }, "ui.video_runtime." + target, 2000);
 	      } catch {}
 	    }
 
@@ -1932,17 +1945,14 @@ app.MapGet("/", () =>
               clearRemoteVideo();
               setRtcStatus("disconnected");
             }
-            const delRes = await fetch(prefix + "/" + encodeURIComponent(room), { method: "DELETE" });
-            const delJson = await delRes.json().catch(() => null);
-            rtcLog({ webrtc: "ui.room_restart_stop", room, endpoint: prefix, payload: delJson });
-            const startRes = await fetch(prefix, {
+            const restartRes = await fetch(prefix + "/" + encodeURIComponent(room) + "/restart", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(buildVideoRoomRequest(room))
             });
-            const startJson = await startRes.json().catch(() => null);
-            rtcLog({ webrtc: "ui.room_restart_start", room, endpoint: prefix, payload: startJson });
-            show(startJson || { ok: false, error: "restart_failed" });
+            const restartJson = await restartRes.json().catch(() => null);
+            rtcLog({ webrtc: "ui.room_restart", room, endpoint: prefix, payload: restartJson });
+            show(restartJson || { ok: false, error: "restart_failed" });
 	          await refreshRooms();
 	        } catch (e) {
 	          rtcLog({ webrtc: "ui.room_restart_error", room, error: String(e) });
@@ -2825,6 +2835,48 @@ app.MapPost("/api/webrtc/video/rooms/{room}/apply", async (string room, HttpRequ
             error = created.Error,
             deleted
         });
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { ok = false, room, error = "timeout" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, room, error = ex.Message });
+    }
+});
+
+app.MapPost("/api/webrtc/video/rooms/{room}/restart", async (string room, HttpRequest req, CancellationToken ct) =>
+{
+    var payload = new HidControl.Contracts.WebRtcCreateVideoRoomRequest(room, null, null, null, null, null, null, null);
+    try
+    {
+        payload = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct) ?? payload;
+        string targetRoom = string.IsNullOrWhiteSpace(payload.Room) ? room : payload.Room.Trim();
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+
+        string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/video/rooms/{Uri.EscapeDataString(targetRoom)}/restart";
+        using var resp = await http.PostAsJsonAsync(
+            url,
+            new HidControl.Contracts.WebRtcCreateVideoRoomRequest(
+                targetRoom,
+                payload.QualityPreset,
+                payload.BitrateKbps,
+                payload.Fps,
+                payload.ImageQuality,
+                payload.CaptureInput,
+                payload.Encoder,
+                payload.Codec),
+            ct);
+
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = JsonSerializer.Serialize(new { ok = false, room = targetRoom, error = "empty_response" });
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
     }
     catch (TaskCanceledException)
     {

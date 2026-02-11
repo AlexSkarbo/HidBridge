@@ -42,6 +42,21 @@ public interface IWebRtcRoomsService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Delete result.</returns>
     Task<WebRtcRoomDeleteResult> DeleteAsync(string room, CancellationToken ct);
+
+    /// <summary>
+    /// Restarts a video room helper atomically for the same room/settings.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="qualityPreset">Optional video quality preset.</param>
+    /// <param name="bitrateKbps">Optional target bitrate (kbps).</param>
+    /// <param name="fps">Optional target FPS.</param>
+    /// <param name="imageQuality">Optional image quality level (1-100).</param>
+    /// <param name="captureInput">Optional capture input string passed to helper.</param>
+    /// <param name="encoder">Optional encoder selection passed to helper.</param>
+    /// <param name="codec">Optional codec selection passed to helper.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Restart result.</returns>
+    Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct);
 }
 
 /// <summary>
@@ -179,6 +194,17 @@ public sealed record WebRtcRoomCreateResult(bool Ok, string? Room, bool Started,
 /// <param name="Stopped">True if a helper was stopped by this call.</param>
 /// <param name="Error">Error code if failed.</param>
 public sealed record WebRtcRoomDeleteResult(bool Ok, string Room, bool Stopped, string? Error);
+
+/// <summary>
+/// Result of restarting a room.
+/// </summary>
+/// <param name="Ok">Ok.</param>
+/// <param name="Room">Room id.</param>
+/// <param name="Stopped">True if previous helper was stopped.</param>
+/// <param name="Started">True if helper was started by this call.</param>
+/// <param name="Pid">Helper pid if started/known.</param>
+/// <param name="Error">Error code if failed.</param>
+public sealed record WebRtcRoomRestartResult(bool Ok, string Room, bool Stopped, bool Started, int? Pid, string? Error);
 
 /// <summary>
 /// WebRTC ICE servers payload (STUN/TURN).

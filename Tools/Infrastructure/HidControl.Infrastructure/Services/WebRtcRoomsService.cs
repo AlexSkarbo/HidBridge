@@ -13,6 +13,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
     private readonly IWebRtcBackend _backend;
     private readonly IWebRtcRoomIdService _roomIds;
+    private readonly SemaphoreSlim _videoRoomOpLock = new(1, 1);
     private readonly object _persistLock = new();
     private readonly Dictionary<string, PersistedRoomState> _persistedRooms = new(StringComparer.OrdinalIgnoreCase);
     private bool _restoreAttempted;
@@ -62,14 +63,25 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     }
 
     /// <inheritdoc />
-    public Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
+    public async Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
     {
-        return CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, persist: false, ct);
+        await _videoRoomOpLock.WaitAsync(ct);
+        try
+        {
+            return await CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, persist: false, ct);
+        }
+        finally
+        {
+            _videoRoomOpLock.Release();
+        }
     }
 
     /// <inheritdoc />
     public async Task<WebRtcRoomDeleteResult> DeleteAsync(string room, CancellationToken ct)
     {
+        await _videoRoomOpLock.WaitAsync(ct);
+        try
+        {
         if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
         {
             return new WebRtcRoomDeleteResult(false, room, false, "cannot_delete_control");
@@ -111,6 +123,94 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
 
         return new WebRtcRoomDeleteResult(stop.ok, room, stop.stopped, stop.error);
+        }
+        finally
+        {
+            _videoRoomOpLock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
+    {
+        await _videoRoomOpLock.WaitAsync(ct);
+        try
+        {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return new WebRtcRoomRestartResult(false, room ?? string.Empty, false, false, null, "room_required");
+        }
+
+        string normalizedRoom = room.Trim();
+        if (!IsVideoRoom(normalizedRoom))
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "video_room_required");
+        }
+
+        // Keep the same guardrails as create endpoint for user-provided params.
+        if (!string.IsNullOrWhiteSpace(qualityPreset))
+        {
+            string q = qualityPreset.Trim().ToLowerInvariant();
+            if (q != "low" && q != "low-latency" && q != "balanced" && q != "high" && q != "optimal")
+            {
+                return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_quality_preset");
+            }
+        }
+        if (bitrateKbps is int b && (b < 200 || b > 12000))
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_bitrate_kbps");
+        }
+        if (fps is int f && (f < 5 || f > 60))
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_fps");
+        }
+        if (imageQuality is int iq && (iq < 1 || iq > 100))
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_image_quality");
+        }
+
+        string? normalizedPreset = NormalizeQualityPreset(qualityPreset);
+        string? normalizedEncoder = NormalizeEncoder(encoder);
+        string? normalizedCodec = NormalizeCodec(codec);
+        int? normalizedImageQuality = NormalizeImageQuality(imageQuality);
+
+        (bool ok, bool stopped, string? error) stop = (false, false, "restart_stop_failed");
+        for (int i = 0; i < 3; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            stop = _backend.StopHelper(normalizedRoom);
+            if (stop.ok)
+            {
+                break;
+            }
+            await Task.Delay(120 * (i + 1), ct);
+        }
+
+        if (!stop.ok)
+        {
+            // Same reconciliation rule as delete: if room is already gone, continue restart.
+            var peers = _backend.GetRoomPeerCountsSnapshot();
+            var helpers = _backend.GetHelperRoomsSnapshot();
+            bool hasHelper = helpers.Contains(normalizedRoom);
+            bool hasPeers = peers.TryGetValue(normalizedRoom, out int peerCount) && peerCount > 0;
+            if (hasHelper || hasPeers)
+            {
+                return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, false, null, stop.error);
+            }
+        }
+
+        var start = _backend.EnsureHelperStarted(normalizedRoom, normalizedPreset, bitrateKbps, fps, normalizedImageQuality, captureInput, normalizedEncoder, normalizedCodec);
+        if (!start.ok)
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, start.started, start.pid, start.error);
+        }
+
+        return new WebRtcRoomRestartResult(true, normalizedRoom, stop.stopped, start.started, start.pid, null);
+        }
+        finally
+        {
+            _videoRoomOpLock.Release();
+        }
     }
 
     private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool persist, CancellationToken ct)
