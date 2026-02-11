@@ -140,10 +140,10 @@ func TestDefaultH264EncoderArgs_LowLatencyRateControl(t *testing.T) {
 	if got := argValue(args, "-g"); got != "30" {
 		t.Fatalf("low-latency gop mismatch, got=%q", got)
 	}
-	if got := argValue(args, "-maxrate"); got != "1260k" {
+	if got := argValue(args, "-maxrate"); got != "1320k" {
 		t.Fatalf("low-latency maxrate mismatch, got=%q", got)
 	}
-	if got := argValue(args, "-bufsize"); got != "1200k" {
+	if got := argValue(args, "-bufsize"); got != "2400k" {
 		t.Fatalf("low-latency bufsize mismatch, got=%q", got)
 	}
 }
@@ -173,20 +173,59 @@ func TestDefaultVp8EncoderArgs_LowLatencyAddsRealtimeFlags(t *testing.T) {
 }
 
 func TestCaptureRtbufsizeForPreset(t *testing.T) {
-	if got := captureRtbufsizeForPreset("low-latency"); got != "32M" {
+	if got := captureRtbufsizeForPreset("low-latency"); got != "64M" {
 		t.Fatalf("low-latency rtbufsize mismatch, got=%q", got)
 	}
-	if got := captureRtbufsizeForPreset("low"); got != "64M" {
+	if got := captureRtbufsizeForPreset("low"); got != "96M" {
 		t.Fatalf("low rtbufsize mismatch, got=%q", got)
 	}
-	if got := captureRtbufsizeForPreset("balanced"); got != "128M" {
+	if got := captureRtbufsizeForPreset("balanced"); got != "192M" {
 		t.Fatalf("balanced rtbufsize mismatch, got=%q", got)
 	}
-	if got := captureRtbufsizeForPreset("high"); got != "128M" {
+	if got := captureRtbufsizeForPreset("high"); got != "192M" {
 		t.Fatalf("high rtbufsize mismatch, got=%q", got)
 	}
 	if got := captureRtbufsizeForPreset("optimal"); got != "256M" {
 		t.Fatalf("optimal rtbufsize mismatch, got=%q", got)
+	}
+}
+
+func TestAdaptiveBitrateNext_DownWhenMeasuredLow(t *testing.T) {
+	next, reason, changed := adaptiveBitrateNext(1200, 1200, 600, 400, 6000)
+	if !changed {
+		t.Fatalf("expected bitrate change")
+	}
+	if reason != "down" {
+		t.Fatalf("expected reason=down, got=%q", reason)
+	}
+	if next >= 1200 {
+		t.Fatalf("expected lower bitrate, got=%d", next)
+	}
+}
+
+func TestAdaptiveBitrateNext_UpWhenMeasuredHighAndBelowTarget(t *testing.T) {
+	next, reason, changed := adaptiveBitrateNext(900, 1200, 1300, 400, 6000)
+	if !changed {
+		t.Fatalf("expected bitrate change")
+	}
+	if reason != "up" {
+		t.Fatalf("expected reason=up, got=%q", reason)
+	}
+	if next <= 900 {
+		t.Fatalf("expected higher bitrate, got=%d", next)
+	}
+	if next > 1200 {
+		t.Fatalf("expected bitrate <= configured target, got=%d", next)
+	}
+}
+
+func TestAdaptiveBitrateNext_NoChangeInsideHysteresis(t *testing.T) {
+	next, reason, changed := adaptiveBitrateNext(1200, 1200, 1100, 400, 6000)
+	if changed {
+		t.Fatalf("unexpected bitrate change reason=%q next=%d", reason, next)
+	}
+	if next != 1200 {
+		t.Fatalf("expected unchanged bitrate, got=%d", next)
 	}
 }
 

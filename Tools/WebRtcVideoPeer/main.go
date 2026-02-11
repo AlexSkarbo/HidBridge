@@ -453,6 +453,14 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	restartWindowSec := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_WINDOW_SEC", 60, 5, 600)
 	restartBaseDelayMs := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_DELAY_MS", 500, 50, 10000)
 	startupPacketTimeoutMs := envIntInRange("HIDBRIDGE_VIDEO_STARTUP_PACKET_TIMEOUT_MS", 15000, 2000, 120000)
+	abrEnabled := envBool("HIDBRIDGE_VIDEO_ABR_ENABLED", true)
+	abrIntervalSec := envIntInRange("HIDBRIDGE_VIDEO_ABR_INTERVAL_SEC", 6, 2, 30)
+	abrMinKbps := envIntInRange("HIDBRIDGE_VIDEO_ABR_MIN_KBPS", 400, 200, 12000)
+	abrMaxKbps := envIntInRange("HIDBRIDGE_VIDEO_ABR_MAX_KBPS", 6000, 200, 20000)
+	configuredBitrateKbps := clamp(bitrateKbps, 200, 12000)
+	currentBitrateKbps := configuredBitrateKbps
+	lastAbrEvalAt := time.Now()
+	pendingReconfigureReason := ""
 	var restartTimestamps []time.Time
 	var cmd *exec.Cmd
 	var waitCh chan error
@@ -468,7 +476,7 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		if normalizeSourceMode(mode) == "testsrc" {
 			args = append(args, "-re")
 		}
-		pipelineArgs, buildErr := buildVideoPipelineArgs(mode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, rawFFmpegArgs, rawCaptureInput)
+		pipelineArgs, buildErr := buildVideoPipelineArgs(mode, qualityPreset, imageQuality, encoderMode, codecMode, currentBitrateKbps, fps, rawFFmpegArgs, rawCaptureInput)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -489,13 +497,15 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		}
 
 		cmd = localCmd
-		waitCh = make(chan error, 1)
-		go func() { waitCh <- localCmd.Wait() }()
+		localWaitCh := make(chan error, 1)
+		waitCh = localWaitCh
+		go func(ch chan error, c *exec.Cmd) { ch <- c.Wait() }(localWaitCh, localCmd)
 		startedAt = time.Now()
 		firstPacketSeen = false
 		if onStatus != nil {
 			onStatus("pipeline_started", mode, "", map[string]any{
 				"fallbackUsed": fallbackUsed,
+				"bitrateKbps":  currentBitrateKbps,
 			})
 		}
 		return nil
@@ -571,6 +581,8 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	lastReportAt := time.Now()
 	lastFrames := int64(0)
 	lastBytes := int64(0)
+	lastAbrAt := time.Now()
+	lastAbrBytes := int64(0)
 	for {
 		select {
 		case <-ctx.Done():
@@ -579,7 +591,8 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 			if ctx.Err() != nil {
 				return nil
 			}
-			if ffErr != nil && canFallback && !fallbackUsed && modeInUse == "capture" {
+			reconfiguring := pendingReconfigureReason != ""
+			if ffErr != nil && !reconfiguring && canFallback && !fallbackUsed && modeInUse == "capture" {
 				fallbackUsed = true
 				modeInUse = "testsrc"
 				log.Printf("capture pipeline failed, switching to fallback source mode=%s: %v", modeInUse, ffErr)
@@ -593,7 +606,12 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 				}
 				continue
 			}
-			if restartPipeline(modeInUse, "ffmpeg_exit", ffErr) {
+			reason := "ffmpeg_exit"
+			if pendingReconfigureReason != "" {
+				reason = pendingReconfigureReason
+				pendingReconfigureReason = ""
+			}
+			if restartPipeline(modeInUse, reason, ffErr) {
 				continue
 			}
 			if ffErr != nil {
@@ -676,6 +694,33 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 			lastBytes = totalBytes
 		}
 
+		if abrEnabled && now.Sub(lastAbrEvalAt) >= time.Duration(abrIntervalSec)*time.Second {
+			lastAbrEvalAt = now
+			interval := now.Sub(lastAbrAt).Seconds()
+			if interval <= 0 {
+				interval = float64(abrIntervalSec)
+			}
+			measuredKbps := int(float64((totalBytes-lastAbrBytes)*8) / interval / 1000.0)
+			lastAbrAt = now
+			lastAbrBytes = totalBytes
+			if nextBitrate, reason, changed := adaptiveBitrateNext(currentBitrateKbps, configuredBitrateKbps, measuredKbps, abrMinKbps, abrMaxKbps); changed {
+				prev := currentBitrateKbps
+				currentBitrateKbps = nextBitrate
+				pendingReconfigureReason = "abr_" + reason
+				if onStatus != nil {
+					onStatus("abr_update", modeInUse, reason, map[string]any{
+						"bitrateKbps":    currentBitrateKbps,
+						"bitratePrevKbps": prev,
+						"measuredKbps":   measuredKbps,
+						"fallbackUsed":   fallbackUsed,
+					})
+				}
+				if cmd != nil && cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			}
+		}
+
 		if writeErr := track.WriteRTP(&pkt); writeErr != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -683,6 +728,44 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 			return fmt.Errorf("track write: %w", writeErr)
 		}
 	}
+}
+
+func adaptiveBitrateNext(current int, configured int, measured int, minKbps int, maxKbps int) (next int, reason string, changed bool) {
+	cur := clamp(current, 200, 12000)
+	cfg := clamp(configured, 200, 12000)
+	minV := clamp(minKbps, 200, 20000)
+	maxV := clamp(maxKbps, minV, 20000)
+	cur = clamp(cur, minV, maxV)
+	if measured <= 0 {
+		return cur, "", false
+	}
+
+	downThreshold := int(float64(cur) * 0.80)
+	if measured < downThreshold {
+		proposed := int(float64(measured) * 1.10)
+		proposed = clamp(proposed, minV, maxV)
+		if proposed < cur-80 {
+			return proposed, "down", true
+		}
+	}
+
+	upThreshold := int(float64(cur) * 1.25)
+	if measured > upThreshold && cur < cfg {
+		proposed := int(float64(cur) * 1.12)
+		proposed = clamp(proposed, minV, minInt(maxV, cfg))
+		if proposed > cur+80 {
+			return proposed, "up", true
+		}
+	}
+
+	if cur > cfg {
+		proposed := clamp(cfg, minV, maxV)
+		if proposed < cur-80 {
+			return proposed, "back_to_target", true
+		}
+	}
+
+	return cur, "", false
 }
 
 func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string) ([]string, error) {
@@ -703,13 +786,15 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQualit
 
 	switch normalizeSourceMode(sourceMode) {
 	case "capture":
-		inputArgs, err := buildCaptureInputArgs(rawCaptureInput, fps, qualityPreset)
+		normalizedEncoder := normalizeEncoderMode(encoderMode)
+		pipelineFps := effectiveCaptureFps(fps, normalizedEncoder)
+		inputArgs, err := buildCaptureInputArgs(rawCaptureInput, pipelineFps, qualityPreset, normalizedEncoder)
 		if err != nil {
 			return nil, err
 		}
 		args := append([]string{}, inputArgs...)
 		args = append(args, "-an")
-		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps, fps)...)
+		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizedEncoder, normalizeCodecMode(codecMode), bitrateKbps, pipelineFps)...)
 		return args, nil
 	case "testsrc":
 		args := []string{
@@ -724,7 +809,8 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQualit
 	}
 }
 
-func buildCaptureInputArgs(raw string, fps int, qualityPreset string) ([]string, error) {
+func buildCaptureInputArgs(raw string, fps int, qualityPreset string, encoderMode string) ([]string, error) {
+	fps = effectiveCaptureFps(fps, encoderMode)
 	fps = clamp(fps, 5, 60)
 	rtbufsize := captureRtbufsizeForPreset(qualityPreset)
 	if strings.TrimSpace(raw) != "" {
@@ -738,8 +824,8 @@ func buildCaptureInputArgs(raw string, fps int, qualityPreset string) ([]string,
 		if runtime.GOOS == "windows" {
 			parsed = normalizeDshowInputArgs(parsed)
 			if usesDshowInput(parsed) {
-				parsed = ensureDshowCaptureArg(parsed, "-framerate", strconv.Itoa(fps))
-				parsed = ensureDshowCaptureArg(parsed, "-rtbufsize", rtbufsize)
+				parsed = upsertDshowCaptureArg(parsed, "-framerate", strconv.Itoa(fps))
+				parsed = upsertDshowCaptureArg(parsed, "-rtbufsize", rtbufsize)
 			}
 		}
 		return parsed, nil
@@ -761,13 +847,13 @@ func buildCaptureInputArgs(raw string, fps int, qualityPreset string) ([]string,
 func captureRtbufsizeForPreset(qualityPreset string) string {
 	switch normalizeQualityPreset(qualityPreset) {
 	case "low-latency":
-		return "32M"
-	case "low":
 		return "64M"
+	case "low":
+		return "96M"
 	case "optimal":
 		return "256M"
 	default: // balanced, high
-		return "128M"
+		return "192M"
 	}
 }
 
@@ -802,6 +888,19 @@ func ensureDshowCaptureArg(args []string, key string, value string) []string {
 	out = append(out, key, value)
 	out = append(out, args[insertAt:]...)
 	return out
+}
+
+// upsertDshowCaptureArg updates an existing "-key value" pair for dshow input,
+// or inserts one before "-i ..." if missing.
+func upsertDshowCaptureArg(args []string, key string, value string) []string {
+	for i := 0; i+1 < len(args); i++ {
+		if strings.EqualFold(args[i], key) {
+			out := append([]string{}, args...)
+			out[i+1] = value
+			return out
+		}
+	}
+	return ensureDshowCaptureArg(args, key, value)
 }
 
 func normalizeDshowInputArgs(args []string) []string {
@@ -1086,7 +1185,7 @@ func qualityRateControl(preset string, bitrate int, fps int) (gop int, maxrate i
 	case "low":
 		return clamp(f*3, 30, 180), int(float64(b) * 1.15), b * 3
 	case "low-latency":
-		return clamp(f, 15, 60), int(float64(b) * 1.05), b
+		return clamp(f, 15, 60), int(float64(b) * 1.10), b * 2
 	case "high":
 		return clamp(f*2, 30, 120), int(float64(b) * 1.2), b * 2
 	case "optimal":
@@ -1094,6 +1193,15 @@ func qualityRateControl(preset string, bitrate int, fps int) (gop int, maxrate i
 	default: // balanced
 		return clamp(f*2, 30, 120), int(float64(b) * 1.2), b * 2
 	}
+}
+
+func effectiveCaptureFps(fps int, encoderMode string) int {
+	target := clamp(fps, 5, 60)
+	// CPU capture defaults to 30 fps for stability on common 1080p cards.
+	if normalizeEncoderMode(encoderMode) == "cpu" && target > 30 {
+		return 30
+	}
+	return target
 }
 
 func applyImageQualityToBitrate(bitrateKbps int, imageQuality int) int {
@@ -1147,6 +1255,21 @@ func envOptionalIntInRange(name string, min int, max int) int {
 		return 0
 	}
 	return n
+}
+
+func envBool(name string, defaultVal bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if raw == "" {
+		return defaultVal
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultVal
+	}
 }
 
 func envIntInRange(name string, defaultVal int, min int, max int) int {
