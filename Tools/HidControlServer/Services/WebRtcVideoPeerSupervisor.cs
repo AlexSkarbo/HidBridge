@@ -14,6 +14,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     // Give helper enough time to fail fast on missing deps/toolchain issues.
     // 300ms is too optimistic on some Windows/Go setups.
     private const int EarlyExitProbeMs = 1500;
+    private const int RestartMaxAttempts = 6;
+    private const int RestartBaseDelayMs = 1000;
+    private const int RestartMaxDelayMs = 30000;
+    private const int RestartFailureWindowSeconds = 180;
 
     private readonly Options _opt;
     private readonly IWebRtcSignalingService _signaling;
@@ -22,9 +26,21 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     private readonly Dictionary<string, ProcState> _procs = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, VideoPeerRuntimeState> _runtimeByRoom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, HashSet<string>> _manualStopsByRoom = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _manualStopRooms = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RestartState> _restartByRoom = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, StartRequestState> _startRequestByRoom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _cleanupTimer;
 
     private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc, DateTimeOffset? IdleSinceUtc);
+    private sealed record RestartState(int Attempts, DateTimeOffset LastFailureAtUtc);
+    private sealed record StartRequestState(
+        string? QualityPreset,
+        int? BitrateKbps,
+        int? Fps,
+        int? ImageQuality,
+        string? CaptureInput,
+        string? Encoder,
+        string? Codec);
     private sealed record VideoPeerRuntimeState(
         string Room,
         string SourceModeRequested,
@@ -112,6 +128,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 try
                 {
+                    _manualStopRooms.Add(kvp.Key);
                     if (!kvp.Value.Process.HasExited)
                     {
                         kvp.Value.Process.Kill(entireProcessTree: true);
@@ -123,6 +140,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     try { kvp.Value.Process.Dispose(); } catch { }
                     _procs.Remove(kvp.Key);
                     _runtimeByRoom.Remove(kvp.Key);
+                    _restartByRoom.Remove(kvp.Key);
+                    _startRequestByRoom.Remove(kvp.Key);
                     if (!string.IsNullOrWhiteSpace(toolDir))
                     {
                         DeletePidFile(toolDir!, kvp.Key);
@@ -155,6 +174,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
 
         lock (_lock)
         {
+            _manualStopRooms.Remove(room);
+            _startRequestByRoom[room] = new StartRequestState(
+                qualityPreset,
+                bitrateKbps,
+                fps,
+                imageQuality,
+                captureInput,
+                encoder,
+                codec);
+
             int max = _opt.WebRtcRoomsMaxHelpers;
             if (max > 0 && !_procs.ContainsKey(room) && _procs.Count >= max)
             {
@@ -165,6 +194,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 if (!existing.Process.HasExited)
                 {
+                    _restartByRoom.Remove(room);
                     UpsertRuntimeState(room, roomState =>
                     {
                         string requested = NormalizeSourceModeForState(_opt.WebRtcVideoPeerSourceMode);
@@ -199,6 +229,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 try { existing.Process.Dispose(); } catch { }
                 _procs.Remove(room);
                 MarkRuntimeStopped(room, existing.Process, exitCode: null);
+                _restartByRoom.Remove(room);
                 ReleaseManualStopsForRoom(room);
             }
 
@@ -252,6 +283,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     try { code = p.ExitCode; } catch { }
                     ServerEventLog.Log("webrtc.videopeer", "exit", new { room, code });
                     DeletePidFile(toolDir, room);
+                    bool scheduleRestart = false;
 
                     lock (_lock)
                     {
@@ -261,6 +293,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                         }
                         MarkRuntimeStopped(room, p, code);
                         ReleaseManualStopsForRoom(room);
+                        scheduleRestart = ShouldScheduleRestart_NoLock(room, code);
+                    }
+
+                    if (scheduleRestart)
+                    {
+                        TryScheduleRestart(room, code);
                     }
                 };
 
@@ -330,6 +368,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 }
 
                 _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, IdleSinceUtc: null);
+                _restartByRoom.Remove(room);
                 UpsertRuntimeState(room, _ => new VideoPeerRuntimeState(
                     room,
                     NormalizeSourceModeForState(_opt.WebRtcVideoPeerSourceMode),
@@ -414,16 +453,21 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 return (true, stoppedByPid, null);
             }
             lockTaken = true;
+            _manualStopRooms.Add(room);
 
             if (!_procs.TryGetValue(room, out tracked))
             {
                 _runtimeByRoom.Remove(room);
+                _restartByRoom.Remove(room);
+                _startRequestByRoom.Remove(room);
                 ReleaseManualStopsForRoom(room);
                 return (true, stoppedByPid, null);
             }
 
             _procs.Remove(room);
             _runtimeByRoom.Remove(room);
+            _restartByRoom.Remove(room);
+            _startRequestByRoom.Remove(room);
             ReleaseManualStopsForRoom(room);
         }
         finally
@@ -1235,6 +1279,131 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             return null;
         }
         return NormalizeSourceModeForState(mode);
+    }
+
+    private bool ShouldScheduleRestart_NoLock(string room, int exitCode)
+    {
+        if (exitCode == 0)
+        {
+            return false;
+        }
+        if (!_opt.WebRtcVideoPeerAutoStart)
+        {
+            return false;
+        }
+        if (_manualStopRooms.Contains(room))
+        {
+            _manualStopRooms.Remove(room);
+            return false;
+        }
+        return true;
+    }
+
+    private static int GetRestartDelayMs(int attempts)
+    {
+        int capped = Math.Max(1, Math.Min(16, attempts));
+        long d = RestartBaseDelayMs * (1L << (capped - 1));
+        if (d > RestartMaxDelayMs) d = RestartMaxDelayMs;
+        return (int)d;
+    }
+
+    private void TryScheduleRestart(string room, int exitCode)
+    {
+        int attempts;
+        int delayMs;
+        StartRequestState? request;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        lock (_lock)
+        {
+            _startRequestByRoom.TryGetValue(room, out request);
+            if (_restartByRoom.TryGetValue(room, out var prev) &&
+                (now - prev.LastFailureAtUtc).TotalSeconds <= RestartFailureWindowSeconds)
+            {
+                attempts = prev.Attempts + 1;
+            }
+            else
+            {
+                attempts = 1;
+            }
+            _restartByRoom[room] = new RestartState(attempts, now);
+            delayMs = GetRestartDelayMs(attempts);
+        }
+
+        if (attempts > RestartMaxAttempts)
+        {
+            ServerEventLog.Log("webrtc.videopeer", "autorestart_limit", new
+            {
+                room,
+                exitCode,
+                attempts,
+                maxAttempts = RestartMaxAttempts
+            });
+            return;
+        }
+
+        ServerEventLog.Log("webrtc.videopeer", "autorestart_scheduled", new
+        {
+            room,
+            exitCode,
+            attempts,
+            delayMs
+        });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delayMs).ConfigureAwait(false);
+                lock (_lock)
+                {
+                    if (_procs.ContainsKey(room))
+                    {
+                        return;
+                    }
+                    if (_manualStopRooms.Contains(room))
+                    {
+                        _manualStopRooms.Remove(room);
+                        return;
+                    }
+                }
+
+                var started = EnsureStarted(
+                    room,
+                    request?.QualityPreset,
+                    request?.BitrateKbps,
+                    request?.Fps,
+                    request?.ImageQuality,
+                    request?.CaptureInput,
+                    request?.Encoder,
+                    request?.Codec);
+
+                if (started.ok)
+                {
+                    lock (_lock)
+                    {
+                        _restartByRoom.Remove(room);
+                    }
+                    ServerEventLog.Log("webrtc.videopeer", "autorestart_ok", new
+                    {
+                        room,
+                        started = started.started,
+                        pid = started.pid
+                    });
+                }
+                else
+                {
+                    ServerEventLog.Log("webrtc.videopeer", "autorestart_failed", new
+                    {
+                        room,
+                        error = started.error
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                ServerEventLog.Log("webrtc.videopeer", "autorestart_error", new { room, error = ex.Message });
+            }
+        });
     }
 
     private void UpsertRuntimeState(string room, Func<VideoPeerRuntimeState?, VideoPeerRuntimeState> build)

@@ -11,14 +11,21 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
     // Give helper enough time to fail fast on missing deps/toolchain issues.
     // 300ms is too optimistic on some Windows/Go setups.
     private const int EarlyExitProbeMs = 1500;
+    private const int RestartMaxAttempts = 6;
+    private const int RestartBaseDelayMs = 1000;
+    private const int RestartMaxDelayMs = 30000;
+    private const int RestartFailureWindowSeconds = 180;
 
     private readonly Options _opt;
     private readonly IWebRtcSignalingService _signaling;
     private readonly object _lock = new();
     private readonly Dictionary<string, ProcState> _procs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _manualStopRooms = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RestartState> _restartByRoom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _cleanupTimer;
 
     private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc, DateTimeOffset? IdleSinceUtc);
+    private sealed record RestartState(int Attempts, DateTimeOffset LastFailureAtUtc);
 
     /// <summary>
     /// Creates an instance.
@@ -60,6 +67,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
             {
                 try
                 {
+                    _manualStopRooms.Add(kvp.Key);
                     if (!kvp.Value.Process.HasExited)
                     {
                         kvp.Value.Process.Kill(entireProcessTree: true);
@@ -70,6 +78,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 {
                     try { kvp.Value.Process.Dispose(); } catch { }
                     _procs.Remove(kvp.Key);
+                    _restartByRoom.Remove(kvp.Key);
                     if (!string.IsNullOrWhiteSpace(toolDir))
                     {
                         DeletePidFile(toolDir!, kvp.Key);
@@ -92,6 +101,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
 
         lock (_lock)
         {
+            _manualStopRooms.Remove(room);
             int max = _opt.WebRtcRoomsMaxHelpers;
             if (max > 0 && !_procs.ContainsKey(room) && _procs.Count >= max)
             {
@@ -102,11 +112,13 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
             {
                 if (!existing.Process.HasExited)
                 {
+                    _restartByRoom.Remove(room);
                     return (true, false, existing.Process.Id, null);
                 }
 
                 try { existing.Process.Dispose(); } catch { }
                 _procs.Remove(room);
+                _restartByRoom.Remove(room);
             }
 
             if (!TryFindToolDir(out string toolDir, out string toolHint))
@@ -141,6 +153,7 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                     try { code = p.ExitCode; } catch { }
                     ServerEventLog.Log("webrtc.peer", "exit", new { room, code });
                     DeletePidFile(toolDir, room);
+                    bool scheduleRestart = false;
 
                     lock (_lock)
                     {
@@ -148,6 +161,12 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                         {
                             _procs.Remove(room);
                         }
+                        scheduleRestart = ShouldScheduleRestart_NoLock(room, code);
+                    }
+
+                    if (scheduleRestart)
+                    {
+                        TryScheduleRestart(room, code);
                     }
                 };
 
@@ -178,10 +197,18 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
 
                     ServerEventLog.Log("webrtc.peer", "autostart_failed", new { room, reason = "exited_early", code, probeMs = EarlyExitProbeMs });
                     try { p.Dispose(); } catch { }
+                    lock (_lock)
+                    {
+                        if (ShouldScheduleRestart_NoLock(room, code))
+                        {
+                            _ = Task.Run(() => TryScheduleRestart(room, code));
+                        }
+                    }
                     return (false, false, null, $"exit_{code}");
                 }
 
                 _procs[room] = new ProcState(p, DateTimeOffset.UtcNow, IdleSinceUtc: null);
+                _restartByRoom.Remove(room);
                 ServerEventLog.Log("webrtc.peer", "autostart_started", new
                 {
                     serverUrl,
@@ -235,6 +262,8 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
                 return (true, stoppedByPid, null);
             }
             lockTaken = true;
+            _manualStopRooms.Add(room);
+            _restartByRoom.Remove(room);
 
             if (!_procs.TryGetValue(room, out tracked))
             {
@@ -289,6 +318,120 @@ public sealed class WebRtcControlPeerSupervisor : IDisposable
         }
 
         return (true, stoppedTracked || stoppedByPid, null);
+    }
+
+    private bool ShouldScheduleRestart_NoLock(string room, int exitCode)
+    {
+        if (exitCode == 0)
+        {
+            return false;
+        }
+        if (!_opt.WebRtcControlPeerAutoStart)
+        {
+            return false;
+        }
+        if (_manualStopRooms.Contains(room))
+        {
+            _manualStopRooms.Remove(room);
+            return false;
+        }
+        return true;
+    }
+
+    private static int GetRestartDelayMs(int attempts)
+    {
+        int capped = Math.Max(1, Math.Min(16, attempts));
+        long d = RestartBaseDelayMs * (1L << (capped - 1));
+        if (d > RestartMaxDelayMs) d = RestartMaxDelayMs;
+        return (int)d;
+    }
+
+    private void TryScheduleRestart(string room, int exitCode)
+    {
+        int attempts;
+        int delayMs;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        lock (_lock)
+        {
+            if (_restartByRoom.TryGetValue(room, out var prev) &&
+                (now - prev.LastFailureAtUtc).TotalSeconds <= RestartFailureWindowSeconds)
+            {
+                attempts = prev.Attempts + 1;
+            }
+            else
+            {
+                attempts = 1;
+            }
+            _restartByRoom[room] = new RestartState(attempts, now);
+            delayMs = GetRestartDelayMs(attempts);
+        }
+
+        if (attempts > RestartMaxAttempts)
+        {
+            ServerEventLog.Log("webrtc.peer", "autorestart_limit", new
+            {
+                room,
+                exitCode,
+                attempts,
+                maxAttempts = RestartMaxAttempts
+            });
+            return;
+        }
+
+        ServerEventLog.Log("webrtc.peer", "autorestart_scheduled", new
+        {
+            room,
+            exitCode,
+            attempts,
+            delayMs
+        });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delayMs).ConfigureAwait(false);
+                lock (_lock)
+                {
+                    if (_procs.ContainsKey(room))
+                    {
+                        return;
+                    }
+                    if (_manualStopRooms.Contains(room))
+                    {
+                        _manualStopRooms.Remove(room);
+                        return;
+                    }
+                }
+
+                var started = EnsureStarted(room);
+                if (started.ok)
+                {
+                    lock (_lock)
+                    {
+                        _restartByRoom.Remove(room);
+                    }
+                    ServerEventLog.Log("webrtc.peer", "autorestart_ok", new
+                    {
+                        room,
+                        started = started.started,
+                        pid = started.pid
+                    });
+                }
+                else
+                {
+                    ServerEventLog.Log("webrtc.peer", "autorestart_failed", new
+                    {
+                        room,
+                        error = started.error
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                ServerEventLog.Log("webrtc.peer", "autorestart_error", new { room, error = ex.Message });
+            }
+        });
     }
 
     /// <summary>

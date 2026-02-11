@@ -81,6 +81,34 @@ Notes:
 - Helper keeps DataChannel echo for control/debug payloads.
 - Helper process is long-running and reconnects to signaling after transient transport failures.
 
+## Stabilization Status
+
+Implemented:
+
+- Server-side fallback path `capture -> testsrc` with runtime status surfaced in API/UI:
+  - `fallbackUsed`
+  - `lastVideoError`
+  - `sourceModeRequested`
+  - `sourceModeActive`
+- Video room runtime status endpoint:
+  - `GET /status/webrtc/video/peers/{room}`
+  - includes `running`, `pid`, `startedAtUtc`, `updatedAtUtc`, `measuredFps`, `measuredKbps`, `frames`, `packets`.
+- Helper lifecycle hardening:
+  - early-exit probe
+  - restart policy with backoff and limits
+  - room cleanup reconciliation on helper stop/delete races.
+- Integration test coverage for key failure/recovery paths (see `Tools/HidControlServer.Tests/WebRtcIntegrationTests.cs`):
+  - helper start timeout propagation
+  - room list lag versus peer/runtime snapshots
+  - fallback status persistence
+  - delete reconcile when backend stop reports transient failure.
+
+Run all tests:
+
+```powershell
+.\run_all_tests.ps1
+```
+
 ## Quality Presets
 
 Preset tuning is intentionally different for throughput-oriented low quality versus
@@ -135,3 +163,40 @@ Enable persistence explicitly with:
 
 - Hardware encoder availability depends on OS/driver/FFmpeg build.
 - Capture-device capability limits (resolution/fps/format) still dominate final output quality.
+
+## Runbook
+
+### No video in player
+
+1. Check helper runtime status:
+   - `GET /status/webrtc/video/peers/{room}`
+2. If `fallbackUsed=true`, inspect `lastVideoError`.
+3. Verify browser logs contain `pc.track` and `pc.connectionState=connected`.
+
+### Device busy
+
+Symptoms:
+- FFmpeg logs contain `Could not run graph` / `device already in use`.
+
+Actions:
+1. Stop legacy capture/ffmpeg pipelines for the same source.
+2. Delete stale video rooms in UI or via `DELETE /status/webrtc/video/rooms/{room}`.
+3. Retry with `capture` mode.
+
+### Socket refused / bind error
+
+Symptoms:
+- `connectex: No connection could be made...`
+- Kestrel bind error on `https://localhost:55484`.
+
+Actions:
+1. Ensure only one server instance is running.
+2. Free/replace occupied ports (`8080`, `55484`) and restart.
+3. Re-check server startup logs before reconnecting clients.
+
+### Useful diagnostics
+
+- Room list: `GET /status/webrtc/video/rooms`
+- Room runtime: `GET /status/webrtc/video/peers/{room}`
+- ICE config: `GET /status/webrtc/ice`
+- Local tests: `.\run_all_tests.ps1`

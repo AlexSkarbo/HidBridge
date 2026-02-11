@@ -111,6 +111,24 @@ app.MapGet("/", () =>
 	      align-items: center;
 	    }
 	    .rtc-qgrid > * { min-width: 0; }
+      .rtc-video-surface {
+        position: relative;
+        width: min(100%, 960px);
+      }
+      .rtc-focus-hint {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.62);
+        color: #fff;
+        font-size: 12px;
+        pointer-events: none;
+        z-index: 21;
+        display: none;
+      }
 	  </style>
 </head>
 <body>
@@ -270,10 +288,14 @@ app.MapGet("/", () =>
 	    <div class="card" id="rtcVideoPane" style="display:none">
 	      <h4>Video Preview</h4>
       <div class="row">
-        <video id="rtcRemoteVideo" autoplay playsinline muted tabindex="0" style="width: min(100%, 960px); aspect-ratio: 16 / 9; background: #111; border: 1px solid #2d2d2d; border-radius: 10px;"></video>
+        <div id="rtcVideoSurface" class="rtc-video-surface">
+          <video id="rtcRemoteVideo" autoplay playsinline muted tabindex="0" style="width: 100%; aspect-ratio: 16 / 9; background: #111; border: 1px solid #2d2d2d; border-radius: 10px;"></video>
+          <div id="rtcFocusHint" class="rtc-focus-hint" aria-hidden="true">Click to focus remote input</div>
+        </div>
       </div>
       <div class="row">
         <button id="rtcVideoFullscreen" type="button">Fullscreen</button>
+        <button id="rtcVideoFitFill" type="button">Fit</button>
         <button id="rtcVideoInputToggle" type="button">Enable Remote Input</button>
         <span id="rtcVideoInputState" class="muted">remote input: off</span>
       </div>
@@ -416,7 +438,9 @@ app.MapGet("/", () =>
       "NumpadDivide": 84, "NumpadMultiply": 85, "NumpadSubtract": 86, "NumpadAdd": 87, "NumpadEnter": 88,
       "Numpad1": 89, "Numpad2": 90, "Numpad3": 91, "Numpad4": 92, "Numpad5": 93, "Numpad6": 94, "Numpad7": 95, "Numpad8": 96, "Numpad9": 97, "Numpad0": 98,
       "NumpadDecimal": 99,
-      "ContextMenu": 101
+      "ContextMenu": 101,
+      "ControlLeft": 224, "ShiftLeft": 225, "AltLeft": 226, "MetaLeft": 227,
+      "ControlRight": 228, "ShiftRight": 229, "AltRight": 230, "MetaRight": 231
     };
 
     function modsFromEvent(e) {
@@ -475,13 +499,16 @@ app.MapGet("/", () =>
 	    const rtcMouseMoveBtn = document.getElementById("rtcMouseMoveBtn");
 	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
 	    const rtcVideoPane = document.getElementById("rtcVideoPane");
+	    const rtcVideoSurface = document.getElementById("rtcVideoSurface");
 	    const rtcRemoteVideo = document.getElementById("rtcRemoteVideo");
 	    const rtcVideoMeta = document.getElementById("rtcVideoMeta");
 	    const rtcVideoStability = document.getElementById("rtcVideoStability");
 	    const rtcVideoPerf = document.getElementById("rtcVideoPerf");
 	    const rtcVideoFullscreen = document.getElementById("rtcVideoFullscreen");
+	    const rtcVideoFitFill = document.getElementById("rtcVideoFitFill");
 	    const rtcVideoInputToggle = document.getElementById("rtcVideoInputToggle");
 	    const rtcVideoInputState = document.getElementById("rtcVideoInputState");
+      const rtcFocusHint = document.getElementById("rtcFocusHint");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
 	    // Defaults are intentionally minimal.
 	    // Default values are overwritten by /api/webrtc/config on page load. Keep them small for fast fail on LAN.
@@ -492,33 +519,103 @@ app.MapGet("/", () =>
 	    let rtcMoveTimer = null;
 	    let rtcLastMouseX = null;
 	    let rtcLastMouseY = null;
+      let rtcRemoteInputFocused = false;
+      const rtcHeldButtons = new Set();
+      const rtcPressedCodes = new Set();
+      let rtcVideoFitMode = "fit"; // fit=contain, fill=cover
 
-	    function setRemoteInputEnabled(v) {
+      function mouseButtonName(button) {
+        if (button === 0) return "left";
+        if (button === 1) return "middle";
+        if (button === 2) return "right";
+        if (button === 3) return "back";
+        if (button === 4) return "forward";
+        return null;
+      }
+
+      function buildKeyboardReportFromPressed() {
+        let mods = 0;
+        const keys = [];
+        for (const code of rtcPressedCodes.values()) {
+          const usage = codeToUsage[code];
+          if (usage === undefined) continue;
+          if (usage >= 224 && usage <= 231) {
+            mods |= (1 << (usage - 224));
+            continue;
+          }
+          if (!keys.includes(usage)) keys.push(usage);
+          if (keys.length >= 6) break;
+        }
+        return { mods, keys };
+      }
+
+      async function syncKeyboardReport() {
+        const rpt = buildKeyboardReportFromPressed();
+        await postQuiet("/api/keyboard/report", { mods: rpt.mods, keys: rpt.keys, applyMapping: true });
+      }
+
+      async function releaseHeldRemoteInput() {
+        try {
+          for (const b of Array.from(rtcHeldButtons)) {
+            await postQuiet("/api/mouse/button", { button: b, down: false });
+          }
+          rtcHeldButtons.clear();
+          rtcPressedCodes.clear();
+          await postQuiet("/api/keyboard/report", { mods: 0, keys: [], applyMapping: true });
+        } catch {
+          rtcHeldButtons.clear();
+          rtcPressedCodes.clear();
+        }
+      }
+
+      function canHandleRemoteInput() {
+        return rtcRemoteInputEnabled && getMode() === "video" && (rtcRemoteInputFocused || document.pointerLockElement === rtcRemoteVideo);
+      }
+
+      function updateRemoteInputUiState() {
+        if (!rtcVideoInputState) return;
+        if (!rtcRemoteInputEnabled) {
+          rtcVideoInputState.textContent = "remote input: off";
+        } else if (canHandleRemoteInput()) {
+          rtcVideoInputState.textContent = "remote input: on (focused)";
+        } else {
+          rtcVideoInputState.textContent = "remote input: on (click video to focus)";
+        }
+        if (rtcFocusHint) {
+          rtcFocusHint.style.display = (rtcRemoteInputEnabled && !canHandleRemoteInput()) ? "block" : "none";
+        }
+      }
+
+	    async function setRemoteInputEnabled(v) {
 	      rtcRemoteInputEnabled = !!v;
+        if (!rtcRemoteInputEnabled) rtcRemoteInputFocused = false;
 	      if (rtcVideoInputToggle) {
 	        rtcVideoInputToggle.textContent = rtcRemoteInputEnabled ? "Disable Remote Input" : "Enable Remote Input";
 	      }
-	      if (rtcVideoInputState) {
-	        rtcVideoInputState.textContent = rtcRemoteInputEnabled ? "remote input: on (video focused)" : "remote input: off";
-	      }
 	      if (!rtcRemoteInputEnabled) {
-	        rtcLastMouseX = null;
-	        rtcLastMouseY = null;
+          rtcLastMouseX = null;
+          rtcLastMouseY = null;
+          if (document.pointerLockElement === rtcRemoteVideo) {
+            try { document.exitPointerLock(); } catch {}
+          }
+          await releaseHeldRemoteInput();
 	      }
 	      if (rtcRemoteVideo) {
 	        rtcRemoteVideo.style.cursor = rtcRemoteInputEnabled ? "crosshair" : "default";
 	      }
+        updateRemoteInputUiState();
 	    }
 
 	    async function postQuiet(path, payload) {
 	      try {
-	        await fetch(path, {
+	        const r = await fetch(path, {
 	          method: "POST",
 	          headers: { "Content-Type": "application/json" },
 	          body: JSON.stringify(payload || {})
 	        });
+          return r.ok;
 	      } catch {
-	        // Best-effort control path.
+	        return false;
 	      }
 	    }
 
@@ -699,6 +796,37 @@ app.MapGet("/", () =>
 	      return x === "video" || x.startsWith("hb-v-") || x.startsWith("video-");
 	    }
 	    function getMode() { return (document.getElementById("rtcMode").value || "control"); }
+      function applyVideoFitMode() {
+        if (!rtcRemoteVideo) return;
+        rtcRemoteVideo.style.objectFit = rtcVideoFitMode === "fill" ? "cover" : "contain";
+        if (rtcVideoFitFill) rtcVideoFitFill.textContent = rtcVideoFitMode === "fill" ? "Fill" : "Fit";
+      }
+      function saveRtcVideoPrefs() {
+        try {
+          const payload = {
+            quality: document.getElementById("rtcVideoQuality")?.value || "balanced",
+            imageQuality: document.getElementById("rtcVideoImageQuality")?.value || "",
+            bitrateKbps: document.getElementById("rtcVideoBitrateKbps")?.value || "",
+            encoder: document.getElementById("rtcVideoEncoder")?.value || "cpu",
+            codec: document.getElementById("rtcVideoCodec")?.value || "vp8",
+            captureInput: document.getElementById("rtcVideoCaptureInput")?.value || "",
+            captureMode: document.getElementById("rtcVideoCaptureMode")?.value || "",
+            fitMode: rtcVideoFitMode
+          };
+          localStorage.setItem("hidbridge_rtc_video_prefs", JSON.stringify(payload));
+        } catch {}
+      }
+      function loadRtcVideoPrefs() {
+        try {
+          const raw = localStorage.getItem("hidbridge_rtc_video_prefs");
+          if (!raw) return null;
+          const p = JSON.parse(raw);
+          if (!p || typeof p !== "object") return null;
+          return p;
+        } catch {
+          return null;
+        }
+      }
 	    function isLanOrLocalHost(hostname) {
 	      const h = String(hostname || "").trim().toLowerCase();
 	      if (!h) return false;
@@ -824,6 +952,11 @@ app.MapGet("/", () =>
 	      if (prev && Array.from(sel.options).some(o => o.value === prev)) {
 	        sel.value = prev;
 	      }
+	      const prefs = loadRtcVideoPrefs();
+	      if (prefs && prefs.captureMode && Array.from(sel.options).some(o => o.value === String(prefs.captureMode))) {
+	        sel.value = String(prefs.captureMode);
+	      }
+	      saveRtcVideoPrefs();
 	      await refreshVideoEncoders();
 	    }
 	    async function refreshVideoEncoders() {
@@ -865,6 +998,11 @@ app.MapGet("/", () =>
 	      } else {
 	        sel.value = sel.options[0].value;
 	      }
+	      const prefs = loadRtcVideoPrefs();
+	      if (prefs && prefs.encoder && Array.from(sel.options).some(o => o.value.toLowerCase() === String(prefs.encoder).toLowerCase())) {
+	        sel.value = String(prefs.encoder);
+	      }
+	      saveRtcVideoPrefs();
 	    }
 	    async function refreshVideoCaptureDevices() {
 	      const sel = document.getElementById("rtcVideoCaptureInput");
@@ -896,6 +1034,10 @@ app.MapGet("/", () =>
 	      } catch {}
 	      if (prev && Array.from(sel.options).some(o => o.value === prev)) {
 	        sel.value = prev;
+	      }
+	      const prefs = loadRtcVideoPrefs();
+	      if (prefs && prefs.captureInput && Array.from(sel.options).some(o => o.value === String(prefs.captureInput))) {
+	        sel.value = String(prefs.captureInput);
 	      }
 	      await refreshVideoCaptureModes();
 	    }
@@ -977,6 +1119,15 @@ app.MapGet("/", () =>
 	      });
 	    }
 	    applyDefaultVideoQualityForLan();
+	    const rtcLoadedPrefs = loadRtcVideoPrefs();
+	    if (rtcLoadedPrefs) {
+	      if (document.getElementById("rtcVideoQuality")) document.getElementById("rtcVideoQuality").value = String(rtcLoadedPrefs.quality || document.getElementById("rtcVideoQuality").value);
+	      if (document.getElementById("rtcVideoImageQuality")) document.getElementById("rtcVideoImageQuality").value = String(rtcLoadedPrefs.imageQuality || "");
+	      if (document.getElementById("rtcVideoBitrateKbps")) document.getElementById("rtcVideoBitrateKbps").value = String(rtcLoadedPrefs.bitrateKbps || "");
+	      if (document.getElementById("rtcVideoCodec")) document.getElementById("rtcVideoCodec").value = String(rtcLoadedPrefs.codec || document.getElementById("rtcVideoCodec").value);
+	      rtcVideoFitMode = (String(rtcLoadedPrefs.fitMode || "fit").toLowerCase() === "fill") ? "fill" : "fit";
+	    }
+      applyVideoFitMode();
 	    updateRtcModeUi();
 	    resetWebRtcClient();
 	    setRemoteInputEnabled(false);
@@ -994,49 +1145,97 @@ app.MapGet("/", () =>
 	        }
 	      });
 	    }
+      if (rtcVideoFitFill) {
+        rtcVideoFitFill.addEventListener("click", () => {
+          rtcVideoFitMode = rtcVideoFitMode === "fit" ? "fill" : "fit";
+          applyVideoFitMode();
+          saveRtcVideoPrefs();
+        });
+      }
 	    if (rtcVideoInputToggle) {
-	      rtcVideoInputToggle.addEventListener("click", () => setRemoteInputEnabled(!rtcRemoteInputEnabled));
+	      rtcVideoInputToggle.addEventListener("click", async () => { await setRemoteInputEnabled(!rtcRemoteInputEnabled); });
 	    }
 	    if (rtcRemoteVideo) {
-	      rtcRemoteVideo.addEventListener("click", () => {
+	      rtcRemoteVideo.addEventListener("click", async () => {
+          if (!rtcRemoteInputEnabled || getMode() !== "video") return;
+          rtcRemoteInputFocused = true;
 	        try { rtcRemoteVideo.focus(); } catch {}
+          try { if (document.pointerLockElement !== rtcRemoteVideo) await rtcRemoteVideo.requestPointerLock(); } catch {}
+          updateRemoteInputUiState();
 	      });
 	      rtcRemoteVideo.addEventListener("contextmenu", (e) => {
 	        if (rtcRemoteInputEnabled) e.preventDefault();
 	      });
-	      rtcRemoteVideo.addEventListener("mousemove", (e) => {
-	        if (!rtcRemoteInputEnabled || getMode() !== "video") return;
-	        if (rtcLastMouseX == null || rtcLastMouseY == null) {
-	          rtcLastMouseX = e.clientX;
-	          rtcLastMouseY = e.clientY;
-	          return;
-	        }
-	        const dx = e.clientX - rtcLastMouseX;
-	        const dy = e.clientY - rtcLastMouseY;
-	        rtcLastMouseX = e.clientX;
-	        rtcLastMouseY = e.clientY;
-	        queueMouseMove(dx, dy);
-	      });
+      rtcRemoteVideo.addEventListener("mousemove", (e) => {
+        if (!canHandleRemoteInput()) return;
+        const mx = Number.isFinite(e.movementX) ? e.movementX : (rtcLastMouseX == null ? 0 : (e.clientX - rtcLastMouseX));
+        const my = Number.isFinite(e.movementY) ? e.movementY : (rtcLastMouseY == null ? 0 : (e.clientY - rtcLastMouseY));
+        rtcLastMouseX = e.clientX;
+        rtcLastMouseY = e.clientY;
+        queueMouseMove(mx, my);
+      });
 	      rtcRemoteVideo.addEventListener("mouseleave", () => {
 	        rtcLastMouseX = null;
 	        rtcLastMouseY = null;
 	      });
-	      rtcRemoteVideo.addEventListener("mousedown", (e) => {
-	        if (!rtcRemoteInputEnabled || getMode() !== "video") return;
-	        e.preventDefault();
-	        const button = (e.button === 2) ? "right" : (e.button === 1 ? "middle" : "left");
-	        postQuiet("/api/mouse/click", { button });
-	      });
-	      rtcRemoteVideo.addEventListener("keydown", (e) => {
-	        if (!rtcRemoteInputEnabled || getMode() !== "video") return;
-	        if (e.repeat) return;
-	        const chord = keyboardChordFromEvent(e);
-	        if (!chord) return;
-	        e.preventDefault();
-	        e.stopPropagation();
-	        postQuiet("/api/keyboard/chord", chord);
+        rtcRemoteVideo.addEventListener("blur", () => {
+          if (!rtcRemoteInputEnabled || getMode() !== "video") return;
+          if (document.pointerLockElement === rtcRemoteVideo) return;
+          rtcRemoteInputFocused = false;
+          updateRemoteInputUiState();
+          releaseHeldRemoteInput();
 	      });
 	    }
+
+      document.addEventListener("pointerlockchange", () => {
+        rtcRemoteInputFocused = document.pointerLockElement === rtcRemoteVideo;
+        updateRemoteInputUiState();
+        if (!rtcRemoteInputFocused) releaseHeldRemoteInput();
+      });
+
+      window.addEventListener("mousedown", (e) => {
+        if (!canHandleRemoteInput()) return;
+        const button = mouseButtonName(e.button);
+        if (!button) return;
+        e.preventDefault();
+        rtcHeldButtons.add(button);
+        postQuiet("/api/mouse/button", { button, down: true });
+      }, { capture: true });
+
+      window.addEventListener("mouseup", (e) => {
+        if (!canHandleRemoteInput()) return;
+        const button = mouseButtonName(e.button);
+        if (!button) return;
+        e.preventDefault();
+        rtcHeldButtons.delete(button);
+        postQuiet("/api/mouse/button", { button, down: false });
+      }, { capture: true });
+
+      window.addEventListener("wheel", (e) => {
+        if (!canHandleRemoteInput()) return;
+        e.preventDefault();
+        const direction = Math.sign(e.deltaY);
+        if (direction !== 0) postQuiet("/api/mouse/wheel", { delta: direction });
+      }, { passive: false, capture: true });
+
+      window.addEventListener("keydown", async (e) => {
+        if (!canHandleRemoteInput()) return;
+        if (!(e.code in codeToUsage)) return;
+        if (e.repeat && rtcPressedCodes.has(e.code)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        rtcPressedCodes.add(e.code);
+        await syncKeyboardReport();
+      }, { capture: true });
+
+      window.addEventListener("keyup", async (e) => {
+        if (!canHandleRemoteInput()) return;
+        if (!(e.code in codeToUsage)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        rtcPressedCodes.delete(e.code);
+        await syncKeyboardReport();
+      }, { capture: true });
 
 	    async function refreshWebRtcConfig() {
 	      try {
@@ -1100,6 +1299,15 @@ app.MapGet("/", () =>
 	      }
 	    }
 
+      function classifyVideoError(errText) {
+        const e = String(errText || "").toLowerCase();
+        if (!e) return "";
+        if (e.includes("device already in use") || e.includes("could not run graph") || e.includes("device_busy")) return "device_busy";
+        if (e.includes("invalid argument") || e.includes("error parsing options") || e.includes("ffmpeg args")) return "ffmpeg_args_invalid";
+        if (e.includes("signaling") || e.includes("timeout") || e.includes("refused")) return "signaling_timeout";
+        return "unknown";
+      }
+
 	    function renderVideoPeerRuntime(j) {
 	      if (!rtcVideoMeta) return;
 	      if (!j || !j.ok) {
@@ -1111,8 +1319,10 @@ app.MapGet("/", () =>
 	      const modeAct = j.sourceModeActive || "?";
 	      const running = j.running ? "running" : "stopped";
 	      const fallback = j.fallbackUsed ? "fallback=yes" : "fallback=no";
+        const errClass = classifyVideoError(j.lastVideoError);
 	      const err = j.lastVideoError ? ` error=${j.lastVideoError}` : "";
-	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${err}`;
+        const errClassText = errClass ? ` class=${errClass}` : "";
+	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${errClassText}${err}`;
 	      if (rtcVideoStability) {
 	        const parts = [];
 	        if (typeof j.measuredFps === "number" && j.measuredFps > 0) parts.push(`fps=${j.measuredFps.toFixed(1)}`);
@@ -1136,6 +1346,24 @@ app.MapGet("/", () =>
 	        renderVideoPeerRuntime(j);
 	        rtcLog({ webrtc: "ui.video_runtime", room: target, payload: j });
 	      } catch {}
+	    }
+
+	    async function getVideoRuntimeState(room) {
+	      const target = (room || "").trim();
+	      if (!isVideoRoomId(target)) return null;
+	      try {
+	        const res = await fetch("/api/webrtc/video/peers/" + encodeURIComponent(target), { cache: "no-store" });
+	        if (!res.ok) return null;
+	        const j = await res.json().catch(() => null);
+	        if (!j || !j.ok) return null;
+	        return {
+	          running: !!j.running,
+	          fallbackUsed: !!j.fallbackUsed,
+	          sourceModeActive: j.sourceModeActive || null
+	        };
+	      } catch {
+	        return null;
+	      }
 	    }
 
 	    document.getElementById("rtcRefreshRooms").addEventListener("click", async () => {
@@ -1266,10 +1494,17 @@ app.MapGet("/", () =>
 	    refreshWebRtcConfig();
 	    refreshVideoCaptureDevices();
 	    refreshRooms();
+      document.getElementById("rtcVideoQuality")?.addEventListener("change", saveRtcVideoPrefs);
+      document.getElementById("rtcVideoImageQuality")?.addEventListener("input", saveRtcVideoPrefs);
+      document.getElementById("rtcVideoBitrateKbps")?.addEventListener("input", saveRtcVideoPrefs);
+      document.getElementById("rtcVideoEncoder")?.addEventListener("change", saveRtcVideoPrefs);
+      document.getElementById("rtcVideoCodec")?.addEventListener("change", saveRtcVideoPrefs);
 	    document.getElementById("rtcVideoCaptureInput")?.addEventListener("change", () => {
+	      saveRtcVideoPrefs();
 	      refreshVideoCaptureModes();
 	    });
 	    document.getElementById("rtcVideoCaptureMode")?.addEventListener("change", () => {
+	      saveRtcVideoPrefs();
 	      refreshVideoEncoders();
 	    });
 	    document.getElementById("rtcMode").addEventListener("change", () => {
@@ -1324,6 +1559,30 @@ app.MapGet("/", () =>
 	        const wanted = (room || "").trim();
 	        const wantedLc = wanted.toLowerCase();
 	        const prefix = getRoomsApiPrefix(wanted);
+	        const recoverVideoTimeout = async () => {
+	          if (!isVideoRoomId(wanted)) return false;
+	          for (let i = 0; i < 8; i++) {
+	            const runtime = await getVideoRuntimeState(wanted);
+	            if (runtime && runtime.running) {
+	              rtcLog({ webrtc: "ui.ensure_helper_timeout_recovered_runtime", room: wanted, attempt: i + 1 });
+	              return true;
+	            }
+	            const rr = await getRoomState(wanted);
+	            if (rr && rr.hasHelper) {
+	              rtcLog({ webrtc: "ui.ensure_helper_timeout_recovered_roomstate", room: wanted, attempt: i + 1 });
+	              return true;
+	            }
+	            await new Promise(r => setTimeout(r, 500));
+	          }
+	          return false;
+	        };
+	        if (isVideoRoomId(wanted)) {
+	          const runtime = await getVideoRuntimeState(wanted);
+	          if (runtime && runtime.running) {
+	            rtcLog({ webrtc: "ui.ensure_helper_runtime", room: wanted, endpoint: prefix, runtime });
+	            return true;
+	          }
+	        }
 
 	        // "control" is expected to exist from startup defaults; do not create here to avoid accidental room drift.
 	        if (wantedLc === "control") {
@@ -1384,6 +1643,13 @@ app.MapGet("/", () =>
 	              return true;
 	            }
 	          }
+	          if (isVideoRoomId(wanted)) {
+	            const runtime = await getVideoRuntimeState(wanted);
+	            if (runtime && runtime.running) {
+	              rtcLog({ webrtc: "ui.ensure_helper_runtime_existing", room: wanted, endpoint: prefix, runtime });
+	              return true;
+	            }
+	          }
 	        } catch {}
 
 	        const body = isVideoRoomId(wanted)
@@ -1405,6 +1671,7 @@ app.MapGet("/", () =>
 	        const j = await res.json().catch(() => null);
 	        rtcLog({ webrtc: "ui.ensure_helper", room: wanted, endpoint: prefix, payload: j });
 	        if (j && j.ok && j.room && String(j.room).toLowerCase() === wantedLc) return true;
+	        if (j && !j.ok && j.error === "timeout" && await recoverVideoTimeout()) return true;
 	        if (j && j.ok && j.room && String(j.room).toLowerCase() !== wantedLc) {
 	          show({ ok: false, error: "room_mismatch", requested: wanted, actual: j.room });
 	          return false;
@@ -1441,9 +1708,17 @@ app.MapGet("/", () =>
 	      // Fast path to avoid unnecessary waiting when helper is already in room.
 	      const first = await getRoomState(room);
 	      if (first && first.hasHelper && first.peers >= 1) return true;
+	      if (isVideoRoomId(room)) {
+	        const runtime = await getVideoRuntimeState(room);
+	        if (runtime && runtime.running) return true;
+	      }
 	      while (Date.now() - start < timeoutMs) {
 	        const rr = await getRoomState(room);
 	        if (rr && rr.hasHelper && rr.peers >= 1) return true;
+	        if (isVideoRoomId(room)) {
+	          const runtime = await getVideoRuntimeState(room);
+	          if (runtime && runtime.running) return true;
+	        }
 	        const elapsed = Date.now() - start;
 	        const sleepMs = timeoutMs <= 4000 ? 50 : (elapsed < 3000 ? 100 : 150);
 	        await new Promise(r => setTimeout(r, sleepMs));
@@ -1760,7 +2035,7 @@ app.MapGet("/api/webrtc/video/rooms", async (CancellationToken ct) =>
 {
     try
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
         var res = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, ct);
@@ -1780,7 +2055,7 @@ app.MapGet("/api/webrtc/video/peers/{room}", async (string room, CancellationTok
 {
     try
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/video/peers/{Uri.EscapeDataString(room)}";
         using var resp = await http.GetAsync(url, ct);
@@ -1885,7 +2160,7 @@ app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken
     HidControl.Contracts.WebRtcCreateVideoRoomRequest body = new(null, null, null, null, null, null, null, null);
     try
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
         body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct) ?? body;
@@ -1907,7 +2182,7 @@ app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken
         try
         {
             // Best-effort recovery: helper startup may complete while the proxy request times out.
-            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             if (!string.IsNullOrWhiteSpace(token)) probe.DefaultRequestHeaders.Add("X-HID-Token", token);
             var client = new HidControl.ClientSdk.HidControlClient(probe, new Uri(serverUrl));
             var list = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, CancellationToken.None);
@@ -1918,6 +2193,21 @@ app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken
                 if (exists)
                 {
                     return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(true, wanted, false, null, null));
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(wanted))
+            {
+                string statusUrl = $"{serverUrl.TrimEnd('/')}/status/webrtc/video/peers/{Uri.EscapeDataString(wanted)}";
+                using var statusResp = await probe.GetAsync(statusUrl, CancellationToken.None);
+                if (statusResp.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(await statusResp.Content.ReadAsStringAsync(CancellationToken.None));
+                    bool running = doc.RootElement.TryGetProperty("ok", out var okEl) && okEl.GetBoolean()
+                        && doc.RootElement.TryGetProperty("running", out var runEl) && runEl.GetBoolean();
+                    if (running)
+                    {
+                        return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(true, wanted, false, null, null));
+                    }
                 }
             }
         }
@@ -2047,6 +2337,63 @@ app.MapPost("/api/keyboard/chord", async (KeyboardChordRequest req, Cancellation
     });
 });
 
+app.MapPost("/api/keyboard/report", async (KeyboardReportApiRequest req, CancellationToken ct) =>
+{
+    byte mods = req.Mods ?? 0;
+    int[] keys = req.Keys ?? Array.Empty<int>();
+    if (keys.Length > 6)
+    {
+        return Results.BadRequest(new { ok = false, error = "keys max length is 6" });
+    }
+    foreach (int k in keys)
+    {
+        if (k < 0 || k > 255)
+        {
+            return Results.BadRequest(new { ok = false, error = "keys must be 0..255" });
+        }
+    }
+    Uri baseUri = new Uri(serverUrl);
+    string resp = await SendWsOnceAsync(baseUri, token, (ws, c) =>
+        ws.SendKeyboardReportAsync(mods, keys.Select(x => (byte)x).ToArray(), applyMapping: req.ApplyMapping ?? true, itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
+    return Results.Text(resp, "application/json");
+});
+
+app.MapPost("/api/keyboard/down", async (KeyboardPressApiRequest req, CancellationToken ct) =>
+{
+    if (!TryParseByte(req.Usage, out byte usage))
+    {
+        return Results.BadRequest(new { ok = false, error = "usage must be 0..255 (decimal) or 0x.." });
+    }
+    if (!TryParseByte(req.Mods, out byte mods))
+    {
+        return Results.BadRequest(new { ok = false, error = "mods must be 0..255 (decimal) or 0x.." });
+    }
+
+    Uri baseUri = new Uri(serverUrl);
+    string resp = await SendWsOnceAsync(baseUri, token, (ws, c) =>
+        ws.SendKeyboardDownAsync(usage, mods: mods, itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
+
+    return Results.Text(resp, "application/json");
+});
+
+app.MapPost("/api/keyboard/up", async (KeyboardPressApiRequest req, CancellationToken ct) =>
+{
+    if (!TryParseByte(req.Usage, out byte usage))
+    {
+        return Results.BadRequest(new { ok = false, error = "usage must be 0..255 (decimal) or 0x.." });
+    }
+    if (!TryParseByte(req.Mods, out byte mods))
+    {
+        return Results.BadRequest(new { ok = false, error = "mods must be 0..255 (decimal) or 0x.." });
+    }
+
+    Uri baseUri = new Uri(serverUrl);
+    string resp = await SendWsOnceAsync(baseUri, token, (ws, c) =>
+        ws.SendKeyboardUpAsync(usage, mods: mods, itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
+
+    return Results.Text(resp, "application/json");
+});
+
 app.MapPost("/api/mouse/move", async (MouseMoveApiRequest req, CancellationToken ct) =>
 {
     Uri baseUri = new Uri(serverUrl);
@@ -2084,6 +2431,42 @@ app.MapPost("/api/mouse/click", async (MouseClickApiRequest req, CancellationTok
         down = ParseJsonOrString(downResp),
         up = ParseJsonOrString(upResp)
     });
+});
+
+app.MapPost("/api/mouse/button", async (MouseButtonStateApiRequest req, CancellationToken ct) =>
+{
+    string button = string.IsNullOrWhiteSpace(req.Button) ? "left" : req.Button!;
+    bool down = req.Down ?? true;
+    Uri baseUri = new Uri(serverUrl);
+    string resp = await SendWsOnceAsync(baseUri, token, (ws, c) =>
+        ws.SendMouseButtonAsync(button, down, itfSel: req.ItfSel, id: Guid.NewGuid().ToString("N"), ct: c), ct);
+    return Results.Text(resp, "application/json");
+});
+
+app.MapPost("/api/mouse/wheel", async (MouseWheelApiRequest req, CancellationToken ct) =>
+{
+    int delta = req.Delta ?? 0;
+    Uri baseUri = new Uri(serverUrl);
+    Uri wsUri = ToWsUri(baseUri, "/ws/hid");
+
+    await using var ws = new HidControlWsClient();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        ws.SetRequestHeader("X-HID-Token", token!);
+    }
+
+    await ws.ConnectAsync(wsUri, ct);
+    var payload = new
+    {
+        type = "mouse.wheel",
+        id = Guid.NewGuid().ToString("N"),
+        delta,
+        itfSel = req.ItfSel
+    };
+    await ws.SendJsonAsync(payload, null, ct);
+    string resp = await ws.ReceiveTextOnceAsync(ct) ?? "{\"ok\":false,\"error\":\"no_response\"}";
+    await ws.CloseAsync(ct);
+    return Results.Text(resp, "application/json");
 });
 
 // Touch the SDK so the project reference is exercised.
@@ -2151,5 +2534,8 @@ internal sealed record KeyboardShortcutRequest(string Shortcut, int? HoldMs = nu
 internal sealed record KeyboardTextRequest(string? Text, string? Layout = null, byte? ItfSel = null);
 internal sealed record KeyboardPressApiRequest(string? Usage, string? Mods, byte? ItfSel = null);
 internal sealed record KeyboardChordRequest(byte? Mods, int[]? Keys, int? HoldMs = null, byte? ItfSel = null, bool? ApplyMapping = null);
+internal sealed record KeyboardReportApiRequest(byte? Mods, int[]? Keys, byte? ItfSel = null, bool? ApplyMapping = null);
 internal sealed record MouseMoveApiRequest(int? Dx, int? Dy, byte? ItfSel = null);
 internal sealed record MouseClickApiRequest(string? Button, byte? ItfSel = null);
+internal sealed record MouseButtonStateApiRequest(string? Button, bool? Down, byte? ItfSel = null);
+internal sealed record MouseWheelApiRequest(int? Delta, byte? ItfSel = null);

@@ -1,6 +1,9 @@
 using HidControl.Application.Abstractions;
 using HidControl.Application.UseCases.WebRtc;
+using HidControl.UseCases.Video;
 using HidControl.Infrastructure.Services;
+using HidControlServer;
+using HidControlServer.Services;
 using Xunit;
 
 namespace HidControlServer.Tests;
@@ -11,6 +14,8 @@ public sealed class WebRtcIntegrationTests
     {
         private readonly Dictionary<string, int> _peers;
         private readonly HashSet<string> _helperRooms;
+        private readonly Queue<(bool ok, bool started, int? pid, string? error)> _ensureResults = new();
+        private readonly Queue<(bool ok, bool stopped, string? error)> _stopResults = new();
 
         public FakeBackend(string? deviceIdHex = "a1b2c3d4e5f6")
         {
@@ -57,8 +62,12 @@ public sealed class WebRtcIntegrationTests
         public bool StopHelperStopped { get; set; } = true;
 
         public string? StopHelperError { get; set; }
+        public bool EnsureAddsHelperRoom { get; set; } = true;
+        public bool EnsureAddsPeer { get; set; } = true;
 
         public void SetRoomPeers(string room, int peers) => _peers[room] = peers;
+        public void EnqueueEnsureResult(bool ok, bool started, int? pid, string? error) => _ensureResults.Enqueue((ok, started, pid, error));
+        public void EnqueueStopResult(bool ok, bool stopped, string? error) => _stopResults.Enqueue((ok, stopped, error));
 
         public void SetHelperRoom(string room, bool hasHelper)
         {
@@ -82,20 +91,43 @@ public sealed class WebRtcIntegrationTests
         {
             EnsureHelperStartedCalls++;
             LastQualityPreset = qualityPreset;
-            _helperRooms.Add(room);
-            // Simulate helper itself joining as a peer.
-            _peers[room] = Math.Max(_peers.TryGetValue(room, out var c) ? c : 0, 1);
-            return (true, true, 12345, null);
+            var result = _ensureResults.Count > 0
+                ? _ensureResults.Dequeue()
+                : (true, true, 12345, null);
+
+            if (result.ok && EnsureAddsHelperRoom)
+            {
+                _helperRooms.Add(room);
+            }
+            if (result.ok && EnsureAddsPeer)
+            {
+                // Simulate helper itself joining as a peer.
+                _peers[room] = Math.Max(_peers.TryGetValue(room, out var c) ? c : 0, 1);
+            }
+            return result;
         }
 
         public (bool ok, bool stopped, string? error) StopHelper(string room)
         {
             StopHelperCalls++;
             _helperRooms.Remove(room);
+            if (_stopResults.Count > 0)
+            {
+                return _stopResults.Dequeue();
+            }
             return (StopHelperOk, StopHelperStopped, StopHelperError);
         }
 
         public string? GetDeviceIdHex() => DeviceIdHex;
+    }
+
+    private sealed class FakeVideoRuntime : IVideoRuntime
+    {
+        public bool IsManualStop(string id) => false;
+        public void SetManualStop(string id, bool stopped) { }
+        public Task<IReadOnlyList<string>> StopCaptureWorkersAsync(string? id, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        public bool StopFfmpegProcess(string id) => false;
+        public IReadOnlyList<string> StopFfmpegProcesses() => Array.Empty<string>();
     }
 
     [Fact]
@@ -280,6 +312,94 @@ public sealed class WebRtcIntegrationTests
 
         Assert.True(res.Ok);
         Assert.Equal("high", backend.LastQualityPreset);
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_WhenHelperStartTimeout_PropagatesTimeoutError()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        backend.EnqueueEnsureResult(ok: false, started: false, pid: null, error: "timeout");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
+
+        var res = await uc.Execute("hb-v-50443405-timeout", "high", 1500, 30, null, null, "cpu", "h264", CancellationToken.None);
+
+        Assert.False(res.Ok);
+        Assert.False(res.Started);
+        Assert.Equal("timeout", res.Error);
+        Assert.Equal(1, backend.EnsureHelperStartedCalls);
+    }
+
+    [Fact]
+    public async Task ListVideoRooms_WhenHelperFlagLagsBehindRuntime_PreservesRoomFromPeersSnapshot()
+    {
+        var backend = new FakeBackend();
+        backend.SetRoomPeers("hb-v-50443405-lag", 1);
+        backend.SetHelperRoom("hb-v-50443405-lag", false);
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new ListWebRtcRoomsUseCase(roomsSvc);
+
+        var snap = await uc.Execute(CancellationToken.None);
+
+        var room = Assert.Single(snap.Rooms, r => string.Equals(r.Room, "hb-v-50443405-lag", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(1, room.Peers);
+        Assert.False(room.HasHelper);
+    }
+
+    [Fact]
+    public async Task DeleteVideoRoom_WhenStopFailsButRoomAlreadyGone_ReconcilesAsSuccess()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        backend.EnqueueStopResult(ok: false, stopped: false, error: "timeout");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var uc = new DeleteWebRtcVideoRoomUseCase(roomsSvc);
+
+        // Room is already effectively gone from runtime snapshots.
+        backend.SetHelperRoom("hb-v-50443405-gone", false);
+        backend.SetRoomPeers("hb-v-50443405-gone", 0);
+
+        var res = await uc.Execute("hb-v-50443405-gone", CancellationToken.None);
+
+        Assert.True(res.Ok);
+        // Stop flag may be true/false depending on backend reconciliation details;
+        // success + no error is the contract we care about here.
+        Assert.Null(res.Error);
+        Assert.True(backend.StopHelperCalls >= 1);
+    }
+
+    [Fact]
+    public void VideoRuntimeStatus_WhenFallbackReported_StoresFallbackAndLastError()
+    {
+        var opt = Options.Parse(Array.Empty<string>());
+        var signaling = new WebRtcSignalingService();
+        var runtime = new FakeVideoRuntime();
+        using var supervisor = new WebRtcVideoPeerSupervisor(opt, signaling, runtime);
+        const string room = "hb-v-50443405-fallback";
+
+        supervisor.ReportRuntimeStatus(
+            room,
+            eventName: "pipeline_started",
+            sourceModeActive: "capture",
+            detail: null,
+            encoder: "cpu",
+            codec: "h264");
+
+        supervisor.ReportRuntimeStatus(
+            room,
+            eventName: "fallback",
+            sourceModeActive: "testsrc",
+            detail: "capture_failed",
+            fallbackUsed: true);
+
+        var status = supervisor.GetRoomRuntimeStatus(room);
+
+        Assert.NotNull(status);
+        Assert.True(status!.FallbackUsed);
+        Assert.Equal("capture_failed", status.LastVideoError);
+        Assert.Equal("testsrc", status.SourceModeActive);
     }
 
     [Fact]
