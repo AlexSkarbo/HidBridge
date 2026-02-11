@@ -36,6 +36,9 @@ Where:
 - List available WebRTC encoders for current host: `GET /video/webrtc/encoders`
 - Delete a video room helper: `DELETE /status/webrtc/video/rooms/{room}`
   - Note: deleting the default room `video` is blocked (`cannot_delete_video`).
+- Apply video settings to an existing room (best-effort restart helper):
+  - `POST /api/webrtc/video/rooms/{room}/apply`
+  - Used by `HidControl.Web` button `Apply now`.
 
 Web UI note:
 - In `HidControl.Web`, video quality defaults to `high` on LAN/localhost hosts.
@@ -164,14 +167,67 @@ Enable persistence explicitly with:
 - Hardware encoder availability depends on OS/driver/FFmpeg build.
 - Capture-device capability limits (resolution/fps/format) still dominate final output quality.
 
+## Recommended Defaults (Latency/Quality)
+
+For stable interactive remote control on LAN:
+
+- Preset: `low-latency`
+- Codec: `VP8`
+- Encoder: `CPU (software)` unless hardware path is validated on this host
+- Capture mode: real device mode with `1920x1080` and `30 fps` (or closest stable mode)
+- Bitrate: `900..1500 kbps` for low-latency, `2000..3500 kbps` for visual quality focus
+
+For visual-quality profile `optimal (1080p)`:
+
+- Preset: `optimal`
+- Codec: `H264` (better visual quality/bitrate on many paths)
+- Encoder: validated hardware encoder (`nvenc`/`amf`) or `CPU` fallback
+- Use `Apply now` after changes, then reconnect to verify actual result in runtime stats.
+
+Note:
+- If capture mode only provides `60 fps` but latency is unstable, explicitly choose `30 fps` capture mode.
+- If software encoder path cannot keep up, reduce fps or bitrate first, then lower preset.
+
 ## Runbook
+
+Quick API flow (copy/paste):
+
+```bash
+# 1) Create room
+curl -s -X POST http://127.0.0.1:8080/status/webrtc/video/rooms \
+  -H "Content-Type: application/json" \
+  -d '{"room":"hb-v-local-test","qualityPreset":"low-latency","codec":"vp8","encoder":"cpu"}'
+# expected: {"ok":true,"room":"hb-v-local-test","started":true|false,...}
+
+# 2) Runtime health
+curl -s http://127.0.0.1:8080/status/webrtc/video/peers/hb-v-local-test
+# expected: {"ok":true,"room":"hb-v-local-test","running":true,...}
+
+# 3) Apply settings to same room
+curl -s -X POST http://127.0.0.1:8080/api/webrtc/video/rooms/hb-v-local-test/apply \
+  -H "Content-Type: application/json" \
+  -d '{"qualityPreset":"optimal","codec":"h264","encoder":"cpu","bitrateKbps":3000}'
+# expected: {"ok":true,"room":"hb-v-local-test","started":true|false,...}
+
+# 4) Delete room
+curl -s -X DELETE http://127.0.0.1:8080/status/webrtc/video/rooms/hb-v-local-test
+# expected: {"ok":true,"room":"hb-v-local-test","stopped":true|false}
+```
 
 ### No video in player
 
-1. Check helper runtime status:
+1. Query runtime:
    - `GET /status/webrtc/video/peers/{room}`
-2. If `fallbackUsed=true`, inspect `lastVideoError`.
-3. Verify browser logs contain `pc.track` and `pc.connectionState=connected`.
+2. Expected:
+   - `ok=true`, `running=true`
+   - `sourceModeActive` is `capture` or `testsrc`
+3. If `fallbackUsed=true`, inspect `lastVideoError`.
+4. Verify browser logs include:
+   - `pc.track` (video)
+   - `pc.connectionState=connected`
+5. If `running=true` but no frame:
+   - check helper log for `startup_timeout` / `no video RTP packets within ...`
+   - this means FFmpeg started but RTP packets did not arrive in time.
 
 ### Device busy
 
@@ -182,6 +238,7 @@ Actions:
 1. Stop legacy capture/ffmpeg pipelines for the same source.
 2. Delete stale video rooms in UI or via `DELETE /status/webrtc/video/rooms/{room}`.
 3. Retry with `capture` mode.
+4. On Windows, verify who holds the device and kill stale workers first.
 
 ### Socket refused / bind error
 
@@ -194,9 +251,87 @@ Actions:
 2. Free/replace occupied ports (`8080`, `55484`) and restart.
 3. Re-check server startup logs before reconnecting clients.
 
+### High latency / poor image quality
+
+1. Check runtime health:
+   - `GET /status/webrtc/video/peers/{room}`
+2. Compare:
+   - `measuredFps` vs target capture mode
+   - `measuredKbps` vs configured bitrate
+3. If latency is high:
+   - switch to `low-latency` preset
+   - lower bitrate and/or fps
+   - prefer `VP8 + CPU` as baseline
+4. If quality is poor:
+   - switch to `high` or `optimal`
+   - move to `H264`
+   - increase bitrate in steps (`+300..500 kbps`)
+
 ### Useful diagnostics
 
 - Room list: `GET /status/webrtc/video/rooms`
 - Room runtime: `GET /status/webrtc/video/peers/{room}`
 - ICE config: `GET /status/webrtc/ice`
 - Local tests: `.\run_all_tests.ps1`
+- Runtime must-have fields when room is healthy:
+  - `ok=true`
+  - `running=true`
+  - `sourceModeActive` set (`capture` or `testsrc`)
+  - `updatedAtUtc` changes over time
+
+Windows quick commands:
+
+- List listeners:
+  - `netstat -ano | findstr :8080`
+  - `netstat -ano | findstr :55484`
+- Resolve PID -> process:
+  - `tasklist /FI "PID eq <pid>"`
+- Find stale helper/ffmpeg processes:
+  - `Get-Process webrtcvideopeer,webrtccontrolpeer,ffmpeg,powershell -ErrorAction SilentlyContinue`
+- Kill stale helper quickly:
+  - `taskkill /F /IM webrtcvideopeer.exe`
+  - `taskkill /F /IM webrtccontrolpeer.exe`
+- Probe capture modes:
+  - `ffmpeg -hide_banner -f dshow -list_options true -i video="USB3.0 Video"`
+- Check helper room runtime quickly:
+  - `curl http://127.0.0.1:8080/status/webrtc/video/peers/<room>`
+
+Linux quick commands:
+
+- List listeners:
+  - `ss -ltnp | rg "8080|55484"`
+- Find/kill stale helpers:
+  - `ps -ef | rg "webrtc(video|control)peer|ffmpeg"`
+  - `pkill -f webrtcvideopeer`
+  - `pkill -f webrtccontrolpeer`
+- Probe capture modes:
+  - `ffmpeg -hide_banner -f v4l2 -list_formats all -i /dev/video0`
+- Check helper room runtime quickly:
+  - `curl http://127.0.0.1:8080/status/webrtc/video/peers/<room>`
+
+## Pre-Release Smoke Checklist
+
+Run before each release candidate:
+
+1. Control channel:
+   - connect to `control`
+   - send keyboard shortcut and mouse click
+   - verify remote input works
+2. Video channel:
+   - create `hb-v-*` room
+   - connect and confirm first frame appears
+   - verify `pc.track` and `datachannel: open`
+3. Settings apply:
+   - change codec/encoder/preset
+   - click `Apply now`
+   - reconnect and confirm runtime reflects new settings
+4. Failure handling:
+   - force capture failure (busy/missing device)
+   - verify fallback status in runtime (`fallbackUsed=true`)
+5. Cleanup:
+   - delete created video room
+   - confirm room disappears from list
+   - confirm no stale helper process for that room
+6. Automated checks:
+   - run `.\run_all_tests.ps1`
+   - all suites green
