@@ -365,6 +365,7 @@ app.MapGet("/", () =>
         <span class="rtc-kpi-item" id="rtcKpiStartup">startup: n/a</span>
         <span class="rtc-kpi-item" id="rtcKpiFps">fps: n/a</span>
         <span class="rtc-kpi-item" id="rtcKpiKbps">kbps: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiAbr">abr: n/a</span>
         <span class="rtc-kpi-item" id="rtcKpiCodec">codec: n/a</span>
         <span class="rtc-kpi-item" id="rtcKpiEncoder">encoder: n/a</span>
         <span class="rtc-kpi-item" id="rtcKpiFallback">fallback: n/a</span>
@@ -578,6 +579,7 @@ app.MapGet("/", () =>
       const rtcKpiStartup = document.getElementById("rtcKpiStartup");
       const rtcKpiFps = document.getElementById("rtcKpiFps");
       const rtcKpiKbps = document.getElementById("rtcKpiKbps");
+      const rtcKpiAbr = document.getElementById("rtcKpiAbr");
       const rtcKpiCodec = document.getElementById("rtcKpiCodec");
       const rtcKpiEncoder = document.getElementById("rtcKpiEncoder");
       const rtcKpiFallback = document.getElementById("rtcKpiFallback");
@@ -611,8 +613,21 @@ app.MapGet("/", () =>
         fallbackUsed: false,
         startupMs: 0,
         codec: "",
-        encoder: ""
+        encoder: "",
+        abrCurrentKbps: 0,
+        abrTargetKbps: 0,
+        abrMeasuredKbps: 0,
+        abrReason: ""
       };
+      let rtcConnectInFlight = false;
+      let rtcHangupInFlight = false;
+
+      function setRtcMainActionBusy() {
+        const connectBtn = document.getElementById("rtcConnect");
+        const hangupBtn = document.getElementById("rtcHangup");
+        if (connectBtn) connectBtn.disabled = rtcConnectInFlight || rtcHangupInFlight;
+        if (hangupBtn) hangupBtn.disabled = rtcConnectInFlight || rtcHangupInFlight;
+      }
 
       function mouseButtonName(button) {
         if (button === 0) return "left";
@@ -788,6 +803,10 @@ app.MapGet("/", () =>
         rtcVideoRuntime.startupMs = 0;
         rtcVideoRuntime.codec = "";
         rtcVideoRuntime.encoder = "";
+        rtcVideoRuntime.abrCurrentKbps = 0;
+        rtcVideoRuntime.abrTargetKbps = 0;
+        rtcVideoRuntime.abrMeasuredKbps = 0;
+        rtcVideoRuntime.abrReason = "";
 	      if (rtcVideoPerf) rtcVideoPerf.textContent = "video perf: n/a";
         updateVideoKpiPanel();
         updatePresetHint();
@@ -964,10 +983,13 @@ app.MapGet("/", () =>
 	      if (!rtcVideoStability) return;
 	      const p = payload || {};
 	      const event = String(p.event || "");
+        const eventLower = event.toLowerCase();
 	      const mode = String(p.mode || "");
 	      const detail = String(p.detail || "");
 	      const measuredFps = Number(p.measuredFps || 0);
 	      const measuredKbps = Number(p.measuredKbps || 0);
+	      const targetKbps = Number(p.targetBitrateKbps || p.configuredBitrateKbps || 0);
+	      const currentKbps = Number(p.bitrateKbps || p.currentBitrateKbps || 0);
 	      const fallbackUsed = !!p.fallbackUsed;
 	      const parts = [];
 	      if (event) parts.push(event);
@@ -977,6 +999,26 @@ app.MapGet("/", () =>
 	      parts.push(`fallback=${fallbackUsed ? "yes" : "no"}`);
 	      if (detail) parts.push(detail);
 	      rtcVideoStability.textContent = "video stability: " + parts.join(", ");
+        let abrTouched = false;
+        if (targetKbps > 0) {
+          rtcVideoRuntime.abrTargetKbps = targetKbps;
+          abrTouched = true;
+        }
+        if (measuredKbps > 0) {
+          rtcVideoRuntime.abrMeasuredKbps = measuredKbps;
+          abrTouched = true;
+        }
+        if (eventLower === "abr_update") {
+          if (currentKbps > 0) {
+            rtcVideoRuntime.abrCurrentKbps = currentKbps;
+            abrTouched = true;
+          }
+          rtcVideoRuntime.abrReason = detail || String(p.reason || "");
+          abrTouched = true;
+        }
+        if (abrTouched) {
+          updateVideoKpiPanel();
+        }
 	    }
 	    function updateRtcModeUi() {
 	      const videoMode = getMode() === "video";
@@ -1009,6 +1051,19 @@ app.MapGet("/", () =>
         if (rtcKpiStartup) rtcKpiStartup.textContent = "startup: " + (rtcVideoRuntime.startupMs > 0 ? (Math.round(rtcVideoRuntime.startupMs) + " ms") : "n/a");
         if (rtcKpiFps) rtcKpiFps.textContent = "fps: " + (rtcPerf.fps > 0 ? rtcPerf.fps.toFixed(1) : "n/a");
         if (rtcKpiKbps) rtcKpiKbps.textContent = "kbps: " + (rtcPerf.inboundKbps > 0 ? rtcPerf.inboundKbps.toFixed(0) : "n/a");
+        if (rtcKpiAbr) {
+          const cur = Number(rtcVideoRuntime.abrCurrentKbps || 0);
+          const target = Number(rtcVideoRuntime.abrTargetKbps || 0);
+          const measured = Number(rtcVideoRuntime.abrMeasuredKbps || 0);
+          const reason = String(rtcVideoRuntime.abrReason || "");
+          if (cur > 0 || measured > 0 || target > 0) {
+            const val = cur > 0 ? cur : measured;
+            const base = target > 0 ? `${val}/${target} kbps` : `${val} kbps`;
+            rtcKpiAbr.textContent = "abr: " + base + (reason ? ` (${reason})` : "");
+          } else {
+            rtcKpiAbr.textContent = "abr: n/a";
+          }
+        }
         if (rtcKpiCodec) rtcKpiCodec.textContent = "codec: " + (rtcVideoRuntime.codec || getVideoCodec() || "n/a");
         if (rtcKpiEncoder) rtcKpiEncoder.textContent = "encoder: " + (rtcVideoRuntime.encoder || getVideoEncoder() || "n/a");
         if (rtcKpiFallback) rtcKpiFallback.textContent = "fallback: " + (rtcVideoRuntime.fallbackUsed ? "yes" : "no");
@@ -1741,6 +1796,10 @@ app.MapGet("/", () =>
           rtcVideoRuntime.startupMs = 0;
           rtcVideoRuntime.codec = "";
           rtcVideoRuntime.encoder = "";
+          rtcVideoRuntime.abrCurrentKbps = 0;
+          rtcVideoRuntime.abrTargetKbps = 0;
+          rtcVideoRuntime.abrMeasuredKbps = 0;
+          rtcVideoRuntime.abrReason = "";
           updateVideoKpiPanel();
           updatePresetHint();
 	        return;
@@ -1760,6 +1819,8 @@ app.MapGet("/", () =>
         rtcVideoRuntime.startupMs = startupMs > 0 ? startupMs : 0;
         rtcVideoRuntime.codec = String(j.codec || "").trim().toLowerCase();
         rtcVideoRuntime.encoder = String(j.encoder || "").trim().toLowerCase();
+        rtcVideoRuntime.abrTargetKbps = Number(j.targetBitrateKbps || rtcVideoRuntime.abrTargetKbps || 0);
+        rtcVideoRuntime.abrMeasuredKbps = Number(j.measuredKbps || rtcVideoRuntime.abrMeasuredKbps || 0);
         updateVideoKpiPanel();
         updatePresetHint();
 	      if (rtcVideoStability) {
@@ -1846,12 +1907,11 @@ app.MapGet("/", () =>
 	        return;
 	      }
 	      if (act === "hangup") {
-	        // Hangup only affects current browser session; helper/room remains alive.
-	        if (getRoom().toLowerCase() === room.toLowerCase()) {
-	          resetWebRtcClient();
-	          clearRemoteVideo();
-	          setRtcStatus("disconnected");
-	        }
+	        if (getRoom().toLowerCase() !== room.toLowerCase()) {
+            setRoom(room);
+          }
+          document.getElementById("rtcHangup").click();
+          await refreshRooms();
 	        return;
 	      }
 	      if (act === "delete") {
@@ -2173,9 +2233,15 @@ app.MapGet("/", () =>
 	    });
 
 	    document.getElementById("rtcConnect").addEventListener("click", async () => {
-	      resetWebRtcClient();
-	      if (!webrtcClient) return;
+        if (rtcConnectInFlight || rtcHangupInFlight) {
+          rtcLog({ webrtc: "ui.connect_ignored_busy" });
+          return;
+        }
+        rtcConnectInFlight = true;
+        setRtcMainActionBusy();
 	      try {
+	        resetWebRtcClient();
+	        if (!webrtcClient) return;
 	        const room = getRoom();
 	        const roomBeforeEnsure = await getRoomState(room);
 	        rtcPerf.connectClickAt = Date.now();
@@ -2231,6 +2297,9 @@ app.MapGet("/", () =>
 	      } catch (e) {
 	        rtcLog({ webrtc: "ui.connect_error", error: String(e) });
 	        show({ ok: false, error: String(e) });
+	      } finally {
+          rtcConnectInFlight = false;
+          setRtcMainActionBusy();
 	      }
 	    });
 
@@ -2257,10 +2326,21 @@ app.MapGet("/", () =>
 	    });
 
 	    document.getElementById("rtcHangup").addEventListener("click", async () => {
-	      if (webrtcClient) webrtcClient.hangup();
-	      setRemoteInputEnabled(false);
-	      clearRemoteVideo();
-	      setRtcStatus("disconnected");
+        if (rtcConnectInFlight || rtcHangupInFlight) {
+          rtcLog({ webrtc: "ui.hangup_ignored_busy" });
+          return;
+        }
+        rtcHangupInFlight = true;
+        setRtcMainActionBusy();
+	      try {
+	        if (webrtcClient) webrtcClient.hangup();
+	        setRemoteInputEnabled(false);
+	        clearRemoteVideo();
+	        setRtcStatus("disconnected");
+	      } finally {
+          rtcHangupInFlight = false;
+          setRtcMainActionBusy();
+        }
 	    });
 
     function sendDcJson(obj) {
