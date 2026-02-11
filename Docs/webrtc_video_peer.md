@@ -229,6 +229,26 @@ curl -s -X DELETE http://127.0.0.1:8080/status/webrtc/video/rooms/hb-v-local-tes
    - check helper log for `startup_timeout` / `no video RTP packets within ...`
    - this means FFmpeg started but RTP packets did not arrive in time.
 
+### Black screen (track exists, image missing)
+
+Symptoms:
+- Browser logs show `pc.track` and `connectionState=connected`.
+- `datachannel: open` is visible, but `rtcRemoteVideo` stays black.
+
+Actions:
+1. Check runtime status:
+   - `GET /status/webrtc/video/peers/{room}`
+   - verify `running=true`, `fallbackUsed`, `codec`, `encoder`.
+2. Check browser stats (inbound video):
+   - `fps` and `kbps` must be non-zero after connect.
+3. If using `H264` and black frame persists:
+   - switch codec to `VP8` and reconnect (rules out H264 profile/decoder mismatch).
+4. If using hardware encoder (`nvenc`/`amf`) and black frame persists:
+   - switch encoder to `CPU (software)` and reconnect.
+5. Confirm FFmpeg writes RTP packets:
+   - helper log should not end with `Nothing was written into output file`.
+   - if it does, check capture mode/device format and reduce complexity (1080p30 baseline).
+
 ### Device busy
 
 Symptoms:
@@ -291,6 +311,31 @@ Actions:
    - switch to `high` or `optimal`
    - move to `H264`
    - increase bitrate in steps (`+300..500 kbps`)
+
+### Preset Matrix (recommended)
+
+Use these as baseline profiles before fine tuning:
+
+- `low-latency`
+  - codec: `VP8`
+  - target: lowest interaction delay
+  - typical bitrate: `700..1200 kbps`
+- `balanced`
+  - codec: `VP8`
+  - target: stable quality/latency compromise
+  - typical bitrate: `1000..1800 kbps`
+- `high`
+  - codec: `H264` or `VP8`
+  - target: better detail at moderate latency
+  - typical bitrate: `1800..2800 kbps`
+- `optimal (1080p)`
+  - codec: `H264` (preferred default for this profile)
+  - target: 1920x1080 quality-first profile
+  - typical bitrate: `2500..4500 kbps`
+
+UI behavior:
+- When codec is switched to `H264`, quality auto-defaults to `optimal` (unless already `high/optimal`).
+- When codec is switched back to `VP8` and quality was `optimal`, quality auto-defaults to `balanced`.
 
 ### Useful diagnostics
 

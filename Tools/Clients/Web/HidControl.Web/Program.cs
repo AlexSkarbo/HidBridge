@@ -103,22 +103,25 @@ app.MapGet("/", () =>
 	    .rtc-qrow {
 	      display: flex;
 	      flex-direction: column;
-	      align-items: center;
+	      align-items: stretch;
 	      gap: 6px;
 	      margin-top: 4px;
 	      width: 100%;
 	    }
 	    .rtc-qgrid {
 	      display: grid;
-	      grid-template-columns: 180px 180px 180px 180px 220px 520px 320px;
+	      grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1.8fr 1.6fr;
 	      column-gap: 10px;
-	      width: max-content;
-	      max-width: 100%;
+	      width: 100%;
+	      max-width: 1700px;
+	      margin: 0 auto;
 	      align-items: center;
 	    }
 	    .rtc-qgrid > * { min-width: 0; }
       .rtc-qgrid-head label {
         white-space: nowrap;
+        display: block;
+        text-align: center;
       }
       .rtc-qgrid-body > * {
         width: 100%;
@@ -143,6 +146,20 @@ app.MapGet("/", () =>
       .rtc-quality-good { background: #e8f7ec; color: #146c2e; }
       .rtc-quality-degraded { background: #fff3cd; color: #7a5800; }
       .rtc-quality-bad { background: #fde2e1; color: #8f1d18; }
+      .rtc-kpi-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .rtc-kpi-item {
+        border: 1px solid #d8d8d8;
+        border-radius: 999px;
+        padding: 3px 8px;
+        font-size: 12px;
+        line-height: 1.4;
+        background: #fafafa;
+      }
       .rtc-video-surface {
         position: relative;
         width: min(100%, 960px);
@@ -303,6 +320,7 @@ app.MapGet("/", () =>
             <button id="rtcPresetLowLatency" type="button">Low latency</button>
             <button id="rtcPresetBalanced" type="button">Balanced</button>
             <button id="rtcPresetQuality" type="button">Quality</button>
+            <button id="rtcAutoTune" type="button" title="Adjust quality/bitrate based on current runtime metrics">Auto tune</button>
             <button id="rtcApplyNow" type="button" title="Restart helper in this room with current settings">Apply now</button>
             <span id="rtcPresetHint" class="muted"></span>
           </div>
@@ -337,9 +355,19 @@ app.MapGet("/", () =>
       </div>
       <div class="row">
         <button id="rtcVideoFullscreen" type="button">Fullscreen</button>
+        <span class="muted">Shortcut: <code>Ctrl+Alt+Enter</code></span>
         <button id="rtcVideoFitFill" type="button">Fit</button>
         <button id="rtcVideoInputToggle" type="button">Enable Remote Input</button>
         <span id="rtcVideoInputState" class="muted">remote input: off</span>
+      </div>
+      <div class="rtc-kpi-row">
+        <span class="rtc-kpi-item" id="rtcKpiQuality">quality: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiStartup">startup: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiFps">fps: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiKbps">kbps: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiCodec">codec: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiEncoder">encoder: n/a</span>
+        <span class="rtc-kpi-item" id="rtcKpiFallback">fallback: n/a</span>
       </div>
 	      <div class="row muted" id="rtcVideoMeta">waiting for remote video track...</div>
 	      <div class="row muted" id="rtcVideoStability">video stability: n/a</div>
@@ -546,6 +574,13 @@ app.MapGet("/", () =>
 	    const rtcVideoMeta = document.getElementById("rtcVideoMeta");
 	    const rtcVideoStability = document.getElementById("rtcVideoStability");
 	    const rtcVideoPerf = document.getElementById("rtcVideoPerf");
+      const rtcKpiQuality = document.getElementById("rtcKpiQuality");
+      const rtcKpiStartup = document.getElementById("rtcKpiStartup");
+      const rtcKpiFps = document.getElementById("rtcKpiFps");
+      const rtcKpiKbps = document.getElementById("rtcKpiKbps");
+      const rtcKpiCodec = document.getElementById("rtcKpiCodec");
+      const rtcKpiEncoder = document.getElementById("rtcKpiEncoder");
+      const rtcKpiFallback = document.getElementById("rtcKpiFallback");
 	    const rtcVideoFullscreen = document.getElementById("rtcVideoFullscreen");
 	    const rtcVideoFitFill = document.getElementById("rtcVideoFitFill");
 	    const rtcVideoInputToggle = document.getElementById("rtcVideoInputToggle");
@@ -554,6 +589,7 @@ app.MapGet("/", () =>
       const rtcPresetLowLatency = document.getElementById("rtcPresetLowLatency");
       const rtcPresetBalanced = document.getElementById("rtcPresetBalanced");
       const rtcPresetQuality = document.getElementById("rtcPresetQuality");
+      const rtcAutoTune = document.getElementById("rtcAutoTune");
       const rtcApplyNow = document.getElementById("rtcApplyNow");
       const rtcPresetHint = document.getElementById("rtcPresetHint");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
@@ -570,6 +606,13 @@ app.MapGet("/", () =>
       const rtcHeldButtons = new Set();
       const rtcPressedCodes = new Set();
       let rtcVideoFitMode = "fit"; // fit=contain, fill=cover
+      const rtcVideoRuntime = {
+        running: false,
+        fallbackUsed: false,
+        startupMs: 0,
+        codec: "",
+        encoder: ""
+      };
 
       function mouseButtonName(button) {
         if (button === 0) return "left";
@@ -740,7 +783,13 @@ app.MapGet("/", () =>
 	      rtcPerf.inboundKbps = 0;
 	      rtcPerf.qualityState = "n/a";
         rtcPerf.runtimeStartupMs = 0;
+        rtcVideoRuntime.running = false;
+        rtcVideoRuntime.fallbackUsed = false;
+        rtcVideoRuntime.startupMs = 0;
+        rtcVideoRuntime.codec = "";
+        rtcVideoRuntime.encoder = "";
 	      if (rtcVideoPerf) rtcVideoPerf.textContent = "video perf: n/a";
+        updateVideoKpiPanel();
         updatePresetHint();
 	    }
 	    function updateRtcPerf() {
@@ -768,6 +817,7 @@ app.MapGet("/", () =>
           : `quality ${q}`;
         parts.push(badgeHtml);
         rtcVideoPerf.innerHTML = parts.length > 0 ? ("video perf: " + parts.join(", ")) : "video perf: waiting...";
+        updateVideoKpiPanel();
       }
       function classifyVideoQuality(rttMs, jitterMs, lossPct, inboundKbps) {
         if (inboundKbps <= 0) return "bad";
@@ -949,6 +999,50 @@ app.MapGet("/", () =>
         rtcRemoteVideo.style.objectFit = rtcVideoFitMode === "fill" ? "cover" : "contain";
         if (rtcVideoFitFill) rtcVideoFitFill.textContent = rtcVideoFitMode === "fill" ? "Fill" : "Fit";
       }
+      function updateVideoKpiPanel() {
+        const q = String(rtcPerf.qualityState || "n/a");
+        const qCls = q === "good" ? "rtc-quality-good" : (q === "degraded" ? "rtc-quality-degraded" : (q === "bad" ? "rtc-quality-bad" : ""));
+        if (rtcKpiQuality) {
+          rtcKpiQuality.className = "rtc-kpi-item" + (qCls ? (" " + qCls) : "");
+          rtcKpiQuality.textContent = "quality: " + q;
+        }
+        if (rtcKpiStartup) rtcKpiStartup.textContent = "startup: " + (rtcVideoRuntime.startupMs > 0 ? (Math.round(rtcVideoRuntime.startupMs) + " ms") : "n/a");
+        if (rtcKpiFps) rtcKpiFps.textContent = "fps: " + (rtcPerf.fps > 0 ? rtcPerf.fps.toFixed(1) : "n/a");
+        if (rtcKpiKbps) rtcKpiKbps.textContent = "kbps: " + (rtcPerf.inboundKbps > 0 ? rtcPerf.inboundKbps.toFixed(0) : "n/a");
+        if (rtcKpiCodec) rtcKpiCodec.textContent = "codec: " + (rtcVideoRuntime.codec || getVideoCodec() || "n/a");
+        if (rtcKpiEncoder) rtcKpiEncoder.textContent = "encoder: " + (rtcVideoRuntime.encoder || getVideoEncoder() || "n/a");
+        if (rtcKpiFallback) rtcKpiFallback.textContent = "fallback: " + (rtcVideoRuntime.fallbackUsed ? "yes" : "no");
+      }
+      async function toggleVideoFullscreen() {
+        if (!rtcRemoteVideo) return;
+        try {
+          if (document.fullscreenElement === rtcRemoteVideo) {
+            await document.exitFullscreen();
+          } else {
+            await rtcRemoteVideo.requestFullscreen();
+          }
+        } catch (e) {
+          rtcLog({ webrtc: "ui.fullscreen_error", error: String(e) });
+        }
+      }
+      function applyCodecQualityDefaultsOnCodecChange() {
+        const codecEl = document.getElementById("rtcVideoCodec");
+        const qualityEl = document.getElementById("rtcVideoQuality");
+        if (!codecEl || !qualityEl) return;
+        const codec = String(codecEl.value || "").toLowerCase();
+        const quality = String(qualityEl.value || "").toLowerCase();
+        if (codec === "h264" && quality !== "optimal" && quality !== "high") {
+          qualityEl.value = "optimal";
+          saveRtcVideoPrefs();
+          rtcLog({ webrtc: "ui.codec_quality_default", codec: "h264", quality: "optimal" });
+          return;
+        }
+        if (codec === "vp8" && quality === "optimal") {
+          qualityEl.value = "balanced";
+          saveRtcVideoPrefs();
+          rtcLog({ webrtc: "ui.codec_quality_default", codec: "vp8", quality: "balanced" });
+        }
+      }
       function saveRtcVideoPrefs() {
         try {
           const payload = {
@@ -1072,6 +1166,85 @@ app.MapGet("/", () =>
         if (!rtcPresetHint) return;
         const suggested = recommendedPresetFromQualityState(rtcPerf.qualityState, rtcPerf.runtimeStartupMs || 0);
         rtcPresetHint.textContent = suggested ? (`Suggested: ${suggested}`) : "";
+      }
+      function autoTuneVideoSettings() {
+        if (getMode() !== "video") {
+          show({ ok: false, error: "video_mode_required" });
+          return;
+        }
+        const codec = getVideoCodec();
+        const currentQuality = getVideoQualityPreset();
+        const fps = Number(rtcPerf.fps || 0);
+        const kbps = Number(rtcPerf.inboundKbps || 0);
+        const startupMs = Number(rtcVideoRuntime.startupMs || rtcPerf.runtimeStartupMs || 0);
+        const qualityState = String(rtcPerf.qualityState || "n/a").toLowerCase();
+
+        let currentBitrate = getVideoBitrateKbps();
+        if (!Number.isFinite(currentBitrate) || currentBitrate <= 0) {
+          if (currentQuality === "optimal") currentBitrate = 2500;
+          else if (currentQuality === "high") currentBitrate = 1800;
+          else if (currentQuality === "balanced") currentBitrate = 1200;
+          else currentBitrate = 900;
+        }
+
+        let nextQuality = currentQuality;
+        let nextBitrate = currentBitrate;
+        let action = "keep";
+        let reason = "insufficient_confidence";
+
+        const severe = qualityState === "bad" || (fps > 0 && fps < 20) || (startupMs > 0 && startupMs >= 12000) || (kbps > 0 && kbps < 700);
+        const degraded = qualityState === "degraded" || (fps > 0 && fps < 26) || (startupMs > 0 && startupMs >= 8000);
+        const good = qualityState === "good" && (fps === 0 || fps >= 28) && (startupMs === 0 || startupMs < 6000);
+
+        if (severe) {
+          action = "degrade";
+          reason = `severe_quality q=${qualityState} fps=${fps.toFixed(1)} kbps=${kbps.toFixed(0)} startupMs=${Math.round(startupMs)}`;
+          nextQuality = "low-latency";
+          nextBitrate = Math.max(700, Math.round((currentBitrate * 0.8) / 50) * 50);
+        } else if (degraded) {
+          action = "stabilize";
+          reason = `degraded_quality q=${qualityState} fps=${fps.toFixed(1)} kbps=${kbps.toFixed(0)} startupMs=${Math.round(startupMs)}`;
+          nextQuality = "balanced";
+          nextBitrate = Math.max(900, Math.min(1800, Math.round(currentBitrate / 50) * 50));
+        } else if (good) {
+          action = "upgrade";
+          reason = `healthy_stream q=${qualityState} fps=${fps.toFixed(1)} kbps=${kbps.toFixed(0)} startupMs=${Math.round(startupMs)}`;
+          if (codec === "h264") {
+            nextQuality = "optimal";
+            nextBitrate = Math.min(4500, Math.max(1800, currentBitrate + 300));
+          } else {
+            nextQuality = (currentQuality === "low-latency") ? "balanced" : "high";
+            nextBitrate = Math.min(2500, currentBitrate + 200);
+          }
+        }
+
+        if (codec === "vp8" && nextQuality === "optimal") {
+          nextQuality = "high";
+        }
+
+        setVideoFieldValue("rtcVideoQuality", nextQuality);
+        setVideoFieldValue("rtcVideoBitrateKbps", String(nextBitrate));
+        saveRtcVideoPrefs();
+        updatePresetHint();
+        const changed = (nextQuality !== currentQuality) || (nextBitrate !== currentBitrate);
+        rtcLog({
+          webrtc: "ui.video_auto_tune",
+          changed,
+          action,
+          reason,
+          from: { quality: currentQuality, bitrateKbps: currentBitrate, codec },
+          to: { quality: nextQuality, bitrateKbps: nextBitrate, codec }
+        });
+        show({
+          ok: true,
+          type: "auto_tune",
+          changed,
+          action,
+          reason,
+          from: { quality: currentQuality, bitrateKbps: currentBitrate, codec },
+          to: { quality: nextQuality, bitrateKbps: nextBitrate, codec },
+          hint: "Use Apply now to restart helper with tuned settings."
+        });
       }
       function buildVideoRoomRequest(roomOverride) {
         const payload = {
@@ -1335,17 +1508,8 @@ app.MapGet("/", () =>
 	    setRemoteInputEnabled(false);
 	    if (rtcVideoFullscreen) {
 	      rtcVideoFullscreen.addEventListener("click", async () => {
-	        if (!rtcRemoteVideo) return;
-	        try {
-	          if (document.fullscreenElement === rtcRemoteVideo) {
-	            await document.exitFullscreen();
-	          } else {
-	            await rtcRemoteVideo.requestFullscreen();
-	          }
-	        } catch (e) {
-	          rtcLog({ webrtc: "ui.fullscreen_error", error: String(e) });
-	        }
-	      });
+          await toggleVideoFullscreen();
+        });
 	    }
       if (rtcVideoFitFill) {
         rtcVideoFitFill.addEventListener("click", () => {
@@ -1357,6 +1521,7 @@ app.MapGet("/", () =>
       if (rtcPresetLowLatency) rtcPresetLowLatency.addEventListener("click", () => applyVideoPreset("low-latency"));
       if (rtcPresetBalanced) rtcPresetBalanced.addEventListener("click", () => applyVideoPreset("balanced"));
       if (rtcPresetQuality) rtcPresetQuality.addEventListener("click", () => applyVideoPreset("quality"));
+      if (rtcAutoTune) rtcAutoTune.addEventListener("click", () => autoTuneVideoSettings());
       if (rtcApplyNow) rtcApplyNow.addEventListener("click", async () => {
         try {
           if (getMode() !== "video") {
@@ -1459,6 +1624,17 @@ app.MapGet("/", () =>
         if (direction !== 0) postQuiet("/api/mouse/wheel", { delta: direction });
       }, { passive: false, capture: true });
 
+      // Global fullscreen shortcut for video preview.
+      window.addEventListener("keydown", async (e) => {
+        if (!(e.ctrlKey && e.altKey && e.code === "Enter")) return;
+        if (getMode() !== "video") return;
+        const tag = String((document.activeElement && document.activeElement.tagName) || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") return;
+        e.preventDefault();
+        e.stopPropagation();
+        await toggleVideoFullscreen();
+      }, { capture: true });
+
       window.addEventListener("keydown", async (e) => {
         if (!canHandleRemoteInput()) return;
         if (!(e.code in codeToUsage)) return;
@@ -1501,6 +1677,9 @@ app.MapGet("/", () =>
 	        const body = document.getElementById("rtcRoomsBody");
 	        body.innerHTML = "";
 	        const mode = getMode();
+          const activeRoom = getRoom().toLowerCase();
+          const statusNow = (rtcStatus && rtcStatus.textContent ? rtcStatus.textContent : "").trim().toLowerCase();
+          const activeSession = !!statusNow && !statusNow.startsWith("disconnected") && !statusNow.startsWith("error:");
 	        for (const r of j.rooms) {
 	          const room = String(r.room || "");
 	          const isVideo = isVideoRoomId(room);
@@ -1517,6 +1696,7 @@ app.MapGet("/", () =>
 	          const canDelete = !r.isControl && room.toLowerCase() !== "video";
 	          const canStart = !r.hasHelper && status !== "busy";
 	          const canConnect = status !== "busy" || room.toLowerCase() === getRoom().toLowerCase();
+            const canHangup = room.toLowerCase() === activeRoom && activeSession;
 
 	          const tr = document.createElement("tr");
 	          tr.innerHTML = `
@@ -1529,6 +1709,7 @@ app.MapGet("/", () =>
 	              <button data-act="start" data-room="${room}" ${canStart ? "" : "disabled"} title="${canStart ? "start helper for this room" : (r.hasHelper ? "helper already started" : "room is busy")}">Start</button>
 	              <button data-act="use" data-room="${room}">Use</button>
 	              <button data-act="connect" data-room="${room}" ${canConnect ? "" : "disabled"} title="${canConnect ? "connect using this room" : "room is busy"}">Connect</button>
+	              <button data-act="hangup" data-room="${room}" ${canHangup ? "" : "disabled"} title="${canHangup ? "disconnect current WebRTC session" : "no active session for this room"}">Hangup</button>
 	              <button data-act="delete" data-room="${room}" ${canDelete ? "" : "disabled"} title="${canDelete ? "stop helper for this room" : "default room cannot be deleted"}">Delete</button>
 	            </td>
 	          `;
@@ -1555,6 +1736,12 @@ app.MapGet("/", () =>
 	        rtcVideoMeta.textContent = "video runtime: n/a";
 	        if (rtcVideoStability) rtcVideoStability.textContent = "video stability: n/a";
           rtcPerf.runtimeStartupMs = 0;
+          rtcVideoRuntime.running = false;
+          rtcVideoRuntime.fallbackUsed = false;
+          rtcVideoRuntime.startupMs = 0;
+          rtcVideoRuntime.codec = "";
+          rtcVideoRuntime.encoder = "";
+          updateVideoKpiPanel();
           updatePresetHint();
 	        return;
 	      }
@@ -1568,6 +1755,12 @@ app.MapGet("/", () =>
         const errClassText = errClass ? ` class=${errClass}` : "";
 	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${startupMs > 0 ? ` startup=${Math.round(startupMs)}ms` : ""}${errClassText}${err}`;
         rtcPerf.runtimeStartupMs = startupMs > 0 ? startupMs : 0;
+        rtcVideoRuntime.running = !!j.running;
+        rtcVideoRuntime.fallbackUsed = !!j.fallbackUsed;
+        rtcVideoRuntime.startupMs = startupMs > 0 ? startupMs : 0;
+        rtcVideoRuntime.codec = String(j.codec || "").trim().toLowerCase();
+        rtcVideoRuntime.encoder = String(j.encoder || "").trim().toLowerCase();
+        updateVideoKpiPanel();
         updatePresetHint();
 	      if (rtcVideoStability) {
 	        const parts = [];
@@ -1652,6 +1845,15 @@ app.MapGet("/", () =>
 	        document.getElementById("rtcConnect").click();
 	        return;
 	      }
+	      if (act === "hangup") {
+	        // Hangup only affects current browser session; helper/room remains alive.
+	        if (getRoom().toLowerCase() === room.toLowerCase()) {
+	          resetWebRtcClient();
+	          clearRemoteVideo();
+	          setRtcStatus("disconnected");
+	        }
+	        return;
+	      }
 	      if (act === "delete") {
 	        try {
 	          const prefix = getRoomsApiPrefix(room);
@@ -1730,7 +1932,10 @@ app.MapGet("/", () =>
       document.getElementById("rtcVideoImageQuality")?.addEventListener("input", saveRtcVideoPrefs);
       document.getElementById("rtcVideoBitrateKbps")?.addEventListener("input", saveRtcVideoPrefs);
       document.getElementById("rtcVideoEncoder")?.addEventListener("change", saveRtcVideoPrefs);
-      document.getElementById("rtcVideoCodec")?.addEventListener("change", saveRtcVideoPrefs);
+      document.getElementById("rtcVideoCodec")?.addEventListener("change", () => {
+        applyCodecQualityDefaultsOnCodecChange();
+        saveRtcVideoPrefs();
+      });
 	    document.getElementById("rtcVideoCaptureInput")?.addEventListener("change", () => {
 	      saveRtcVideoPrefs();
 	      refreshVideoCaptureModes();
