@@ -59,7 +59,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         double? MeasuredFps = null,
         int? MeasuredKbps = null,
         long? Frames = null,
-        long? Packets = null);
+        long? Packets = null,
+        long? StartupMs = null);
 
     /// <summary>
     /// Snapshot of video peer runtime state for a single room.
@@ -82,7 +83,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         double? MeasuredFps = null,
         int? MeasuredKbps = null,
         long? Frames = null,
-        long? Packets = null);
+        long? Packets = null,
+        long? StartupMs = null);
 
     /// <summary>
     /// Creates an instance.
@@ -1145,6 +1147,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             int? measuredKbpsNow = measuredKbps ?? prev?.MeasuredKbps;
             long? framesNow = frames ?? prev?.Frames;
             long? packetsNow = packets ?? prev?.Packets;
+            long? startupMsNow = prev?.StartupMs;
 
             if (fallbackUsed.HasValue)
             {
@@ -1174,6 +1177,20 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 }
             }
 
+            if (startupMsNow is null && startedAt.HasValue)
+            {
+                bool hasFlowSignals =
+                    (measuredFpsNow.HasValue && measuredFpsNow.Value > 0) ||
+                    (measuredKbpsNow.HasValue && measuredKbpsNow.Value > 0) ||
+                    (framesNow.HasValue && framesNow.Value > 0) ||
+                    (packetsNow.HasValue && packetsNow.Value > 0);
+                if (hasFlowSignals)
+                {
+                    var elapsed = now - startedAt.Value;
+                    startupMsNow = elapsed.TotalMilliseconds < 0 ? 0 : (long)elapsed.TotalMilliseconds;
+                }
+            }
+
             _runtimeByRoom[room] = new VideoPeerRuntimeState(
                 room,
                 requested,
@@ -1192,7 +1209,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 measuredFpsNow,
                 measuredKbpsNow,
                 framesNow,
-                packetsNow);
+                packetsNow,
+                startupMsNow);
         }
     }
 
@@ -1230,7 +1248,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     st.MeasuredFps,
                     st.MeasuredKbps,
                     st.Frames,
-                    st.Packets);
+                    st.Packets,
+                    st.StartupMs);
             }
 
             if (_procs.TryGetValue(room, out var procState))

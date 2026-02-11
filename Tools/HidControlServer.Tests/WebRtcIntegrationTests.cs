@@ -403,6 +403,42 @@ public sealed class WebRtcIntegrationTests
     }
 
     [Fact]
+    public async Task VideoRuntimeStatus_ComputesStartupMs_OnFirstMeasuredFlow()
+    {
+        var opt = Options.Parse(Array.Empty<string>());
+        var signaling = new WebRtcSignalingService();
+        var runtime = new FakeVideoRuntime();
+        using var supervisor = new WebRtcVideoPeerSupervisor(opt, signaling, runtime);
+        const string room = "hb-v-50443405-startup";
+
+        supervisor.ReportRuntimeStatus(
+            room,
+            eventName: "pipeline_started",
+            sourceModeActive: "capture",
+            detail: null,
+            encoder: "cpu",
+            codec: "vp8");
+
+        await Task.Delay(10);
+
+        supervisor.ReportRuntimeStatus(
+            room,
+            eventName: "stats",
+            sourceModeActive: "capture",
+            detail: null,
+            measuredFps: 29.5,
+            measuredKbps: 1200,
+            frames: 15,
+            packets: 22);
+
+        var status = supervisor.GetRoomRuntimeStatus(room);
+
+        Assert.NotNull(status);
+        Assert.True(status!.StartupMs.HasValue);
+        Assert.True(status.StartupMs.Value >= 0);
+    }
+
+    [Fact]
     public void JoinSignalingUseCase_JoinsControlRoom_AndClassifiesKind()
     {
         var signaling = new WebRtcSignalingService();

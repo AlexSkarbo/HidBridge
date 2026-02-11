@@ -452,9 +452,12 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	maxRestarts := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_MAX_RESTARTS", 8, 0, 100)
 	restartWindowSec := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_WINDOW_SEC", 60, 5, 600)
 	restartBaseDelayMs := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_DELAY_MS", 500, 50, 10000)
+	startupPacketTimeoutMs := envIntInRange("HIDBRIDGE_VIDEO_STARTUP_PACKET_TIMEOUT_MS", 15000, 2000, 120000)
 	var restartTimestamps []time.Time
 	var cmd *exec.Cmd
 	var waitCh chan error
+	startedAt := time.Now()
+	firstPacketSeen := false
 
 	startFfmpeg := func(mode string) error {
 		args := []string{
@@ -488,6 +491,8 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		cmd = localCmd
 		waitCh = make(chan error, 1)
 		go func() { waitCh <- localCmd.Wait() }()
+		startedAt = time.Now()
+		firstPacketSeen = false
 		if onStatus != nil {
 			onStatus("pipeline_started", mode, "", map[string]any{
 				"fallbackUsed": fallbackUsed,
@@ -550,9 +555,9 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		return true
 	}
 
-	if err := startFfmpeg(modeInUse); err != nil {
-		return err
-	}
+		if err := startFfmpeg(modeInUse); err != nil {
+			return err
+		}
 	defer func() {
 		if cmd != nil && cmd.Process != nil {
 			_ = cmd.Process.Kill()
@@ -602,6 +607,38 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		n, _, readErr := conn.ReadFromUDP(buf)
 		if readErr != nil {
 			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
+				// Fail fast if ffmpeg started but produced no RTP packets during startup window.
+				if !firstPacketSeen && time.Since(startedAt) >= time.Duration(startupPacketTimeoutMs)*time.Millisecond {
+					startupErr := fmt.Errorf("no video RTP packets within %dms", startupPacketTimeoutMs)
+					if onStatus != nil {
+						onStatus("startup_timeout", modeInUse, startupErr.Error(), map[string]any{
+							"fallbackUsed": fallbackUsed,
+							"timeoutMs":    startupPacketTimeoutMs,
+						})
+					}
+					if cmd != nil && cmd.Process != nil {
+						_ = cmd.Process.Kill()
+					}
+					if canFallback && !fallbackUsed && modeInUse == "capture" {
+						fallbackUsed = true
+						modeInUse = "testsrc"
+						log.Printf("capture startup timeout, switching to fallback source mode=%s: %v", modeInUse, startupErr)
+						if onStatus != nil {
+							onStatus("fallback", modeInUse, "startup_timeout", map[string]any{
+								"fallbackUsed": true,
+								"timeoutMs":    startupPacketTimeoutMs,
+							})
+						}
+						if err := startFfmpeg(modeInUse); err != nil {
+							return fmt.Errorf("fallback start failed: %w", err)
+						}
+						continue
+					}
+					if restartPipeline(modeInUse, "startup_timeout", startupErr) {
+						continue
+					}
+					return startupErr
+				}
 				continue
 			}
 			if ctx.Err() != nil {
@@ -614,6 +651,7 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		if unmarshalErr := pkt.Unmarshal(buf[:n]); unmarshalErr != nil {
 			continue
 		}
+		firstPacketSeen = true
 		totalPackets++
 		totalBytes += int64(n)
 		if pkt.Marker {
@@ -665,7 +703,7 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQualit
 
 	switch normalizeSourceMode(sourceMode) {
 	case "capture":
-		inputArgs, err := buildCaptureInputArgs(rawCaptureInput, fps)
+		inputArgs, err := buildCaptureInputArgs(rawCaptureInput, fps, qualityPreset)
 		if err != nil {
 			return nil, err
 		}
@@ -686,8 +724,9 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQualit
 	}
 }
 
-func buildCaptureInputArgs(raw string, fps int) ([]string, error) {
+func buildCaptureInputArgs(raw string, fps int, qualityPreset string) ([]string, error) {
 	fps = clamp(fps, 5, 60)
+	rtbufsize := captureRtbufsizeForPreset(qualityPreset)
 	if strings.TrimSpace(raw) != "" {
 		parsed, err := splitCommandLine(raw)
 		if err != nil {
@@ -700,7 +739,7 @@ func buildCaptureInputArgs(raw string, fps int) ([]string, error) {
 			parsed = normalizeDshowInputArgs(parsed)
 			if usesDshowInput(parsed) {
 				parsed = ensureDshowCaptureArg(parsed, "-framerate", strconv.Itoa(fps))
-				parsed = ensureDshowCaptureArg(parsed, "-rtbufsize", "256M")
+				parsed = ensureDshowCaptureArg(parsed, "-rtbufsize", rtbufsize)
 			}
 		}
 		return parsed, nil
@@ -709,13 +748,26 @@ func buildCaptureInputArgs(raw string, fps int) ([]string, error) {
 	switch runtime.GOOS {
 	case "windows":
 		// Default device name matches current HidBridge setups.
-		return []string{"-f", "dshow", "-rtbufsize", "256M", "-framerate", strconv.Itoa(fps), "-i", "video=USB3.0 Video"}, nil
+		return []string{"-f", "dshow", "-rtbufsize", rtbufsize, "-framerate", strconv.Itoa(fps), "-i", "video=USB3.0 Video"}, nil
 	case "linux":
 		return []string{"-f", "v4l2", "-framerate", strconv.Itoa(fps), "-video_size", "1280x720", "-i", "/dev/video0"}, nil
 	case "darwin":
 		return []string{"-f", "avfoundation", "-framerate", strconv.Itoa(fps), "-i", "0:none"}, nil
 	default:
 		return nil, fmt.Errorf("capture mode is unsupported on %s without HIDBRIDGE_VIDEO_CAPTURE_INPUT", runtime.GOOS)
+	}
+}
+
+func captureRtbufsizeForPreset(qualityPreset string) string {
+	switch normalizeQualityPreset(qualityPreset) {
+	case "low-latency":
+		return "32M"
+	case "low":
+		return "64M"
+	case "optimal":
+		return "256M"
+	default: // balanced, high
+		return "128M"
 	}
 }
 

@@ -100,17 +100,49 @@ app.MapGet("/", () =>
     .card h3 { margin: 0 0 10px; font-size: 14px; }
     pre { background: #0b0d12; color: #d5d9e0; padding: 12px; border-radius: 10px; overflow: auto; }
 	    .muted { color: #666; font-size: 12px; }
-	    .rtc-qrow { display: flex; justify-content: center; margin-top: 4px; }
+	    .rtc-qrow {
+	      display: flex;
+	      flex-direction: column;
+	      align-items: center;
+	      gap: 6px;
+	      margin-top: 4px;
+	      width: 100%;
+	    }
 	    .rtc-qgrid {
 	      display: grid;
 	      grid-template-columns: 180px 180px 180px 180px 220px 520px 320px;
 	      column-gap: 10px;
-	      row-gap: 6px;
 	      width: max-content;
 	      max-width: 100%;
 	      align-items: center;
 	    }
 	    .rtc-qgrid > * { min-width: 0; }
+      .rtc-qgrid-head label {
+        white-space: nowrap;
+      }
+      .rtc-qgrid-body > * {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .rtc-preset-row {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .rtc-preset-row .muted {
+        margin-right: 4px;
+      }
+      .rtc-quality-badge {
+        display: inline-block;
+        border-radius: 6px;
+        padding: 1px 6px;
+        font-weight: 600;
+      }
+      .rtc-quality-good { background: #e8f7ec; color: #146c2e; }
+      .rtc-quality-degraded { background: #fff3cd; color: #7a5800; }
+      .rtc-quality-bad { background: #fde2e1; color: #8f1d18; }
       .rtc-video-surface {
         position: relative;
         width: min(100%, 960px);
@@ -233,7 +265,7 @@ app.MapGet("/", () =>
 	    </div>
 	    <div id="rtcQualityWrap" style="display:none">
 	      <div class="rtc-qrow">
-	        <div class="rtc-qgrid">
+	        <div class="rtc-qgrid rtc-qgrid-head">
 	          <label class="muted" for="rtcVideoQuality">Quality</label>
 	          <label class="muted" for="rtcVideoImageQuality">Image quality (1..100)</label>
 	          <label class="muted" for="rtcVideoBitrateKbps">Bitrate kbps</label>
@@ -241,6 +273,8 @@ app.MapGet("/", () =>
 	          <label class="muted" for="rtcVideoCodec">Codec</label>
 	          <label class="muted" for="rtcVideoCaptureInput">Capture input</label>
 	          <label class="muted" for="rtcVideoCaptureMode">Capture mode</label>
+          </div>
+	        <div class="rtc-qgrid rtc-qgrid-body">
 	          <select id="rtcVideoQuality" title="Video quality preset">
 	            <option value="low">low</option>
 	            <option value="low-latency">low-latency</option>
@@ -264,6 +298,14 @@ app.MapGet("/", () =>
 	            <option value="">auto (server default)</option>
 	          </select>
 	        </div>
+      <div class="rtc-preset-row">
+            <span class="muted">Preset</span>
+            <button id="rtcPresetLowLatency" type="button">Low latency</button>
+            <button id="rtcPresetBalanced" type="button">Balanced</button>
+            <button id="rtcPresetQuality" type="button">Quality</button>
+            <button id="rtcApplyNow" type="button" title="Restart helper in this room with current settings">Apply now</button>
+            <span id="rtcPresetHint" class="muted"></span>
+          </div>
 	      </div>
 	    </div>
 	    <div class="row">
@@ -509,6 +551,11 @@ app.MapGet("/", () =>
 	    const rtcVideoInputToggle = document.getElementById("rtcVideoInputToggle");
 	    const rtcVideoInputState = document.getElementById("rtcVideoInputState");
       const rtcFocusHint = document.getElementById("rtcFocusHint");
+      const rtcPresetLowLatency = document.getElementById("rtcPresetLowLatency");
+      const rtcPresetBalanced = document.getElementById("rtcPresetBalanced");
+      const rtcPresetQuality = document.getElementById("rtcPresetQuality");
+      const rtcApplyNow = document.getElementById("rtcApplyNow");
+      const rtcPresetHint = document.getElementById("rtcPresetHint");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
 	    // Defaults are intentionally minimal.
 	    // Default values are overwritten by /api/webrtc/config on page load. Keep them small for fast fail on LAN.
@@ -656,9 +703,22 @@ app.MapGet("/", () =>
 	      fps: 0,
 	      frameWindowStartMs: 0,
 	      frameWindowCount: 0,
-	      frameCbId: 0
+	      frameCbId: 0,
+        statsTimer: null,
+        statsLastAtMs: 0,
+        statsLastBytes: 0,
+        rttMs: 0,
+        jitterMs: 0,
+        lossPct: 0,
+        inboundKbps: 0,
+	      qualityState: "n/a",
+        runtimeStartupMs: 0
 	    };
 	    function resetRtcPerf() {
+        if (rtcPerf.statsTimer) {
+          clearInterval(rtcPerf.statsTimer);
+          rtcPerf.statsTimer = null;
+        }
 	      if (rtcRemoteVideo && typeof rtcRemoteVideo.cancelVideoFrameCallback === "function" && rtcPerf.frameCbId) {
 	        try { rtcRemoteVideo.cancelVideoFrameCallback(rtcPerf.frameCbId); } catch {}
 	      }
@@ -672,7 +732,16 @@ app.MapGet("/", () =>
 	      rtcPerf.frameWindowStartMs = 0;
 	      rtcPerf.frameWindowCount = 0;
 	      rtcPerf.frameCbId = 0;
+        rtcPerf.statsLastAtMs = 0;
+        rtcPerf.statsLastBytes = 0;
+        rtcPerf.rttMs = 0;
+        rtcPerf.jitterMs = 0;
+        rtcPerf.lossPct = 0;
+	      rtcPerf.inboundKbps = 0;
+	      rtcPerf.qualityState = "n/a";
+        rtcPerf.runtimeStartupMs = 0;
 	      if (rtcVideoPerf) rtcVideoPerf.textContent = "video perf: n/a";
+        updatePresetHint();
 	    }
 	    function updateRtcPerf() {
 	      if (!rtcVideoPerf) return;
@@ -686,9 +755,80 @@ app.MapGet("/", () =>
 	      if (rtcPerf.dcOpenAt > 0) parts.push(`dc-open ${rtcPerf.dcOpenAt - t0}ms`);
 	      if (rtcPerf.trackAt > 0) parts.push(`track ${rtcPerf.trackAt - t0}ms`);
 	      if (rtcPerf.firstFrameAt > 0) parts.push(`first-frame ${rtcPerf.firstFrameAt - t0}ms`);
+        if (rtcPerf.runtimeStartupMs > 0) parts.push(`startup ${Math.round(rtcPerf.runtimeStartupMs)}ms`);
 	      if (rtcPerf.fps > 0) parts.push(`fps ${rtcPerf.fps.toFixed(1)}`);
-	      rtcVideoPerf.textContent = parts.length > 0 ? ("video perf: " + parts.join(", ")) : "video perf: waiting...";
-	    }
+        if (rtcPerf.inboundKbps > 0) parts.push(`in ${rtcPerf.inboundKbps.toFixed(0)} kbps`);
+        if (rtcPerf.rttMs > 0) parts.push(`rtt ${rtcPerf.rttMs.toFixed(0)}ms`);
+        if (rtcPerf.jitterMs > 0) parts.push(`jitter ${rtcPerf.jitterMs.toFixed(1)}ms`);
+        if (rtcPerf.lossPct > 0) parts.push(`loss ${rtcPerf.lossPct.toFixed(1)}%`);
+        const q = String(rtcPerf.qualityState || "n/a");
+        const badgeClass = q === "good" ? "rtc-quality-good" : (q === "degraded" ? "rtc-quality-degraded" : (q === "bad" ? "rtc-quality-bad" : ""));
+        const badgeHtml = badgeClass
+          ? `quality <span class="rtc-quality-badge ${badgeClass}">${q}</span>`
+          : `quality ${q}`;
+        parts.push(badgeHtml);
+        rtcVideoPerf.innerHTML = parts.length > 0 ? ("video perf: " + parts.join(", ")) : "video perf: waiting...";
+      }
+      function classifyVideoQuality(rttMs, jitterMs, lossPct, inboundKbps) {
+        if (inboundKbps <= 0) return "bad";
+        if (rttMs >= 180 || jitterMs >= 40 || lossPct >= 5) return "bad";
+        if (rttMs >= 90 || jitterMs >= 20 || lossPct >= 2) return "degraded";
+        return "good";
+      }
+      async function collectRtcStats() {
+        if (!webrtcClient || typeof webrtcClient.getStats !== "function") return;
+        let report = null;
+        try {
+          report = await webrtcClient.getStats();
+        } catch {
+          return;
+        }
+        if (!report || typeof report.forEach !== "function") return;
+        const nowMs = Date.now();
+        let inboundBytes = 0;
+        let packetsReceived = 0;
+        let packetsLost = 0;
+        let jitterSec = 0;
+        let rttMs = 0;
+        report.forEach((st) => {
+          if (!st || typeof st !== "object") return;
+          if (st.type === "candidate-pair" && (st.nominated || st.selected)) {
+            const rtt = Number(st.currentRoundTripTime || 0);
+            if (Number.isFinite(rtt) && rtt > 0) rttMs = Math.max(rttMs, rtt * 1000);
+          }
+          if (st.type === "inbound-rtp" && st.kind === "video" && !st.isRemote) {
+            const b = Number(st.bytesReceived || 0);
+            const pr = Number(st.packetsReceived || 0);
+            const pl = Number(st.packetsLost || 0);
+            const j = Number(st.jitter || 0);
+            if (Number.isFinite(b) && b > 0) inboundBytes += b;
+            if (Number.isFinite(pr) && pr > 0) packetsReceived += pr;
+            if (Number.isFinite(pl) && pl > 0) packetsLost += pl;
+            if (Number.isFinite(j) && j > 0) jitterSec = Math.max(jitterSec, j);
+          }
+        });
+        let inboundKbps = 0;
+        if (rtcPerf.statsLastAtMs > 0 && inboundBytes >= rtcPerf.statsLastBytes) {
+          const dt = (nowMs - rtcPerf.statsLastAtMs) / 1000.0;
+          if (dt > 0.2) {
+            inboundKbps = ((inboundBytes - rtcPerf.statsLastBytes) * 8.0) / 1000.0 / dt;
+          }
+        }
+        rtcPerf.statsLastAtMs = nowMs;
+        rtcPerf.statsLastBytes = inboundBytes;
+        const totalPkts = packetsReceived + packetsLost;
+        rtcPerf.lossPct = totalPkts > 0 ? (packetsLost * 100.0 / totalPkts) : 0;
+        rtcPerf.jitterMs = jitterSec * 1000.0;
+        rtcPerf.rttMs = rttMs;
+        rtcPerf.inboundKbps = inboundKbps;
+        rtcPerf.qualityState = classifyVideoQuality(rtcPerf.rttMs, rtcPerf.jitterMs, rtcPerf.lossPct, rtcPerf.inboundKbps);
+        updateRtcPerf();
+        updatePresetHint();
+      }
+      function startRtcStatsProbe() {
+        if (rtcPerf.statsTimer) clearInterval(rtcPerf.statsTimer);
+        rtcPerf.statsTimer = setInterval(() => { collectRtcStats().catch(() => { }); }, 1000);
+      }
 	    function startVideoPerfProbe() {
 	      if (!rtcRemoteVideo || typeof rtcRemoteVideo.requestVideoFrameCallback !== "function") return;
 	      if (rtcPerf.frameCbId && typeof rtcRemoteVideo.cancelVideoFrameCallback === "function") {
@@ -724,6 +864,14 @@ app.MapGet("/", () =>
 	        updateRtcPerf();
 	      }
 	      const open = (s === "datachannel: open");
+        if (open) {
+          startRtcStatsProbe();
+        } else {
+          if (rtcPerf.statsTimer) {
+            clearInterval(rtcPerf.statsTimer);
+            rtcPerf.statsTimer = null;
+          }
+        }
 	      rtcSendBtn.disabled = !open;
 	      rtcSendShortcutBtn.disabled = !open;
 	      rtcSendTextBtn.disabled = !open;
@@ -884,6 +1032,60 @@ app.MapGet("/", () =>
 	      const raw = (document.getElementById("rtcVideoCaptureMode")?.value || "").trim();
 	      return raw || null;
 	    }
+      function setVideoFieldValue(id, value) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.value = value;
+      }
+      function applyVideoPreset(presetId) {
+        const p = String(presetId || "").trim().toLowerCase();
+        if (p === "low-latency") {
+          setVideoFieldValue("rtcVideoQuality", "low-latency");
+          setVideoFieldValue("rtcVideoCodec", "vp8");
+          setVideoFieldValue("rtcVideoBitrateKbps", "900");
+          setVideoFieldValue("rtcVideoImageQuality", "");
+        } else if (p === "balanced") {
+          setVideoFieldValue("rtcVideoQuality", "balanced");
+          setVideoFieldValue("rtcVideoCodec", "vp8");
+          setVideoFieldValue("rtcVideoBitrateKbps", "1200");
+          setVideoFieldValue("rtcVideoImageQuality", "");
+        } else if (p === "quality") {
+          setVideoFieldValue("rtcVideoQuality", "optimal");
+          setVideoFieldValue("rtcVideoCodec", "h264");
+          setVideoFieldValue("rtcVideoBitrateKbps", "2500");
+          setVideoFieldValue("rtcVideoImageQuality", "85");
+        } else {
+          return;
+        }
+        saveRtcVideoPrefs();
+        rtcLog({ webrtc: "ui.video_preset", preset: p });
+      }
+      function recommendedPresetFromQualityState(q, startupMs) {
+        if (Number.isFinite(startupMs) && startupMs >= 12000) return "low-latency";
+        const v = String(q || "").toLowerCase();
+        if (v === "bad") return "low-latency";
+        if (v === "degraded") return "balanced";
+        if (v === "good") return "quality";
+        return null;
+      }
+      function updatePresetHint() {
+        if (!rtcPresetHint) return;
+        const suggested = recommendedPresetFromQualityState(rtcPerf.qualityState, rtcPerf.runtimeStartupMs || 0);
+        rtcPresetHint.textContent = suggested ? (`Suggested: ${suggested}`) : "";
+      }
+      function buildVideoRoomRequest(roomOverride) {
+        const payload = {
+          qualityPreset: getVideoQualityPreset(),
+          bitrateKbps: getVideoBitrateKbps(),
+          imageQuality: getVideoImageQuality(),
+          captureInput: getVideoCaptureInput(),
+          encoder: getVideoEncoder(),
+          codec: getVideoCodec()
+        };
+        const room = (roomOverride || "").trim();
+        if (room) payload.room = room;
+        return payload;
+      }
 	    function getVideoCaptureInput() {
 	      const device = getSelectedVideoCaptureDevice();
 	      if (!device) return null;
@@ -1152,6 +1354,45 @@ app.MapGet("/", () =>
           saveRtcVideoPrefs();
         });
       }
+      if (rtcPresetLowLatency) rtcPresetLowLatency.addEventListener("click", () => applyVideoPreset("low-latency"));
+      if (rtcPresetBalanced) rtcPresetBalanced.addEventListener("click", () => applyVideoPreset("balanced"));
+      if (rtcPresetQuality) rtcPresetQuality.addEventListener("click", () => applyVideoPreset("quality"));
+      if (rtcApplyNow) rtcApplyNow.addEventListener("click", async () => {
+        try {
+          if (getMode() !== "video") {
+            show({ ok: false, error: "video_mode_required" });
+            return;
+          }
+          const room = getRoom();
+          if (!isVideoRoomId(room)) {
+            show({ ok: false, error: "video_room_required", room });
+            return;
+          }
+          const res = await fetch(`/api/webrtc/video/rooms/${encodeURIComponent(room)}/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildVideoRoomRequest(room))
+          });
+          const j = await res.json().catch(() => null);
+          rtcLog({ webrtc: "ui.video_apply_now", room, payload: j });
+          show(j || { ok: false, error: "apply_failed" });
+          await refreshRooms();
+          if (j && j.ok) {
+            const isActiveRoom = String(getRoom() || "").toLowerCase() === room.toLowerCase();
+            const isLive = rtcStatus.textContent === "datachannel: open" || rtcStatus.textContent === "calling...";
+            if (isActiveRoom && isLive) {
+              resetWebRtcClient();
+              clearRemoteVideo();
+              setRtcStatus("disconnected");
+              await new Promise(r => setTimeout(r, 250));
+              document.getElementById("rtcConnect").click();
+            }
+          }
+        } catch (e) {
+          rtcLog({ webrtc: "ui.video_apply_now_error", error: String(e) });
+          show({ ok: false, error: String(e) });
+        }
+      });
 	    if (rtcVideoInputToggle) {
 	      rtcVideoInputToggle.addEventListener("click", async () => { await setRemoteInputEnabled(!rtcRemoteInputEnabled); });
 	    }
@@ -1313,16 +1554,21 @@ app.MapGet("/", () =>
 	      if (!j || !j.ok) {
 	        rtcVideoMeta.textContent = "video runtime: n/a";
 	        if (rtcVideoStability) rtcVideoStability.textContent = "video stability: n/a";
+          rtcPerf.runtimeStartupMs = 0;
+          updatePresetHint();
 	        return;
 	      }
 	      const modeReq = j.sourceModeRequested || "?";
 	      const modeAct = j.sourceModeActive || "?";
 	      const running = j.running ? "running" : "stopped";
 	      const fallback = j.fallbackUsed ? "fallback=yes" : "fallback=no";
+        const startupMs = Number(j.startupMs || 0);
         const errClass = classifyVideoError(j.lastVideoError);
 	      const err = j.lastVideoError ? ` error=${j.lastVideoError}` : "";
         const errClassText = errClass ? ` class=${errClass}` : "";
-	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${errClassText}${err}`;
+	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${startupMs > 0 ? ` startup=${Math.round(startupMs)}ms` : ""}${errClassText}${err}`;
+        rtcPerf.runtimeStartupMs = startupMs > 0 ? startupMs : 0;
+        updatePresetHint();
 	      if (rtcVideoStability) {
 	        const parts = [];
 	        if (typeof j.measuredFps === "number" && j.measuredFps > 0) parts.push(`fps=${j.measuredFps.toFixed(1)}`);
@@ -1331,6 +1577,7 @@ app.MapGet("/", () =>
 	        if (typeof j.targetBitrateKbps === "number" && j.targetBitrateKbps > 0) parts.push(`target-kbps=${j.targetBitrateKbps}`);
 	        if (typeof j.frames === "number" && j.frames > 0) parts.push(`frames=${j.frames}`);
 	        if (typeof j.packets === "number" && j.packets > 0) parts.push(`packets=${j.packets}`);
+          if (startupMs > 0) parts.push(`startup-ms=${Math.round(startupMs)}`);
 	        parts.push(`fallback=${j.fallbackUsed ? "yes" : "no"}`);
 	        rtcVideoStability.textContent = "video stability: " + parts.join(", ");
 	      }
@@ -1384,15 +1631,7 @@ app.MapGet("/", () =>
 	          const res = await fetch(prefix, {
 	            method: "POST",
 	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify({
-	              room,
-	              qualityPreset: getVideoQualityPreset(),
-	              bitrateKbps: getVideoBitrateKbps(),
-	              imageQuality: getVideoImageQuality(),
-	              captureInput: getVideoCaptureInput(),
-	              encoder: getVideoEncoder(),
-	              codec: getVideoCodec()
-	            })
+	            body: JSON.stringify(buildVideoRoomRequest(room))
 	          });
 	          const j = await res.json().catch(() => null);
 	          rtcLog({ webrtc: "ui.room_started", room, endpoint: prefix, payload: j });
@@ -1448,14 +1687,7 @@ app.MapGet("/", () =>
 	        const mode = getMode();
 	        const createUrl = (mode === "video") ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
 	        const body = (mode === "video")
-	          ? {
-	              qualityPreset: getVideoQualityPreset(),
-	              bitrateKbps: getVideoBitrateKbps(),
-	              imageQuality: getVideoImageQuality(),
-	              captureInput: getVideoCaptureInput(),
-	              encoder: getVideoEncoder(),
-	              codec: getVideoCodec()
-	            }
+	          ? buildVideoRoomRequest()
 	          : {};
 	        const res = await fetch(createUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 	        const j = await res.json().catch(() => null);
@@ -1611,15 +1843,7 @@ app.MapGet("/", () =>
 	          const createRes = await fetch(prefix, {
 	            method: "POST",
 	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify({
-	              room: wanted,
-	              qualityPreset: getVideoQualityPreset(),
-	              bitrateKbps: getVideoBitrateKbps(),
-	              imageQuality: getVideoImageQuality(),
-	              captureInput: getVideoCaptureInput(),
-	              encoder: getVideoEncoder(),
-	              codec: getVideoCodec()
-	            })
+	            body: JSON.stringify(buildVideoRoomRequest(wanted))
 	          });
 	          const created = await createRes.json().catch(() => null);
 	          rtcLog({ webrtc: "ui.ensure_helper_video_create", room: wanted, endpoint: prefix, payload: created });
@@ -1653,15 +1877,7 @@ app.MapGet("/", () =>
 	        } catch {}
 
 	        const body = isVideoRoomId(wanted)
-	          ? {
-	              room: wanted,
-	              qualityPreset: getVideoQualityPreset(),
-	              bitrateKbps: getVideoBitrateKbps(),
-	              imageQuality: getVideoImageQuality(),
-	              captureInput: getVideoCaptureInput(),
-	              encoder: getVideoEncoder(),
-	              codec: getVideoCodec()
-	            }
+	          ? buildVideoRoomRequest(wanted)
 	          : { room: wanted };
 	        const res = await fetch(prefix, {
 	          method: "POST",
@@ -2220,6 +2436,65 @@ app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken
     catch (Exception ex)
     {
         return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, ex.Message));
+    }
+});
+
+app.MapPost("/api/webrtc/video/rooms/{room}/apply", async (string room, HttpRequest req, CancellationToken ct) =>
+{
+    var payload = new HidControl.Contracts.WebRtcCreateVideoRoomRequest(room, null, null, null, null, null, null, null);
+    try
+    {
+        payload = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct) ?? payload;
+        string targetRoom = string.IsNullOrWhiteSpace(payload.Room) ? room : payload.Room.Trim();
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
+
+        HidControl.Contracts.WebRtcDeleteRoomResponse? deleted = null;
+        try
+        {
+            deleted = await HidControl.ClientSdk.WebRtcClientExtensions.DeleteWebRtcVideoRoomAsync(client, targetRoom, ct);
+        }
+        catch
+        {
+            // Best effort: create call below will still attempt to reconcile state.
+        }
+
+        var created = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcVideoRoomAsync(
+            client,
+            targetRoom,
+            payload.QualityPreset,
+            payload.BitrateKbps,
+            payload.Fps,
+            payload.ImageQuality,
+            payload.CaptureInput,
+            payload.Encoder,
+            payload.Codec,
+            ct);
+
+        if (created is null)
+        {
+            return Results.Json(new { ok = false, room = targetRoom, error = "apply_failed", deleted });
+        }
+
+        return Results.Json(new
+        {
+            ok = created.Ok,
+            room = created.Room ?? targetRoom,
+            started = created.Started,
+            pid = created.Pid,
+            error = created.Error,
+            deleted
+        });
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { ok = false, room, error = "timeout" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, room, error = ex.Message });
     }
 });
 

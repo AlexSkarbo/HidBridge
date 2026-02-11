@@ -8,7 +8,7 @@
         "HIDBRIDGE_SERVER_URL": "http://127.0.0.1:8080",
         "HIDBRIDGE_TOKEN": ""
       },
-      "applicationUrl": "https://localhost:56084;http://localhost:56085"
+      "applicationUrl": "https://localhost:8084;http://localhost:8085"
     }
   }
 }

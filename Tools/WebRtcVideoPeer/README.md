@@ -49,6 +49,7 @@ Capture mode (Linux `/dev/video0` default):
 - `HIDBRIDGE_VIDEO_ENCODER` (optional, default: `auto`; values: `auto`, `cpu`, `hw`, `nvenc`, `amf`, `qsv`, `v4l2m2m`, `vaapi`)
 - `HIDBRIDGE_VIDEO_CAPTURE_INPUT` (optional; full FFmpeg input args for capture mode, overrides OS defaults)
 - `HIDBRIDGE_VIDEO_FFMPEG_ARGS` (optional; full FFmpeg pipeline args, overrides built-in mode pipeline)
+- `HIDBRIDGE_VIDEO_STARTUP_PACKET_TIMEOUT_MS` (optional, default: `15000`; startup watchdog for "ffmpeg started but no RTP packets")
 
 Notes:
 - In `capture` mode, defaults are OS-specific:
@@ -57,8 +58,13 @@ Notes:
   - macOS: `-f avfoundation -framerate 30 -i 0:none`
 - `HIDBRIDGE_VIDEO_FFMPEG_ARGS` should include input + codec settings; output transport (`-f rtp ...`) is appended by the helper.
 - Encoder mode behavior:
-  - `cpu`: software VP8 path (`libvpx`)
+  - `cpu`: software path (codec-dependent: `libvpx` for VP8, `libx264` for H264)
   - `nvenc|amf|qsv|v4l2m2m|vaapi`: explicit hardware encoders
   - `hw`: legacy alias kept for compatibility
   - `auto`: stable default (CPU path)
 - `HIDBRIDGE_VIDEO_IMAGE_QUALITY` does not force a specific codec/encoder; it scales target bitrate safely for both CPU and HW paths.
+- Capture-mode `-rtbufsize` is preset-aware on Windows:
+  - `low-latency` => `32M`
+  - `low` => `64M`
+  - `balanced/high` => `128M`
+  - `optimal` => `256M`

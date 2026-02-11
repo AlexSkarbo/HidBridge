@@ -122,7 +122,8 @@ public static class WebRtcStatusEndpoints
                 measuredFps = st.MeasuredFps,
                 measuredKbps = st.MeasuredKbps,
                 frames = st.Frames,
-                packets = st.Packets
+                packets = st.Packets,
+                startupMs = st.StartupMs
             });
         });
     }

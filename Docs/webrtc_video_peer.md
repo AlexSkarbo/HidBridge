@@ -250,6 +250,31 @@ Actions:
 1. Ensure only one server instance is running.
 2. Free/replace occupied ports (`8080`, `55484`) and restart.
 3. Re-check server startup logs before reconnecting clients.
+4. On Windows, check HTTP URL ACL and excluded port ranges:
+   - `netsh http show urlacl | findstr 55484`
+   - `netsh int ipv4 show excludedportrange protocol=tcp`
+   - `netsh int ipv6 show excludedportrange protocol=tcp`
+5. If an invalid ACL exists for your app user:
+   - `netsh http delete urlacl url=https://localhost:55484/`
+   - then restart server (or change dev port in `launchSettings.json`).
+
+### Helper timeout (`helper_not_ready` / `started:false,error:timeout`)
+
+Symptoms:
+- UI: `helper_not_ready` or `ensure_helper ... timeout`
+- Runtime endpoint intermittently returns `timeout`
+
+Actions:
+1. Verify process was really started:
+   - `GET /status/webrtc/video/rooms` (room exists, peers/hasHelper)
+   - helper log file exists in `Tools/WebRtcVideoPeer/logs/`
+2. Verify room runtime directly:
+   - `GET /status/webrtc/video/peers/{room}`
+   - if `ok=true` and `running=true`, retry connect (room-list may lag briefly).
+3. If helper exits quickly:
+   - inspect helper log for ffmpeg/capture errors (`device busy`, `input not found`, codec init fail).
+4. If timeout repeats:
+   - delete room, ensure stale processes are gone, recreate room and reconnect.
 
 ### High latency / poor image quality
 
@@ -284,6 +309,10 @@ Windows quick commands:
 - List listeners:
   - `netstat -ano | findstr :8080`
   - `netstat -ano | findstr :55484`
+- URL ACL and excluded ranges:
+  - `netsh http show urlacl | findstr 55484`
+  - `netsh int ipv4 show excludedportrange protocol=tcp`
+  - `netsh int ipv6 show excludedportrange protocol=tcp`
 - Resolve PID -> process:
   - `tasklist /FI "PID eq <pid>"`
 - Find stale helper/ffmpeg processes:

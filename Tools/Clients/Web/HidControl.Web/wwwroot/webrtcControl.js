@@ -389,6 +389,11 @@
       };
     }
 
+    async function getStats() {
+      if (!pc || typeof pc.getStats !== "function") return null;
+      return await pc.getStats();
+    }
+
     function hangup() {
       stopHeartbeat();
       try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "leave" })); } catch { }
@@ -411,7 +416,7 @@
       setStatus("disconnected");
     }
 
-    return { join, call, send, hangup, getDebug };
+    return { join, call, send, hangup, getDebug, getStats };
   }
 
   window.hidbridge.webrtcControl = {

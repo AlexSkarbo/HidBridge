@@ -172,6 +172,24 @@ func TestDefaultVp8EncoderArgs_LowLatencyAddsRealtimeFlags(t *testing.T) {
 	}
 }
 
+func TestCaptureRtbufsizeForPreset(t *testing.T) {
+	if got := captureRtbufsizeForPreset("low-latency"); got != "32M" {
+		t.Fatalf("low-latency rtbufsize mismatch, got=%q", got)
+	}
+	if got := captureRtbufsizeForPreset("low"); got != "64M" {
+		t.Fatalf("low rtbufsize mismatch, got=%q", got)
+	}
+	if got := captureRtbufsizeForPreset("balanced"); got != "128M" {
+		t.Fatalf("balanced rtbufsize mismatch, got=%q", got)
+	}
+	if got := captureRtbufsizeForPreset("high"); got != "128M" {
+		t.Fatalf("high rtbufsize mismatch, got=%q", got)
+	}
+	if got := captureRtbufsizeForPreset("optimal"); got != "256M" {
+		t.Fatalf("optimal rtbufsize mismatch, got=%q", got)
+	}
+}
+
 func argValue(args []string, key string) string {
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == key {
