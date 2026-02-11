@@ -65,7 +65,10 @@ func main() {
 		room         = flag.String("room", envOr("HIDBRIDGE_WEBRTC_ROOM", "video"), "Signaling room name")
 		stun         = flag.String("stun", envOr("HIDBRIDGE_STUN", "stun:stun.l.google.com:19302"), "STUN server URL (stun:host:port)")
 		sourceMode   = flag.String("source-mode", envOr("HIDBRIDGE_VIDEO_SOURCE_MODE", "testsrc"), "Video source mode: testsrc|capture")
-		qualityPreset = flag.String("quality-preset", envOr("HIDBRIDGE_VIDEO_QUALITY_PRESET", "balanced"), "Video quality preset: low|balanced|high")
+		qualityPreset = flag.String("quality-preset", envOr("HIDBRIDGE_VIDEO_QUALITY_PRESET", "balanced"), "Video quality preset: low|low-latency|balanced|high|optimal")
+		imageQuality = flag.Int("image-quality", envOptionalIntInRange("HIDBRIDGE_VIDEO_IMAGE_QUALITY", 1, 100), "Image quality level (1-100, higher is better); 0=auto")
+		encoderMode  = flag.String("encoder", envOr("HIDBRIDGE_VIDEO_ENCODER", "auto"), "Encoder mode: auto|cpu|hw|nvenc|amf|qsv|v4l2m2m|vaapi")
+		codecMode    = flag.String("codec", envOr("HIDBRIDGE_VIDEO_CODEC", "auto"), "Codec mode: auto|vp8|h264")
 		bitrateKbps  = flag.Int("bitrate-kbps", envIntInRange("HIDBRIDGE_VIDEO_BITRATE_KBPS", 1200, 200, 12000), "Target bitrate in kbps")
 		fps          = flag.Int("fps", envIntInRange("HIDBRIDGE_VIDEO_FPS", 30, 5, 60), "Target frame rate")
 		ffmpegArgs   = flag.String("ffmpeg-args", envOr("HIDBRIDGE_VIDEO_FFMPEG_ARGS", ""), "Optional FFmpeg pipeline args (overrides built-in mode pipeline)")
@@ -80,15 +83,21 @@ func main() {
 
 	mode := normalizeSourceMode(*sourceMode)
 	preset := normalizeQualityPreset(*qualityPreset)
+	encoder := normalizeEncoderMode(*encoderMode)
+	codec := normalizeCodecMode(*codecMode)
 	log.Printf("webrtc video peer starting")
-	log.Printf("server=%s room=%s stun=%s sourceMode=%s qualityPreset=%s bitrateKbps=%d fps=%d", base.String(), *room, *stun, mode, preset, *bitrateKbps, *fps)
+	imageQualityText := "auto"
+	if *imageQuality >= 1 && *imageQuality <= 100 {
+		imageQualityText = strconv.Itoa(*imageQuality)
+	}
+	log.Printf("server=%s room=%s stun=%s sourceMode=%s qualityPreset=%s imageQuality=%s encoder=%s codec=%s bitrateKbps=%d fps=%d", base.String(), *room, *stun, mode, preset, imageQualityText, encoder, codec, *bitrateKbps, *fps)
 	cleanupPidFile := registerHelperPidFile()
 	defer cleanupPidFile()
 
 	// Long-running loop: reconnect on transport failures instead of exiting.
 	backoff := 1 * time.Second
 	for {
-		err := runSession(base, *token, *room, *stun, mode, preset, *bitrateKbps, *fps, *ffmpegArgs, *captureInput)
+		err := runSession(base, *token, *room, *stun, mode, preset, normalizeImageQuality(*imageQuality), encoder, codec, *bitrateKbps, *fps, *ffmpegArgs, *captureInput)
 		if err != nil {
 			log.Printf("session ended: %v", err)
 		} else {
@@ -101,7 +110,7 @@ func main() {
 	}
 }
 
-func runSession(base *url.URL, token string, room string, stun string, sourceMode string, qualityPreset string, bitrateKbps int, fps int, ffmpegArgs string, captureInput string) error {
+func runSession(base *url.URL, token string, room string, stun string, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, ffmpegArgs string, captureInput string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -115,7 +124,7 @@ func runSession(base *url.URL, token string, room string, stun string, sourceMod
 		return fmt.Errorf("join room: %w", err)
 	}
 
-	peer := newPeerState(stun, room, sourceMode, qualityPreset, bitrateKbps, fps, ffmpegArgs, captureInput, sigWS)
+	peer := newPeerState(stun, room, sourceMode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, ffmpegArgs, captureInput, sigWS)
 	for {
 		_, b, err := sigWS.ReadMessage()
 		if err != nil {
@@ -149,6 +158,9 @@ type peerState struct {
 	stun         string
 	sourceMode   string
 	qualityPreset string
+	imageQuality int
+	encoderMode  string
+	codecMode    string
 	bitrateKbps  int
 	fps          int
 	ffmpegArgs   string
@@ -164,13 +176,16 @@ type peerState struct {
 	pendingNotice string
 }
 
-func newPeerState(stun, room, sourceMode, qualityPreset string, bitrateKbps int, fps int, ffmpegArgs, captureInput string, sigWS *websocket.Conn) *peerState {
+func newPeerState(stun, room, sourceMode, qualityPreset string, imageQuality int, encoderMode, codecMode string, bitrateKbps int, fps int, ffmpegArgs, captureInput string, sigWS *websocket.Conn) *peerState {
 	return &peerState{
 		room:         room,
 		sigWS:        sigWS,
 		stun:         stun,
 		sourceMode:   normalizeSourceMode(sourceMode),
 		qualityPreset: normalizeQualityPreset(qualityPreset),
+		imageQuality: normalizeImageQuality(imageQuality),
+		encoderMode:  normalizeEncoderMode(encoderMode),
+		codecMode:    normalizeCodecMode(codecMode),
 		bitrateKbps:  clamp(bitrateKbps, 200, 12000),
 		fps:          clamp(fps, 5, 60),
 		ffmpegArgs:   ffmpegArgs,
@@ -197,7 +212,7 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	}
 
 	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
+		webrtc.RTPCodecCapability{MimeType: selectedVideoMimeType(p.codecMode, p.encoderMode), ClockRate: 90000},
 		"video",
 		"hidbridge",
 	)
@@ -223,7 +238,7 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	p.streamCancel = streamCancel
 	go func() {
-		if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.bitrateKbps, p.fps, p.ffmpegArgs, p.captureInput, p.notifyVideoStatus); err != nil && streamCtx.Err() == nil {
+		if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.imageQuality, p.encoderMode, p.codecMode, p.bitrateKbps, p.fps, p.ffmpegArgs, p.captureInput, p.notifyVideoStatus); err != nil && streamCtx.Err() == nil {
 			log.Printf("video stream ended: %v", err)
 		}
 	}()
@@ -290,14 +305,22 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	return pc, nil
 }
 
-func (p *peerState) notifyVideoStatus(event string, mode string, detail string) {
-	payload := map[string]string{
-		"type":  "video.status",
-		"event": event,
-		"mode":  mode,
+func (p *peerState) notifyVideoStatus(event string, mode string, detail string, extra map[string]any) {
+	payload := map[string]any{
+		"type":          "video.status",
+		"event":         event,
+		"mode":          mode,
+		"encoder":       p.encoderMode,
+		"codec":         p.codecMode,
+		"qualityPreset": p.qualityPreset,
+		"bitrateKbps":   p.bitrateKbps,
+		"targetFps":     p.fps,
 	}
 	if strings.TrimSpace(detail) != "" {
 		payload["detail"] = detail
+	}
+	for k, v := range extra {
+		payload[k] = v
 	}
 	raw, _ := json.Marshal(payload)
 	msg := string(raw)
@@ -412,7 +435,7 @@ func (p *peerState) onCandidate(ctx context.Context, cand webrtc.ICECandidateIni
 	_ = ctx
 }
 
-func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string, onStatus func(event string, mode string, detail string)) error {
+func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string, onStatus func(event string, mode string, detail string, extra map[string]any)) error {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		return fmt.Errorf("listen udp: %w", err)
@@ -426,6 +449,10 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	customPipeline := strings.TrimSpace(rawFFmpegArgs) != ""
 	canFallback := modeInUse == "capture" && !customPipeline
 	fallbackUsed := false
+	maxRestarts := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_MAX_RESTARTS", 8, 0, 100)
+	restartWindowSec := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_WINDOW_SEC", 60, 5, 600)
+	restartBaseDelayMs := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_DELAY_MS", 500, 50, 10000)
+	var restartTimestamps []time.Time
 	var cmd *exec.Cmd
 	var waitCh chan error
 
@@ -433,9 +460,12 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		args := []string{
 			"-hide_banner",
 			"-loglevel", "warning",
-			"-re",
 		}
-		pipelineArgs, buildErr := buildVideoPipelineArgs(mode, qualityPreset, bitrateKbps, fps, rawFFmpegArgs, rawCaptureInput)
+		// Keep synthetic sources real-time; avoid "-re" for live capture devices.
+		if normalizeSourceMode(mode) == "testsrc" {
+			args = append(args, "-re")
+		}
+		pipelineArgs, buildErr := buildVideoPipelineArgs(mode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, rawFFmpegArgs, rawCaptureInput)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -458,7 +488,66 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		cmd = localCmd
 		waitCh = make(chan error, 1)
 		go func() { waitCh <- localCmd.Wait() }()
+		if onStatus != nil {
+			onStatus("pipeline_started", mode, "", map[string]any{
+				"fallbackUsed": fallbackUsed,
+			})
+		}
 		return nil
+	}
+
+	pruneRestarts := func(now time.Time) {
+		cutoff := now.Add(-time.Duration(restartWindowSec) * time.Second)
+		kept := restartTimestamps[:0]
+		for _, ts := range restartTimestamps {
+			if ts.After(cutoff) {
+				kept = append(kept, ts)
+			}
+		}
+		restartTimestamps = kept
+	}
+
+	restartPipeline := func(mode string, reason string, prevErr error) bool {
+		now := time.Now()
+		pruneRestarts(now)
+		if len(restartTimestamps) >= maxRestarts {
+			log.Printf("video pipeline restart limit reached mode=%s restarts=%d windowSec=%d reason=%s", mode, len(restartTimestamps), restartWindowSec, reason)
+			if onStatus != nil {
+				onStatus("restart_limit", mode, reason, map[string]any{
+					"fallbackUsed": fallbackUsed,
+					"restarts":     len(restartTimestamps),
+					"windowSec":    restartWindowSec,
+				})
+			}
+			return false
+		}
+
+		restartTimestamps = append(restartTimestamps, now)
+		attempt := len(restartTimestamps)
+		delayMs := restartBaseDelayMs * (1 << minInt(attempt-1, 4))
+		if delayMs > 5000 {
+			delayMs = 5000
+		}
+		log.Printf("video pipeline restarting mode=%s attempt=%d/%d delayMs=%d reason=%s err=%v", mode, attempt, maxRestarts, delayMs, reason, prevErr)
+		if onStatus != nil {
+			onStatus("recovering", mode, reason, map[string]any{
+				"fallbackUsed": fallbackUsed,
+				"restarts":     attempt,
+				"delayMs":      delayMs,
+			})
+		}
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(time.Duration(delayMs) * time.Millisecond):
+		}
+
+		if err := startFfmpeg(mode); err != nil {
+			log.Printf("video pipeline restart failed mode=%s: %v", mode, err)
+			return false
+		}
+		return true
 	}
 
 	if err := startFfmpeg(modeInUse); err != nil {
@@ -471,6 +560,12 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	}()
 
 	buf := make([]byte, 2048)
+	var totalPackets int64
+	var totalFrames int64
+	var totalBytes int64
+	lastReportAt := time.Now()
+	lastFrames := int64(0)
+	lastBytes := int64(0)
 	for {
 		select {
 		case <-ctx.Done():
@@ -484,11 +579,16 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 				modeInUse = "testsrc"
 				log.Printf("capture pipeline failed, switching to fallback source mode=%s: %v", modeInUse, ffErr)
 				if onStatus != nil {
-					onStatus("fallback", modeInUse, "capture_failed")
+					onStatus("fallback", modeInUse, "capture_failed", map[string]any{
+						"fallbackUsed": true,
+					})
 				}
 				if err := startFfmpeg(modeInUse); err != nil {
 					return fmt.Errorf("fallback start failed: %w", err)
 				}
+				continue
+			}
+			if restartPipeline(modeInUse, "ffmpeg_exit", ffErr) {
 				continue
 			}
 			if ffErr != nil {
@@ -514,6 +614,29 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 		if unmarshalErr := pkt.Unmarshal(buf[:n]); unmarshalErr != nil {
 			continue
 		}
+		totalPackets++
+		totalBytes += int64(n)
+		if pkt.Marker {
+			totalFrames++
+		}
+		now := time.Now()
+		if onStatus != nil && now.Sub(lastReportAt) >= 2*time.Second {
+			interval := now.Sub(lastReportAt).Seconds()
+			if interval > 0 {
+				measuredFps := float64(totalFrames-lastFrames) / interval
+				measuredKbps := int(float64((totalBytes-lastBytes)*8) / interval / 1000.0)
+				onStatus("stats", modeInUse, "", map[string]any{
+					"fallbackUsed": fallbackUsed,
+					"measuredFps":  round2(measuredFps),
+					"measuredKbps": measuredKbps,
+					"frames":       totalFrames,
+					"packets":      totalPackets,
+				})
+			}
+			lastReportAt = now
+			lastFrames = totalFrames
+			lastBytes = totalBytes
+		}
 
 		if writeErr := track.WriteRTP(&pkt); writeErr != nil {
 			if ctx.Err() != nil {
@@ -524,7 +647,7 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	}
 }
 
-func buildVideoPipelineArgs(sourceMode string, qualityPreset string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string) ([]string, error) {
+func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string) ([]string, error) {
 	customArgs := strings.TrimSpace(rawFFmpegArgs)
 	if customArgs != "" {
 		parsed, err := splitCommandLine(customArgs)
@@ -548,7 +671,7 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, bitrateKbps
 		}
 		args := append([]string{}, inputArgs...)
 		args = append(args, "-an")
-		args = append(args, defaultVp8EncoderArgs(qualityPreset, bitrateKbps)...)
+		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps)...)
 		return args, nil
 	case "testsrc":
 		args := []string{
@@ -556,7 +679,7 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, bitrateKbps
 			"-i", fmt.Sprintf("testsrc=size=1280x720:rate=%d", clamp(fps, 5, 60)),
 			"-an",
 		}
-		args = append(args, defaultVp8EncoderArgs(qualityPreset, bitrateKbps)...)
+		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps)...)
 		return args, nil
 	default:
 		return nil, fmt.Errorf("unsupported source mode: %s", sourceMode)
@@ -715,46 +838,252 @@ func normalizeDshowDeviceSelector(inputVal string) string {
 	return "video=" + val
 }
 
-func defaultVp8EncoderArgs(preset string, bitrateKbps int) []string {
+func defaultEncoderArgs(preset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int) []string {
+	enc := normalizeEncoderMode(encoderMode)
+	codec := normalizeCodecMode(codecMode)
+	iq := normalizeImageQuality(imageQuality)
+	adjustedBitrate := applyImageQualityToBitrate(bitrateKbps, iq)
+	if codec == "auto" {
+		switch enc {
+		case "nvenc", "amf", "qsv", "v4l2m2m", "vaapi":
+			codec = "h264"
+		default:
+			codec = "vp8"
+		}
+	}
+
+	if codec == "h264" {
+		return defaultH264ByEncoderArgs(preset, iq, enc, adjustedBitrate)
+	}
+	return defaultVp8EncoderArgs(preset, iq, adjustedBitrate)
+}
+
+func defaultH264ByEncoderArgs(preset string, imageQuality int, encoderMode string, bitrateKbps int) []string {
+	switch normalizeEncoderMode(encoderMode) {
+	case "nvenc":
+		return defaultH264EncoderArgs("h264_nvenc", "yuv420p", preset, bitrateKbps)
+	case "amf":
+		return defaultH264EncoderArgs("h264_amf", "nv12", preset, bitrateKbps)
+	case "qsv":
+		args := defaultH264EncoderArgs("h264_qsv", "nv12", preset, bitrateKbps)
+		return append([]string{"-look_ahead", "0"}, args...)
+	case "v4l2m2m":
+		return defaultH264EncoderArgs("h264_v4l2m2m", "yuv420p", preset, bitrateKbps)
+	case "vaapi":
+		// Works only when host ffmpeg + driver expose VAAPI; otherwise probe/API should hide it.
+		return []string{
+			"-vaapi_device", "/dev/dri/renderD128",
+			"-vf", "format=nv12,hwupload",
+			"-c:v", "h264_vaapi",
+			"-g", "60",
+			"-b:v", fmt.Sprintf("%dk", clamp(bitrateKbps, 200, 12000)),
+			"-maxrate", fmt.Sprintf("%dk", int(float64(clamp(bitrateKbps, 200, 12000))*1.2)),
+			"-bufsize", fmt.Sprintf("%dk", clamp(bitrateKbps, 200, 12000)*2),
+		}
+	case "hw":
+		// Legacy generic HW mode keeps behavior stable by using CPU H.264.
+		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps)
+	case "cpu", "auto":
+		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps)
+	default:
+		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps)
+	}
+}
+
+func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int) []string {
 	bitrate := clamp(bitrateKbps, 200, 12000)
-	maxrate := int(float64(bitrate) * 1.2)
-	bufsize := bitrate * 2
+	gop, maxrate, bufsize := qualityRateControl(preset, bitrate)
+	keyintMin := gop
+	xPreset := "veryfast"
+	crf := imageQualityToX264Crf(imageQuality)
+	switch normalizeQualityPreset(preset) {
+	case "low":
+		xPreset = "superfast"
+	case "low-latency":
+		xPreset = "ultrafast"
+	case "high":
+		xPreset = "faster"
+	case "optimal":
+		xPreset = "fast"
+	}
+	args := []string{
+		"-c:v", "libx264",
+		"-preset", xPreset,
+		"-tune", "zerolatency",
+		"-profile:v", "baseline",
+		"-level", "3.1",
+		"-vf", "format=yuv420p",
+		"-g", strconv.Itoa(gop),
+		"-keyint_min", strconv.Itoa(keyintMin),
+		"-sc_threshold", "0",
+		"-b:v", fmt.Sprintf("%dk", bitrate),
+		"-maxrate", fmt.Sprintf("%dk", maxrate),
+		"-bufsize", fmt.Sprintf("%dk", bufsize),
+	}
+	if crf >= 0 {
+		args = append(args, "-crf", strconv.Itoa(crf))
+	}
+	return args
+}
+
+func defaultVp8EncoderArgs(preset string, imageQuality int, bitrateKbps int) []string {
+	bitrate := clamp(bitrateKbps, 200, 12000)
+	gop, maxrate, bufsize := qualityRateControl(preset, bitrate)
+	crf := imageQualityToVp8Crf(imageQuality)
+
+	appendCrf := func(args []string) []string {
+		if crf >= 0 {
+			return append(args, "-crf", strconv.Itoa(crf))
+		}
+		return args
+	}
 
 	switch normalizeQualityPreset(preset) {
 	case "low":
-		return []string{
+		args := []string{
 			"-c:v", "libvpx",
 			"-deadline", "realtime",
 			"-cpu-used", "10",
-			"-g", "60",
+			"-vf", "format=yuv420p",
+			"-g", strconv.Itoa(gop),
 			"-b:v", fmt.Sprintf("%dk", bitrate),
 			"-maxrate", fmt.Sprintf("%dk", maxrate),
 			"-bufsize", fmt.Sprintf("%dk", bufsize),
-			"-pix_fmt", "yuv420p",
 		}
+		return appendCrf(args)
+	case "low-latency":
+		args := []string{
+			"-c:v", "libvpx",
+			"-deadline", "realtime",
+			"-cpu-used", "12",
+			"-vf", "format=yuv420p",
+			"-g", strconv.Itoa(gop),
+			"-b:v", fmt.Sprintf("%dk", bitrate),
+			"-maxrate", fmt.Sprintf("%dk", maxrate),
+			"-bufsize", fmt.Sprintf("%dk", bufsize),
+		}
+		return appendCrf(args)
 	case "high":
-		return []string{
+		args := []string{
 			"-c:v", "libvpx",
 			"-deadline", "realtime",
 			"-cpu-used", "6",
-			"-g", "60",
+			"-vf", "format=yuv420p",
+			"-g", strconv.Itoa(gop),
 			"-b:v", fmt.Sprintf("%dk", bitrate),
 			"-maxrate", fmt.Sprintf("%dk", maxrate),
 			"-bufsize", fmt.Sprintf("%dk", bufsize),
-			"-pix_fmt", "yuv420p",
 		}
+		return appendCrf(args)
+	case "optimal":
+		args := []string{
+			"-c:v", "libvpx",
+			"-deadline", "realtime",
+			"-cpu-used", "4",
+			"-vf", "format=yuv420p",
+			"-g", strconv.Itoa(gop),
+			"-b:v", fmt.Sprintf("%dk", bitrate),
+			"-maxrate", fmt.Sprintf("%dk", maxrate),
+			"-bufsize", fmt.Sprintf("%dk", bufsize),
+		}
+		return appendCrf(args)
 	default:
-		return []string{
+		args := []string{
 			"-c:v", "libvpx",
 			"-deadline", "realtime",
 			"-cpu-used", "8",
-			"-g", "60",
+			"-vf", "format=yuv420p",
+			"-g", strconv.Itoa(gop),
 			"-b:v", fmt.Sprintf("%dk", bitrate),
 			"-maxrate", fmt.Sprintf("%dk", maxrate),
 			"-bufsize", fmt.Sprintf("%dk", bufsize),
-			"-pix_fmt", "yuv420p",
 		}
+		return appendCrf(args)
 	}
+}
+
+func defaultH264EncoderArgs(encoder string, pixFmt string, preset string, bitrateKbps int) []string {
+	bitrate := clamp(bitrateKbps, 200, 12000)
+	gop, maxrate, bufsize := qualityRateControl(preset, bitrate)
+	return []string{
+		"-c:v", encoder,
+		"-g", strconv.Itoa(gop),
+		"-b:v", fmt.Sprintf("%dk", bitrate),
+		"-maxrate", fmt.Sprintf("%dk", maxrate),
+		"-bufsize", fmt.Sprintf("%dk", bufsize),
+		"-pix_fmt", pixFmt,
+	}
+}
+
+// qualityRateControl centralizes preset tuning so low and low-latency can be
+// intentionally different across all encoder backends.
+func qualityRateControl(preset string, bitrate int) (gop int, maxrate int, bufsize int) {
+	b := clamp(bitrate, 200, 12000)
+	switch normalizeQualityPreset(preset) {
+	case "low":
+		return 90, int(float64(b) * 1.15), b * 3
+	case "low-latency":
+		return 30, int(float64(b) * 1.05), b
+	case "high":
+		return 60, int(float64(b) * 1.2), b * 2
+	case "optimal":
+		return 120, int(float64(b) * 1.15), b * 4
+	default: // balanced
+		return 60, int(float64(b) * 1.2), b * 2
+	}
+}
+
+func applyImageQualityToBitrate(bitrateKbps int, imageQuality int) int {
+	bitrate := clamp(bitrateKbps, 200, 12000)
+	q := normalizeImageQuality(imageQuality)
+	if q == 0 {
+		return bitrate
+	}
+
+	// 1..100 maps to 0.6x..1.4x bitrate. This works uniformly across CPU/HW encoders.
+	scale := 0.6 + (0.8 * float64(q-1) / 99.0)
+	scaled := int(float64(bitrate) * scale)
+	return clamp(scaled, 200, 12000)
+}
+
+func imageQualityToVp8Crf(imageQuality int) int {
+	q := normalizeImageQuality(imageQuality)
+	if q == 0 {
+		return -1
+	}
+	// VP8/libvpx CRF: lower is better. Keep conservative range for realtime.
+	return int(50.0 - (float64(q-1) * 40.0 / 99.0)) // ~50..10
+}
+
+func imageQualityToX264Crf(imageQuality int) int {
+	q := normalizeImageQuality(imageQuality)
+	if q == 0 {
+		return -1
+	}
+	// x264 CRF: lower is better.
+	return int(35.0 - (float64(q-1) * 17.0 / 99.0)) // ~35..18
+}
+
+func normalizeImageQuality(v int) int {
+	if v < 1 || v > 100 {
+		return 0
+	}
+	return v
+}
+
+func envOptionalIntInRange(name string, min int, max int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	if n < min || n > max {
+		return 0
+	}
+	return n
 }
 
 func envIntInRange(name string, defaultVal int, min int, max int) int {
@@ -779,6 +1108,20 @@ func clamp(v int, min int, max int) int {
 	return v
 }
 
+func minInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func round2(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return float64(int(v*100+0.5)) / 100
+}
+
 func normalizeSourceMode(sourceMode string) string {
 	switch strings.ToLower(strings.TrimSpace(sourceMode)) {
 	case "", "testsrc":
@@ -794,10 +1137,66 @@ func normalizeQualityPreset(qualityPreset string) string {
 	switch strings.ToLower(strings.TrimSpace(qualityPreset)) {
 	case "low":
 		return "low"
+	case "low-latency":
+		return "low-latency"
+	case "optimal":
+		return "optimal"
 	case "high":
 		return "high"
 	default:
 		return "balanced"
+	}
+}
+
+func normalizeEncoderMode(encoderMode string) string {
+	switch strings.ToLower(strings.TrimSpace(encoderMode)) {
+	case "", "auto":
+		return "auto"
+	case "cpu":
+		return "cpu"
+	case "hw":
+		return "hw"
+	case "nvenc":
+		return "nvenc"
+	case "amf":
+		return "amf"
+	case "qsv":
+		return "qsv"
+	case "v4l2m2m":
+		return "v4l2m2m"
+	case "vaapi":
+		return "vaapi"
+	default:
+		return "auto"
+	}
+}
+
+func normalizeCodecMode(codecMode string) string {
+	switch strings.ToLower(strings.TrimSpace(codecMode)) {
+	case "", "auto":
+		return "auto"
+	case "vp8":
+		return "vp8"
+	case "h264":
+		return "h264"
+	default:
+		return "auto"
+	}
+}
+
+func selectedVideoMimeType(codecMode string, encoderMode string) string {
+	switch normalizeCodecMode(codecMode) {
+	case "vp8":
+		return webrtc.MimeTypeVP8
+	case "h264":
+		return webrtc.MimeTypeH264
+	}
+
+	switch normalizeEncoderMode(encoderMode) {
+	case "nvenc", "amf", "qsv", "v4l2m2m", "vaapi":
+		return webrtc.MimeTypeH264
+	default:
+		return webrtc.MimeTypeVP8
 	}
 }
 

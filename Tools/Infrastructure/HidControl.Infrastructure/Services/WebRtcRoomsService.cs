@@ -58,13 +58,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     /// <inheritdoc />
     public Task<WebRtcRoomCreateResult> CreateAsync(string? room, CancellationToken ct)
     {
-        return CreateInternalAsync(room, qualityPreset: null, bitrateKbps: null, fps: null, persist: true, ct);
+        return CreateInternalAsync(room, qualityPreset: null, bitrateKbps: null, fps: null, imageQuality: null, captureInput: null, encoder: null, codec: null, persist: true, ct);
     }
 
     /// <inheritdoc />
-    public Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, CancellationToken ct)
+    public Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
     {
-        return CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, persist: false, ct);
+        return CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, persist: false, ct);
     }
 
     /// <inheritdoc />
@@ -113,7 +113,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         return new WebRtcRoomDeleteResult(stop.ok, room, stop.stopped, stop.error);
     }
 
-    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, bool persist, CancellationToken ct)
+    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool persist, CancellationToken ct)
     {
         _ = ct;
         RestorePersistedRoomsIfNeeded();
@@ -125,7 +125,10 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
 
         string? normalizedPreset = NormalizeQualityPreset(qualityPreset);
-        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset, bitrateKbps, fps);
+        string? normalizedEncoder = NormalizeEncoder(encoder);
+        string? normalizedCodec = NormalizeCodec(codec);
+        int? normalizedImageQuality = NormalizeImageQuality(imageQuality);
+        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset, bitrateKbps, fps, normalizedImageQuality, captureInput, normalizedEncoder, normalizedCodec);
         if (ok && persist)
         {
             TouchPersistedRoom(normalized);
@@ -440,6 +443,51 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
 
         return qualityPreset.Trim().ToLowerInvariant();
+    }
+
+    private static string? NormalizeCodec(string? codec)
+    {
+        if (string.IsNullOrWhiteSpace(codec))
+        {
+            return null;
+        }
+
+        string c = codec.Trim().ToLowerInvariant();
+        return c switch
+        {
+            "auto" or "vp8" or "h264" => c,
+            _ => null
+        };
+    }
+
+    private static int? NormalizeImageQuality(int? imageQuality)
+    {
+        if (imageQuality is null)
+        {
+            return null;
+        }
+
+        if (imageQuality < 1 || imageQuality > 100)
+        {
+            return null;
+        }
+
+        return imageQuality.Value;
+    }
+
+    private static string? NormalizeEncoder(string? encoder)
+    {
+        if (string.IsNullOrWhiteSpace(encoder))
+        {
+            return null;
+        }
+
+        string e = encoder.Trim().ToLowerInvariant();
+        return e switch
+        {
+            "auto" or "cpu" or "hw" or "nvenc" or "amf" or "qsv" or "v4l2m2m" or "vaapi" => e,
+            _ => null
+        };
     }
 
     private static bool IsVideoRoom(string room)

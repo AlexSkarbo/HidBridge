@@ -71,6 +71,10 @@ public static class WebRtcClientExtensions
     /// <param name="qualityPreset">Optional video quality preset.</param>
     /// <param name="bitrateKbps">Optional target bitrate (kbps).</param>
     /// <param name="fps">Optional target FPS.</param>
+    /// <param name="imageQuality">Optional image quality level (1-100).</param>
+    /// <param name="captureInput">Optional capture input string (for example: video=USB3.0 Video).</param>
+    /// <param name="encoder">Optional encoder selection (for example: auto, cpu, hw).</param>
+    /// <param name="codec">Optional codec selection (for example: auto, vp8, h264).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create response.</returns>
     public static Task<WebRtcCreateRoomResponse?> CreateWebRtcVideoRoomAsync(
@@ -79,10 +83,14 @@ public static class WebRtcClientExtensions
         string? qualityPreset = null,
         int? bitrateKbps = null,
         int? fps = null,
+        int? imageQuality = null,
+        string? captureInput = null,
+        string? encoder = null,
+        string? codec = null,
         CancellationToken ct = default)
         => client.PostAsync<WebRtcCreateVideoRoomRequest, WebRtcCreateRoomResponse>(
             "/status/webrtc/video/rooms",
-            new WebRtcCreateVideoRoomRequest(room, qualityPreset, bitrateKbps, fps),
+            new WebRtcCreateVideoRoomRequest(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec),
             ct);
 
     /// <summary>

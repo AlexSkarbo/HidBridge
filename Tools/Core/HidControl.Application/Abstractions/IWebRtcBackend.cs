@@ -25,12 +25,20 @@ public interface IWebRtcBackend
     /// <param name="qualityPreset">Optional video quality preset (used for video rooms only).</param>
     /// <param name="bitrateKbps">Optional target bitrate (kbps) used for video rooms only.</param>
     /// <param name="fps">Optional target FPS used for video rooms only.</param>
+    /// <param name="imageQuality">Optional image quality level (1-100) used for video rooms only.</param>
+    /// <param name="captureInput">Optional capture input string used for video rooms only.</param>
+    /// <param name="encoder">Optional encoder selection used for video rooms only.</param>
+    /// <param name="codec">Optional codec selection used for video rooms only.</param>
     /// <returns>Start result.</returns>
     (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(
         string room,
         string? qualityPreset = null,
         int? bitrateKbps = null,
-        int? fps = null);
+        int? fps = null,
+        int? imageQuality = null,
+        string? captureInput = null,
+        string? encoder = null,
+        string? codec = null);
 
     /// <summary>
     /// Stops a helper peer for a room.

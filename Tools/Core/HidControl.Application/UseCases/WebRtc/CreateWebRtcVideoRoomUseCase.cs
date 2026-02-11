@@ -28,14 +28,18 @@ public sealed class CreateWebRtcVideoRoomUseCase
     /// <param name="qualityPreset">Optional video quality preset.</param>
     /// <param name="bitrateKbps">Optional target bitrate (kbps).</param>
     /// <param name="fps">Optional target FPS.</param>
+    /// <param name="imageQuality">Optional image quality level (1-100).</param>
+    /// <param name="captureInput">Optional capture input string for helper.</param>
+    /// <param name="encoder">Optional encoder selection for helper.</param>
+    /// <param name="codec">Optional codec selection for helper.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create result.</returns>
-    public Task<WebRtcRoomCreateResult> Execute(string? room, string? qualityPreset, int? bitrateKbps, int? fps, CancellationToken ct)
+    public Task<WebRtcRoomCreateResult> Execute(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(qualityPreset))
         {
             string q = qualityPreset.Trim().ToLowerInvariant();
-            if (q != "low" && q != "balanced" && q != "high")
+            if (q != "low" && q != "low-latency" && q != "balanced" && q != "high" && q != "optimal")
             {
                 return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_quality_preset"));
             }
@@ -48,8 +52,35 @@ public sealed class CreateWebRtcVideoRoomUseCase
         {
             return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_fps"));
         }
+        if (imageQuality is int iq && (iq < 1 || iq > 100))
+        {
+            return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_image_quality"));
+        }
+        if (!string.IsNullOrWhiteSpace(encoder))
+        {
+            string e = encoder.Trim().ToLowerInvariant();
+            if (e != "auto" &&
+                e != "cpu" &&
+                e != "hw" &&
+                e != "nvenc" &&
+                e != "amf" &&
+                e != "qsv" &&
+                e != "v4l2m2m" &&
+                e != "vaapi")
+            {
+                return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_encoder"));
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(codec))
+        {
+            string c = codec.Trim().ToLowerInvariant();
+            if (c != "auto" && c != "vp8" && c != "h264")
+            {
+                return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_codec"));
+            }
+        }
 
         string? r = string.IsNullOrWhiteSpace(room) ? _roomIds.GenerateVideoRoomId() : room;
-        return _rooms.CreateVideoAsync(r, qualityPreset, bitrateKbps, fps, ct);
+        return _rooms.CreateVideoAsync(r, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, ct);
     }
 }

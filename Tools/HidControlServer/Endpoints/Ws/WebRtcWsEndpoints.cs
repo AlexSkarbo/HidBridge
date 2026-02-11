@@ -92,7 +92,31 @@ public static class WebRtcWsEndpoints
                         string? eventName = TryGetStringProperty(mData, "event");
                         string? mode = TryGetStringProperty(mData, "mode");
                         string? detail = TryGetStringProperty(mData, "detail");
-                        videoPeerSupervisor.ReportRuntimeStatus(runtimeRoom, eventName, mode, detail);
+                        string? encoder = TryGetStringProperty(mData, "encoder");
+                        string? codec = TryGetStringProperty(mData, "codec");
+                        string? qualityPreset = TryGetStringProperty(mData, "qualityPreset");
+                        int? targetBitrateKbps = TryGetIntProperty(mData, "bitrateKbps");
+                        int? targetFps = TryGetIntProperty(mData, "targetFps");
+                        double? measuredFps = TryGetDoubleProperty(mData, "measuredFps");
+                        int? measuredKbps = TryGetIntProperty(mData, "measuredKbps");
+                        long? frames = TryGetLongProperty(mData, "frames");
+                        long? packets = TryGetLongProperty(mData, "packets");
+                        bool? fallbackUsed = TryGetBoolProperty(mData, "fallbackUsed");
+                        videoPeerSupervisor.ReportRuntimeStatus(
+                            runtimeRoom,
+                            eventName,
+                            mode,
+                            detail,
+                            encoder,
+                            codec,
+                            qualityPreset,
+                            targetBitrateKbps,
+                            targetFps,
+                            measuredFps,
+                            measuredKbps,
+                            frames,
+                            packets,
+                            fallbackUsed);
 
                         await BroadcastAsync(signaling, runtimeRoom, clientId, new
                         {
@@ -334,6 +358,104 @@ public static class WebRtcWsEndpoints
         catch
         {
             // Ignore parse errors from malformed helper payloads.
+        }
+
+        return null;
+    }
+
+    private static int? TryGetIntProperty(JsonElement data, string name)
+    {
+        try
+        {
+            if (data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty(name, out JsonElement p))
+            {
+                if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out int n))
+                {
+                    return n;
+                }
+                if (p.ValueKind == JsonValueKind.String && int.TryParse(p.GetString(), out int ns))
+                {
+                    return ns;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static long? TryGetLongProperty(JsonElement data, string name)
+    {
+        try
+        {
+            if (data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty(name, out JsonElement p))
+            {
+                if (p.ValueKind == JsonValueKind.Number && p.TryGetInt64(out long n))
+                {
+                    return n;
+                }
+                if (p.ValueKind == JsonValueKind.String && long.TryParse(p.GetString(), out long ns))
+                {
+                    return ns;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static double? TryGetDoubleProperty(JsonElement data, string name)
+    {
+        try
+        {
+            if (data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty(name, out JsonElement p))
+            {
+                if (p.ValueKind == JsonValueKind.Number && p.TryGetDouble(out double n))
+                {
+                    return n;
+                }
+                if (p.ValueKind == JsonValueKind.String && double.TryParse(p.GetString(), out double ns))
+                {
+                    return ns;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static bool? TryGetBoolProperty(JsonElement data, string name)
+    {
+        try
+        {
+            if (data.ValueKind == JsonValueKind.Object &&
+                data.TryGetProperty(name, out JsonElement p))
+            {
+                if (p.ValueKind == JsonValueKind.True) return true;
+                if (p.ValueKind == JsonValueKind.False) return false;
+                if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out int n))
+                {
+                    return n != 0;
+                }
+                if (p.ValueKind == JsonValueKind.String && bool.TryParse(p.GetString(), out bool bs))
+                {
+                    return bs;
+                }
+            }
+        }
+        catch
+        {
         }
 
         return null;

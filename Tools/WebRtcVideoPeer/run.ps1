@@ -40,7 +40,33 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
   exit 127
 }
 
-& go run . *>> $logPath
+$binDir = Join-Path $PSScriptRoot "bin"
+New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+$exePath = Join-Path $binDir "webrtcvideopeer.exe"
+$forceGoRun = ($env:HIDBRIDGE_HELPER_FORCE_GORUN -eq "1")
+$needBuild = -not (Test-Path $exePath)
+if (-not $needBuild) {
+  $exeStamp = (Get-Item $exePath).LastWriteTimeUtc
+  $srcChanged = Get-ChildItem -Path $PSScriptRoot -Filter "*.go" -File |
+    Where-Object { $_.LastWriteTimeUtc -gt $exeStamp } |
+    Select-Object -First 1
+  if ($null -ne $srcChanged) { $needBuild = $true }
+}
+
+if (-not $forceGoRun) {
+  if ($needBuild) {
+    & go build -o $exePath . *>> $logPath
+    if ($LASTEXITCODE -ne 0) {
+      $code = $LASTEXITCODE
+      if ($null -eq $code) { $code = if ($?) { 0 } else { 1 } }
+      exit $code
+    }
+  }
+  & $exePath *>> $logPath
+} else {
+  & go run . *>> $logPath
+}
+
 $code = $LASTEXITCODE
 if ($null -eq $code) {
   # LASTEXITCODE can stay null for some PowerShell command failures.

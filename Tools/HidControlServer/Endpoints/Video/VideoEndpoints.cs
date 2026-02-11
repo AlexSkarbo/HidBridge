@@ -3,6 +3,7 @@ using System.Linq;
 using System.Management;
 using System.Net.WebSockets;
 using System.Threading.Channels;
+using HidControl.Contracts;
 using HidControl.Application.UseCases;
 using HidControl.UseCases.Video;
 using ServerVideoMode = HidControlServer.Services.VideoModeService;
@@ -892,6 +893,50 @@ public static class VideoEndpoints
             catch (Exception ex)
             {
                 return Results.Ok(new { ok = false, error = ex.Message });
+            }
+        });
+
+        group.MapGet("/dshow/modes", (string? device, Options opt) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Ok(new { ok = false, error = "windows_only" });
+            }
+            if (string.IsNullOrWhiteSpace(device))
+            {
+                return Results.Ok(new { ok = false, error = "device_required", modes = Array.Empty<VideoMode>() });
+            }
+
+            try
+            {
+                var result = ServerVideoMode.ListDshowModes(opt.FfmpegPath, device.Trim());
+                return Results.Ok(new
+                {
+                    ok = true,
+                    device = device.Trim(),
+                    modes = result.Modes,
+                    supportsMjpeg = result.SupportsMjpeg
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { ok = false, error = ex.Message, modes = Array.Empty<VideoMode>() });
+            }
+        });
+
+        group.MapGet("/webrtc/encoders", (Options opt) =>
+        {
+            try
+            {
+                var encoders = VideoProfileService
+                    .ListAvailableWebRtcEncoders(opt.FfmpegPath)
+                    .Select(e => new { id = e.Id, label = e.Label })
+                    .ToArray();
+                return Results.Ok(new { ok = true, encoders });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { ok = false, error = ex.Message, encoders = Array.Empty<object>() });
             }
         });
     }

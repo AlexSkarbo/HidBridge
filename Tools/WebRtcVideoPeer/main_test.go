@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -70,4 +71,88 @@ func TestNormalizeDshowInputArgs_IgnoresNonDshowArgs(t *testing.T) {
 	if !reflect.DeepEqual(got, in) {
 		t.Fatalf("normalizeDshowInputArgs changed non-dshow input\n got: %#v\nwant: %#v", got, in)
 	}
+}
+
+func TestDefaultVp8EncoderArgs_LowLatencyDiffersFromLow(t *testing.T) {
+	low := defaultVp8EncoderArgs("low", 70, 1200)
+	lat := defaultVp8EncoderArgs("low-latency", 70, 1200)
+
+	if got := argValue(low, "-cpu-used"); got != "10" {
+		t.Fatalf("low cpu-used mismatch, got=%q", got)
+	}
+	if got := argValue(lat, "-cpu-used"); got != "12" {
+		t.Fatalf("low-latency cpu-used mismatch, got=%q", got)
+	}
+	if got := argValue(low, "-g"); got != "90" {
+		t.Fatalf("low gop mismatch, got=%q", got)
+	}
+	if got := argValue(lat, "-g"); got != "30" {
+		t.Fatalf("low-latency gop mismatch, got=%q", got)
+	}
+}
+
+func TestDefaultH264CpuArgs_LowLatencyDiffersFromLow(t *testing.T) {
+	low := defaultH264CpuArgs("low", 70, 1200)
+	lat := defaultH264CpuArgs("low-latency", 70, 1200)
+
+	if got := argValue(low, "-preset"); got != "superfast" {
+		t.Fatalf("low preset mismatch, got=%q", got)
+	}
+	if got := argValue(lat, "-preset"); got != "ultrafast" {
+		t.Fatalf("low-latency preset mismatch, got=%q", got)
+	}
+	if got := argValue(low, "-g"); got != "90" {
+		t.Fatalf("low gop mismatch, got=%q", got)
+	}
+	if got := argValue(lat, "-g"); got != "30" {
+		t.Fatalf("low-latency gop mismatch, got=%q", got)
+	}
+}
+
+func TestDefaultVp8EncoderArgs_ImageQualityAddsCrf(t *testing.T) {
+	lowQ := defaultVp8EncoderArgs("balanced", 20, 1200)
+	highQ := defaultVp8EncoderArgs("balanced", 90, 1200)
+	lowCrf := argValue(lowQ, "-crf")
+	highCrf := argValue(highQ, "-crf")
+	if lowCrf == "" || highCrf == "" {
+		t.Fatalf("expected -crf for vp8 args, got low=%q high=%q", lowCrf, highCrf)
+	}
+	lowN, err1 := strconv.Atoi(lowCrf)
+	highN, err2 := strconv.Atoi(highCrf)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("failed to parse crf values low=%q high=%q", lowCrf, highCrf)
+	}
+	if !(lowN > highN) {
+		t.Fatalf("expected lower CRF for higher image quality, got low=%q high=%q", lowCrf, highCrf)
+	}
+}
+
+func TestDefaultVp8EncoderArgs_ImageQualityAutoOmitsCrf(t *testing.T) {
+	args := defaultVp8EncoderArgs("balanced", 0, 1200)
+	if got := argValue(args, "-crf"); got != "" {
+		t.Fatalf("expected no -crf for auto image quality, got=%q", got)
+	}
+}
+
+func TestDefaultH264EncoderArgs_LowLatencyRateControl(t *testing.T) {
+	args := defaultH264EncoderArgs("h264_nvenc", "yuv420p", "low-latency", 1200)
+
+	if got := argValue(args, "-g"); got != "30" {
+		t.Fatalf("low-latency gop mismatch, got=%q", got)
+	}
+	if got := argValue(args, "-maxrate"); got != "1260k" {
+		t.Fatalf("low-latency maxrate mismatch, got=%q", got)
+	}
+	if got := argValue(args, "-bufsize"); got != "1200k" {
+		t.Fatalf("low-latency bufsize mismatch, got=%q", got)
+	}
+}
+
+func argValue(args []string, key string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == key {
+			return args[i+1]
+		}
+	}
+	return ""
 }

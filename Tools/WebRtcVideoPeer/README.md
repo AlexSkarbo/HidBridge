@@ -5,7 +5,7 @@ This helper runs next to `HidControlServer` and acts as a **WebRTC peer for the 
 Current status:
 - It joins a signaling room via `HidControlServer` (`/ws/webrtc`)
 - It accepts offers from browser clients
-- It publishes a VP8 video track from `ffmpeg` (`testsrc` by default, `capture` optional)
+- It publishes a video track from `ffmpeg` (`testsrc` by default, `capture` optional)
 - It opens/accepts a `DataChannel` and echoes text messages back (debug/control)
 - If capture startup fails, it auto-falls back to `testsrc` and sends:
   - `{"type":"video.status","event":"fallback","mode":"testsrc","detail":"capture_failed"}`
@@ -44,7 +44,9 @@ Capture mode (Linux `/dev/video0` default):
 - `HIDBRIDGE_STUN` (default: `stun:stun.l.google.com:19302`)
 - `HIDBRIDGE_FFMPEG` (optional, default: `ffmpeg`)
 - `HIDBRIDGE_VIDEO_SOURCE_MODE` (optional, default: `testsrc`; values: `testsrc`, `capture`)
-- `HIDBRIDGE_VIDEO_QUALITY_PRESET` (optional, default: `balanced`; values: `low`, `balanced`, `high`)
+- `HIDBRIDGE_VIDEO_QUALITY_PRESET` (optional, default: `balanced`; values: `low`, `low-latency`, `balanced`, `high`, `optimal`)
+- `HIDBRIDGE_VIDEO_IMAGE_QUALITY` (optional, default: `70`; range: `1..100`; affects target bitrate scaling for selected encoder)
+- `HIDBRIDGE_VIDEO_ENCODER` (optional, default: `auto`; values: `auto`, `cpu`, `hw`, `nvenc`, `amf`, `qsv`, `v4l2m2m`, `vaapi`)
 - `HIDBRIDGE_VIDEO_CAPTURE_INPUT` (optional; full FFmpeg input args for capture mode, overrides OS defaults)
 - `HIDBRIDGE_VIDEO_FFMPEG_ARGS` (optional; full FFmpeg pipeline args, overrides built-in mode pipeline)
 
@@ -54,3 +56,9 @@ Notes:
   - Linux: `-f v4l2 -framerate 30 -video_size 1280x720 -i /dev/video0`
   - macOS: `-f avfoundation -framerate 30 -i 0:none`
 - `HIDBRIDGE_VIDEO_FFMPEG_ARGS` should include input + codec settings; output transport (`-f rtp ...`) is appended by the helper.
+- Encoder mode behavior:
+  - `cpu`: software VP8 path (`libvpx`)
+  - `nvenc|amf|qsv|v4l2m2m|vaapi`: explicit hardware encoders
+  - `hw`: legacy alias kept for compatibility
+  - `auto`: stable default (CPU path)
+- `HIDBRIDGE_VIDEO_IMAGE_QUALITY` does not force a specific codec/encoder; it scales target bitrate safely for both CPU and HW paths.

@@ -1,7 +1,7 @@
 # WebRTC Video Peer
 
-Goal: move towards real-time video via WebRTC.
-Current implementation publishes a VP8 track via FFmpeg, with source mode configurable.
+Goal: real-time video via WebRTC.
+Current implementation publishes a video track via FFmpeg, with configurable source mode, quality and encoder mode.
 
 ## Components
 
@@ -25,7 +25,15 @@ Where:
 ## Endpoints
 
 - List video rooms: `GET /status/webrtc/video/rooms`
-- Create a video room (and start helper): `POST /status/webrtc/video/rooms` (optional body: `{ "room": "...", "qualityPreset": "low|balanced|high" }`)
+- Create a video room (and start helper): `POST /status/webrtc/video/rooms`
+  Optional body fields:
+  - `room`: string
+  - `qualityPreset`: `low|low-latency|balanced|high|optimal`
+  - `bitrateKbps`: integer (`200..12000`)
+  - `fps`: integer (`5..60`)
+  - `captureInput`: custom ffmpeg capture input args
+  - `encoder`: `auto|cpu|hw|nvenc|amf|qsv|v4l2m2m|vaapi`
+- List available WebRTC encoders for current host: `GET /video/webrtc/encoders`
 - Delete a video room helper: `DELETE /status/webrtc/video/rooms/{room}`
   - Note: deleting the default room `video` is blocked (`cannot_delete_video`).
 
@@ -51,7 +59,7 @@ Web UI note:
 
 Notes:
 - `webRtcVideoPeerSourceMode`: `testsrc` or `capture` (default: `testsrc`)
-- `webRtcVideoPeerQualityPreset`: `low`, `balanced`, `high` (default: `balanced`)
+- `webRtcVideoPeerQualityPreset`: `low`, `low-latency`, `balanced`, `high`, `optimal` (default: `balanced`)
 - `webRtcVideoPeerCaptureInput`: optional FFmpeg input args for capture mode
 - `webRtcVideoPeerFfmpegArgs`: optional full FFmpeg pipeline args (overrides mode defaults)
 - On helper startup, orphan `*.pid` entries are cleaned and stale helper processes are terminated.
@@ -59,14 +67,32 @@ Notes:
 ## Current Behavior
 
 - Helper joins room and accepts offer.
-- Helper publishes VP8 video track from FFmpeg:
+- Helper publishes video track from FFmpeg:
   - default mode: `testsrc` (synthetic generator)
   - optional mode: `capture` (real capture input)
+- Encoder mode:
+  - `cpu`: software encode path (codec-dependent, e.g. `libvpx` for VP8, `libx264` for H264)
+  - explicit hardware modes: `nvenc`, `amf`, `qsv`, `v4l2m2m`, `vaapi`
+  - `hw`: legacy alias kept for compatibility
+  - `auto`: stable CPU default
 - If `capture` fails to start (device busy/not found), helper falls back to `testsrc` automatically
   and sends a DataChannel status event:
   - `{"type":"video.status","event":"fallback","mode":"testsrc","detail":"capture_failed"}`
 - Helper keeps DataChannel echo for control/debug payloads.
 - Helper process is long-running and reconnects to signaling after transient transport failures.
+
+## Quality Presets
+
+Preset tuning is intentionally different for throughput-oriented low quality versus
+latency-oriented mode:
+
+| Preset | Intent | GOP | Rate control | Expected tradeoff |
+| --- | --- | --- | --- | --- |
+| `low-latency` | minimum interaction delay | short (`~30`) | tight (`maxrate ~1.05x`, `bufsize ~1x`) | fastest reaction, lower visual stability/quality |
+| `low` | reduce CPU/bandwidth | medium (`~90`) | relaxed (`maxrate ~1.15x`, `bufsize ~3x`) | lower load, not optimized for latency |
+| `balanced` | default | medium (`~60`) | standard (`maxrate ~1.2x`, `bufsize ~2x`) | balanced latency/quality/load |
+| `high` | better quality at same target bitrate | medium (`~60`) | standard (`maxrate ~1.2x`, `bufsize ~2x`) | better detail, higher encode cost |
+| `optimal` | max visual quality | long (`~120`) | quality-favoring (`maxrate ~1.15x`, `bufsize ~4x`) | best quality, highest latency/CPU risk |
 
 ## Video Source Configuration
 
@@ -78,7 +104,9 @@ Notes:
 - `HIDBRIDGE_VIDEO_CAPTURE_INPUT`
   - optional full FFmpeg input args for capture mode (overrides OS defaults)
 - `HIDBRIDGE_VIDEO_QUALITY_PRESET`
-  - `low`, `balanced`, `high` for built-in VP8 encoder args
+  - `low`, `low-latency`, `balanced`, `high`, `optimal` for built-in encoder args
+- `HIDBRIDGE_VIDEO_ENCODER`
+  - `auto` (default), `cpu`, `hw`, `nvenc`, `amf`, `qsv`, `v4l2m2m`, `vaapi`
 - `HIDBRIDGE_VIDEO_FFMPEG_ARGS`
   - optional full FFmpeg pipeline args (overrides mode-specific built-in pipeline)
 
@@ -105,5 +133,5 @@ Enable persistence explicitly with:
 
 ## Current Limitations
 
-- Video is synthetic (test source), not real camera/screen yet.
-- Full production capture pipeline and codec policy are next milestones.
+- Hardware encoder availability depends on OS/driver/FFmpeg build.
+- Capture-device capability limits (resolution/fps/format) still dominate final output quality.

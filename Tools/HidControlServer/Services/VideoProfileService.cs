@@ -32,4 +32,14 @@ internal static class VideoProfileService
     {
         return InfraVideoProfileService.EnsureSupportedEncoder(opt, profiles.GetAll(), profileArgs);
     }
+
+    /// <summary>
+    /// Lists available WebRTC encoder modes supported by ffmpeg on this host.
+    /// </summary>
+    /// <param name="ffmpegPath">Ffmpeg executable path.</param>
+    /// <returns>Encoder id and label pairs.</returns>
+    public static IReadOnlyList<(string Id, string Label)> ListAvailableWebRtcEncoders(string ffmpegPath)
+    {
+        return InfraVideoProfileService.ListAvailableWebRtcEncoders(ffmpegPath);
+    }
 }

@@ -161,7 +161,8 @@ public sealed record VideoProfileConfig(
 /// <param name="Width">Frame width in pixels.</param>
 /// <param name="Height">Frame height in pixels.</param>
 /// <param name="MaxFps">Maximum supported frames per second.</param>
-public sealed record VideoMode(int Width, int Height, double MaxFps);
+/// <param name="Format">Optional pixel format or codec (e.g. mjpeg, yuyv422, h264).</param>
+public sealed record VideoMode(int Width, int Height, double MaxFps, string? Format = null);
 
 /// <summary>
 /// Result set of available video modes and MJPEG capability.

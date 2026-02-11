@@ -99,8 +99,19 @@ app.MapGet("/", () =>
     .card { border: 1px solid #e2e2e2; border-radius: 12px; padding: 12px; margin: 12px 0; }
     .card h3 { margin: 0 0 10px; font-size: 14px; }
     pre { background: #0b0d12; color: #d5d9e0; padding: 12px; border-radius: 10px; overflow: auto; }
-    .muted { color: #666; font-size: 12px; }
-  </style>
+	    .muted { color: #666; font-size: 12px; }
+	    .rtc-qrow { display: flex; justify-content: center; margin-top: 4px; }
+	    .rtc-qgrid {
+	      display: grid;
+	      grid-template-columns: 180px 180px 180px 180px 220px 520px 320px;
+	      column-gap: 10px;
+	      row-gap: 6px;
+	      width: max-content;
+	      max-width: 100%;
+	      align-items: center;
+	    }
+	    .rtc-qgrid > * { min-width: 0; }
+	  </style>
 </head>
 <body>
   <h2>HidBridge Web Client (Skeleton)</h2>
@@ -195,25 +206,47 @@ app.MapGet("/", () =>
 	        <option value="control" selected>control</option>
 	        <option value="video">video</option>
 	      </select>
-	      <span id="rtcQualityWrap" style="display:none">
-	        <label class="muted">Quality</label>
-	        <select id="rtcVideoQuality" title="Video quality preset">
-	          <option value="low">low</option>
-	          <option value="balanced" selected>balanced</option>
-	          <option value="high">high</option>
-	        </select>
-	        <label class="muted">Bitrate kbps</label>
-	        <input id="rtcVideoBitrateKbps" type="number" min="200" max="12000" step="50" value="" style="width: 120px" placeholder="auto" />
-	        <label class="muted">FPS</label>
-	        <input id="rtcVideoFps" type="number" min="5" max="60" step="1" value="" style="width: 90px" placeholder="auto" />
-	        <span class="muted" title="High quality uses more CPU and bandwidth">high = more CPU</span>
-	      </span>
 	      <input id="rtcRoom" style="min-width: 220px" value="control" placeholder="room" />
 	      <button id="rtcGenRoom" title="Generate a random room id">Generate</button>
 	      <button id="rtcRefreshRooms" title="Fetch rooms from server">Refresh Rooms</button>
 	      <button id="rtcStartHelper" title="Ensure the server-side helper is started for this room">Start Helper</button>
 	      <button id="rtcConnect">Connect</button>
 	      <button id="rtcHangup">Hangup</button>
+	    </div>
+	    <div id="rtcQualityWrap" style="display:none">
+	      <div class="rtc-qrow">
+	        <div class="rtc-qgrid">
+	          <label class="muted" for="rtcVideoQuality">Quality</label>
+	          <label class="muted" for="rtcVideoImageQuality">Image quality (1..100)</label>
+	          <label class="muted" for="rtcVideoBitrateKbps">Bitrate kbps</label>
+	          <label class="muted" for="rtcVideoEncoder">Encoder</label>
+	          <label class="muted" for="rtcVideoCodec">Codec</label>
+	          <label class="muted" for="rtcVideoCaptureInput">Capture input</label>
+	          <label class="muted" for="rtcVideoCaptureMode">Capture mode</label>
+	          <select id="rtcVideoQuality" title="Video quality preset">
+	            <option value="low">low</option>
+	            <option value="low-latency">low-latency</option>
+	            <option value="balanced" selected>balanced</option>
+	            <option value="high">high</option>
+	            <option value="optimal">optimal (1080p)</option>
+	          </select>
+	          <input id="rtcVideoImageQuality" type="number" min="1" max="100" step="1" value="" placeholder="auto" />
+	          <input id="rtcVideoBitrateKbps" type="number" min="200" max="12000" step="50" value="" placeholder="auto" />
+	          <select id="rtcVideoEncoder" title="Encoder mode">
+	            <option value="cpu">CPU (software)</option>
+	          </select>
+	          <select id="rtcVideoCodec" title="Video codec">
+	            <option value="vp8" selected>VP8</option>
+	            <option value="h264">H264</option>
+	          </select>
+	          <select id="rtcVideoCaptureInput" title="Windows dshow capture input" style="width:100%;">
+	            <option value="">(server default)</option>
+	          </select>
+	          <select id="rtcVideoCaptureMode" title="Capture resolution/fps" style="width:100%;">
+	            <option value="">auto (server default)</option>
+	          </select>
+	        </div>
+	      </div>
 	    </div>
 	    <div class="row">
 	      <label class="muted"><input id="rtcAutoRefresh" type="checkbox" checked /> Auto-refresh rooms</label>
@@ -236,10 +269,17 @@ app.MapGet("/", () =>
 	    </div>
 	    <div class="card" id="rtcVideoPane" style="display:none">
 	      <h4>Video Preview</h4>
-	      <div class="row">
-	        <video id="rtcRemoteVideo" autoplay playsinline muted style="width: min(100%, 960px); aspect-ratio: 16 / 9; background: #111; border: 1px solid #2d2d2d; border-radius: 10px;"></video>
-	      </div>
+      <div class="row">
+        <video id="rtcRemoteVideo" autoplay playsinline muted tabindex="0" style="width: min(100%, 960px); aspect-ratio: 16 / 9; background: #111; border: 1px solid #2d2d2d; border-radius: 10px;"></video>
+      </div>
+      <div class="row">
+        <button id="rtcVideoFullscreen" type="button">Fullscreen</button>
+        <button id="rtcVideoInputToggle" type="button">Enable Remote Input</button>
+        <span id="rtcVideoInputState" class="muted">remote input: off</span>
+      </div>
 	      <div class="row muted" id="rtcVideoMeta">waiting for remote video track...</div>
+	      <div class="row muted" id="rtcVideoStability">video stability: n/a</div>
+	      <div class="row muted" id="rtcVideoPerf">video perf: n/a</div>
 	    </div>
 	    <div class="card">
 	      <h4>Control Actions (DataChannel)</h4>
@@ -437,12 +477,155 @@ app.MapGet("/", () =>
 	    const rtcVideoPane = document.getElementById("rtcVideoPane");
 	    const rtcRemoteVideo = document.getElementById("rtcRemoteVideo");
 	    const rtcVideoMeta = document.getElementById("rtcVideoMeta");
+	    const rtcVideoStability = document.getElementById("rtcVideoStability");
+	    const rtcVideoPerf = document.getElementById("rtcVideoPerf");
+	    const rtcVideoFullscreen = document.getElementById("rtcVideoFullscreen");
+	    const rtcVideoInputToggle = document.getElementById("rtcVideoInputToggle");
+	    const rtcVideoInputState = document.getElementById("rtcVideoInputState");
 	    // Timeouts are loaded from HidControlServer config via /api/webrtc/config.
 	    // Defaults are intentionally minimal.
 	    // Default values are overwritten by /api/webrtc/config on page load. Keep them small for fast fail on LAN.
 	    let rtcCfg = { joinTimeoutMs: 250, connectTimeoutMs: 5000 };
+	    let rtcRemoteInputEnabled = false;
+	    let rtcMoveAccumX = 0;
+	    let rtcMoveAccumY = 0;
+	    let rtcMoveTimer = null;
+	    let rtcLastMouseX = null;
+	    let rtcLastMouseY = null;
+
+	    function setRemoteInputEnabled(v) {
+	      rtcRemoteInputEnabled = !!v;
+	      if (rtcVideoInputToggle) {
+	        rtcVideoInputToggle.textContent = rtcRemoteInputEnabled ? "Disable Remote Input" : "Enable Remote Input";
+	      }
+	      if (rtcVideoInputState) {
+	        rtcVideoInputState.textContent = rtcRemoteInputEnabled ? "remote input: on (video focused)" : "remote input: off";
+	      }
+	      if (!rtcRemoteInputEnabled) {
+	        rtcLastMouseX = null;
+	        rtcLastMouseY = null;
+	      }
+	      if (rtcRemoteVideo) {
+	        rtcRemoteVideo.style.cursor = rtcRemoteInputEnabled ? "crosshair" : "default";
+	      }
+	    }
+
+	    async function postQuiet(path, payload) {
+	      try {
+	        await fetch(path, {
+	          method: "POST",
+	          headers: { "Content-Type": "application/json" },
+	          body: JSON.stringify(payload || {})
+	        });
+	      } catch {
+	        // Best-effort control path.
+	      }
+	    }
+
+	    function flushMouseMove() {
+	      rtcMoveTimer = null;
+	      const dx = Math.round(rtcMoveAccumX);
+	      const dy = Math.round(rtcMoveAccumY);
+	      rtcMoveAccumX = 0;
+	      rtcMoveAccumY = 0;
+	      if (dx === 0 && dy === 0) return;
+	      postQuiet("/api/mouse/move", { dx, dy });
+	    }
+
+	    function queueMouseMove(dx, dy) {
+	      rtcMoveAccumX += dx;
+	      rtcMoveAccumY += dy;
+	      if (!rtcMoveTimer) {
+	        rtcMoveTimer = setTimeout(flushMouseMove, 25);
+	      }
+	    }
+
+	    function keyboardChordFromEvent(e) {
+	      const usage = codeToUsage[e.code];
+	      if (usage === undefined) return null;
+	      return {
+	        mods: modsFromEvent(e),
+	        keys: [usage],
+	        holdMs: 35
+	      };
+	    }
+	    const rtcPerf = {
+	      connectClickAt: 0,
+	      helperReadyAt: 0,
+	      callAt: 0,
+	      dcOpenAt: 0,
+	      trackAt: 0,
+	      firstFrameAt: 0,
+	      fps: 0,
+	      frameWindowStartMs: 0,
+	      frameWindowCount: 0,
+	      frameCbId: 0
+	    };
+	    function resetRtcPerf() {
+	      if (rtcRemoteVideo && typeof rtcRemoteVideo.cancelVideoFrameCallback === "function" && rtcPerf.frameCbId) {
+	        try { rtcRemoteVideo.cancelVideoFrameCallback(rtcPerf.frameCbId); } catch {}
+	      }
+	      rtcPerf.connectClickAt = 0;
+	      rtcPerf.helperReadyAt = 0;
+	      rtcPerf.callAt = 0;
+	      rtcPerf.dcOpenAt = 0;
+	      rtcPerf.trackAt = 0;
+	      rtcPerf.firstFrameAt = 0;
+	      rtcPerf.fps = 0;
+	      rtcPerf.frameWindowStartMs = 0;
+	      rtcPerf.frameWindowCount = 0;
+	      rtcPerf.frameCbId = 0;
+	      if (rtcVideoPerf) rtcVideoPerf.textContent = "video perf: n/a";
+	    }
+	    function updateRtcPerf() {
+	      if (!rtcVideoPerf) return;
+	      const t0 = rtcPerf.connectClickAt;
+	      if (!t0) {
+	        rtcVideoPerf.textContent = "video perf: n/a";
+	        return;
+	      }
+	      const parts = [];
+	      if (rtcPerf.helperReadyAt > 0) parts.push(`helper ${rtcPerf.helperReadyAt - t0}ms`);
+	      if (rtcPerf.dcOpenAt > 0) parts.push(`dc-open ${rtcPerf.dcOpenAt - t0}ms`);
+	      if (rtcPerf.trackAt > 0) parts.push(`track ${rtcPerf.trackAt - t0}ms`);
+	      if (rtcPerf.firstFrameAt > 0) parts.push(`first-frame ${rtcPerf.firstFrameAt - t0}ms`);
+	      if (rtcPerf.fps > 0) parts.push(`fps ${rtcPerf.fps.toFixed(1)}`);
+	      rtcVideoPerf.textContent = parts.length > 0 ? ("video perf: " + parts.join(", ")) : "video perf: waiting...";
+	    }
+	    function startVideoPerfProbe() {
+	      if (!rtcRemoteVideo || typeof rtcRemoteVideo.requestVideoFrameCallback !== "function") return;
+	      if (rtcPerf.frameCbId && typeof rtcRemoteVideo.cancelVideoFrameCallback === "function") {
+	        try { rtcRemoteVideo.cancelVideoFrameCallback(rtcPerf.frameCbId); } catch {}
+	      }
+	      rtcPerf.frameWindowStartMs = 0;
+	      rtcPerf.frameWindowCount = 0;
+	      const onFrame = (nowMs) => {
+	        if (!rtcPerf.firstFrameAt) {
+	          rtcPerf.firstFrameAt = Date.now();
+	          updateRtcPerf();
+	        }
+	        if (!rtcPerf.frameWindowStartMs) {
+	          rtcPerf.frameWindowStartMs = nowMs;
+	          rtcPerf.frameWindowCount = 0;
+	        }
+	        rtcPerf.frameWindowCount++;
+	        const dt = nowMs - rtcPerf.frameWindowStartMs;
+	        if (dt >= 1000) {
+	          rtcPerf.fps = (rtcPerf.frameWindowCount * 1000) / dt;
+	          rtcPerf.frameWindowStartMs = nowMs;
+	          rtcPerf.frameWindowCount = 0;
+	          updateRtcPerf();
+	        }
+	        rtcPerf.frameCbId = rtcRemoteVideo.requestVideoFrameCallback(onFrame);
+	      };
+	      rtcPerf.frameCbId = rtcRemoteVideo.requestVideoFrameCallback(onFrame);
+	    }
 	    function setRtcStatus(s) {
 	      rtcStatus.textContent = s;
+	      if (s === "datachannel: open" && rtcPerf.connectClickAt > 0 && rtcPerf.dcOpenAt === 0) {
+	        rtcPerf.dcOpenAt = Date.now();
+	        updateRtcPerf();
+	      }
 	      const open = (s === "datachannel: open");
 	      rtcSendBtn.disabled = !open;
 	      rtcSendShortcutBtn.disabled = !open;
@@ -468,19 +651,47 @@ app.MapGet("/", () =>
 	    let webrtcClient = null;
 	    function clearRemoteVideo() {
 	      if (rtcRemoteVideo) {
+	        if (typeof rtcRemoteVideo.cancelVideoFrameCallback === "function" && rtcPerf.frameCbId) {
+	          try { rtcRemoteVideo.cancelVideoFrameCallback(rtcPerf.frameCbId); } catch {}
+	        }
 	        try { rtcRemoteVideo.pause(); } catch {}
 	        rtcRemoteVideo.srcObject = null;
 	      }
 	      if (rtcVideoMeta) {
 	        rtcVideoMeta.textContent = "waiting for remote video track...";
 	      }
+	      if (rtcVideoStability) {
+	        rtcVideoStability.textContent = "video stability: n/a";
+	      }
+	      resetRtcPerf();
+	    }
+	    function renderVideoStatus(payload) {
+	      if (!rtcVideoStability) return;
+	      const p = payload || {};
+	      const event = String(p.event || "");
+	      const mode = String(p.mode || "");
+	      const detail = String(p.detail || "");
+	      const measuredFps = Number(p.measuredFps || 0);
+	      const measuredKbps = Number(p.measuredKbps || 0);
+	      const fallbackUsed = !!p.fallbackUsed;
+	      const parts = [];
+	      if (event) parts.push(event);
+	      if (mode) parts.push(`mode=${mode}`);
+	      if (measuredFps > 0) parts.push(`fps=${measuredFps.toFixed(1)}`);
+	      if (measuredKbps > 0) parts.push(`kbps=${measuredKbps}`);
+	      parts.push(`fallback=${fallbackUsed ? "yes" : "no"}`);
+	      if (detail) parts.push(detail);
+	      rtcVideoStability.textContent = "video stability: " + parts.join(", ");
 	    }
 	    function updateRtcModeUi() {
 	      const videoMode = getMode() === "video";
 	      if (rtcVideoPane) rtcVideoPane.style.display = videoMode ? "block" : "none";
 	      const qualityWrap = document.getElementById("rtcQualityWrap");
 	      if (qualityWrap) qualityWrap.style.display = videoMode ? "inline-flex" : "none";
-	      if (!videoMode) clearRemoteVideo();
+	      if (!videoMode) {
+	        setRemoteInputEnabled(false);
+	        clearRemoteVideo();
+	      }
 	    }
 	    function isVideoRoomId(r) {
 	      if (!r) return false;
@@ -511,8 +722,16 @@ app.MapGet("/", () =>
 	    }
 	    function getVideoQualityPreset() {
 	      const v = (document.getElementById("rtcVideoQuality")?.value || "balanced").trim().toLowerCase();
-	      if (v === "low" || v === "balanced" || v === "high") return v;
+	      if (v === "low" || v === "low-latency" || v === "balanced" || v === "high" || v === "optimal") return v;
 	      return "balanced";
+	    }
+	    function getVideoEncoder() {
+	      const v = (document.getElementById("rtcVideoEncoder")?.value || "cpu").trim().toLowerCase();
+	      return v || "cpu";
+	    }
+	    function getVideoCodec() {
+	      const v = (document.getElementById("rtcVideoCodec")?.value || "vp8").trim().toLowerCase();
+	      return (v === "h264") ? "h264" : "vp8";
 	    }
 	    function getVideoBitrateKbps() {
 	      const raw = (document.getElementById("rtcVideoBitrateKbps")?.value || "").trim();
@@ -521,12 +740,164 @@ app.MapGet("/", () =>
 	      if (!Number.isFinite(n)) return null;
 	      return n;
 	    }
-	    function getVideoFps() {
-	      const raw = (document.getElementById("rtcVideoFps")?.value || "").trim();
+	    function getVideoImageQuality() {
+	      const raw = (document.getElementById("rtcVideoImageQuality")?.value || "").trim();
 	      if (!raw) return null;
 	      const n = Number.parseInt(raw, 10);
 	      if (!Number.isFinite(n)) return null;
+	      if (n < 1 || n > 100) return null;
 	      return n;
+	    }
+	    function getSelectedVideoCaptureDevice() {
+	      const raw = (document.getElementById("rtcVideoCaptureInput")?.value || "").trim();
+	      return raw || null;
+	    }
+	    function getSelectedVideoCaptureMode() {
+	      const raw = (document.getElementById("rtcVideoCaptureMode")?.value || "").trim();
+	      return raw || null;
+	    }
+	    function getVideoCaptureInput() {
+	      const device = getSelectedVideoCaptureDevice();
+	      if (!device) return null;
+	      const mode = getSelectedVideoCaptureMode();
+	      const args = ["-f", "dshow"];
+	      const selectedEncoder = getVideoEncoder();
+	      if (mode) {
+	        const m = /^(\d+)x(\d+)@(\d+(?:\.\d+)?)(?:\|(.+))?$/.exec(mode);
+	        if (m) {
+	          const fmt = String(m[4] || "").trim().toLowerCase();
+	          if (fmt && fmt !== "unknown") {
+	            if (fmt === "mjpeg" || fmt === "h264" || fmt === "hevc" || fmt === "h265" || fmt === "mpeg4") {
+	              args.push("-vcodec", fmt);
+	            } else {
+	              args.push("-pixel_format", fmt);
+	            }
+	          }
+	          args.push("-video_size", `${m[1]}x${m[2]}`);
+	          const modeFps = Number.parseFloat(m[3]);
+	          let effectiveFps = Number.isFinite(modeFps) ? modeFps : null;
+	          if (selectedEncoder === "cpu" && effectiveFps) {
+	            // CPU path is more stable with lower ingest FPS on common USB capture cards.
+	            effectiveFps = Math.min(effectiveFps, 30);
+	          }
+	          if (effectiveFps && Number.isFinite(effectiveFps)) {
+	            const fpsInt = Math.max(5, Math.min(60, Math.round(effectiveFps)));
+	            args.push("-framerate", String(fpsInt));
+	          }
+	        }
+	      }
+	      const escaped = device.replace(/"/g, '\\"');
+	      args.push("-i", `"video=${escaped}"`);
+	      return args.join(" ");
+	    }
+	    let rtcEncoderRefreshSeq = 0;
+	    async function refreshVideoCaptureModes() {
+	      const sel = document.getElementById("rtcVideoCaptureMode");
+	      if (!sel) return;
+	      const prev = (sel.value || "").trim();
+	      const device = getSelectedVideoCaptureDevice();
+	      sel.innerHTML = "";
+	      const defaultOpt = document.createElement("option");
+	      defaultOpt.value = "";
+	      defaultOpt.textContent = "auto (server default)";
+	      sel.appendChild(defaultOpt);
+	      if (!device) return;
+	      try {
+	        const res = await fetch(`/api/video/dshow/modes?device=${encodeURIComponent(device)}`);
+	        if (!res.ok) return;
+	        const j = await res.json().catch(() => null);
+	        const list = (j && j.ok && Array.isArray(j.modes)) ? j.modes : [];
+	        for (const mode of list) {
+	          const w = Number.parseInt(String((mode && (mode.Width ?? mode.width)) ?? ""), 10);
+	          const h = Number.parseInt(String((mode && (mode.Height ?? mode.height)) ?? ""), 10);
+	          const fps = Number.parseFloat(String((mode && (mode.MaxFps ?? mode.maxFps)) ?? ""));
+	          const fmt = String((mode && (mode.Format ?? mode.format)) ?? "unknown").trim().toLowerCase() || "unknown";
+	          if (!Number.isFinite(w) || !Number.isFinite(h) || !Number.isFinite(fps)) continue;
+	          const fpsText = Number.isInteger(fps) ? String(Math.trunc(fps)) : String(fps);
+	          const value = `${w}x${h}@${fpsText}|${fmt}`;
+	          const opt = document.createElement("option");
+	          opt.value = value;
+	          opt.textContent = `${w}x${h} @ ${fpsText} fps [${fmt}]`;
+	          sel.appendChild(opt);
+	        }
+	      } catch {}
+	      if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+	        sel.value = prev;
+	      }
+	      await refreshVideoEncoders();
+	    }
+	    async function refreshVideoEncoders() {
+	      const seq = ++rtcEncoderRefreshSeq;
+	      const sel = document.getElementById("rtcVideoEncoder");
+	      if (!sel) return;
+	      const prev = (sel.value || "").trim().toLowerCase();
+	      sel.innerHTML = "";
+	      try {
+	        const res = await fetch("/api/video/webrtc/encoders");
+	        if (seq !== rtcEncoderRefreshSeq) return;
+	        if (res.ok) {
+	          const j = await res.json().catch(() => null);
+	          if (seq !== rtcEncoderRefreshSeq) return;
+	          const list = (j && j.ok && Array.isArray(j.encoders)) ? j.encoders : [];
+	          const seen = new Set();
+	          for (const enc of list) {
+	            const id = String((enc && (enc.id || enc.Id)) || "").trim().toLowerCase();
+	            if (!id) continue;
+	            if (seen.has(id)) continue;
+	            seen.add(id);
+	            const label = String((enc && (enc.label || enc.Label)) || id).trim();
+	            const opt = document.createElement("option");
+	            opt.value = id;
+	            opt.textContent = (id === "cpu") ? "CPU (software)" : label;
+	            sel.appendChild(opt);
+	          }
+	        }
+	      } catch {}
+	      if (seq !== rtcEncoderRefreshSeq) return;
+	      if (sel.options.length === 0) {
+	        const opt = document.createElement("option");
+	        opt.value = "cpu";
+	        opt.textContent = "CPU (software)";
+	        sel.appendChild(opt);
+	      }
+	      if (prev && Array.from(sel.options).some(o => o.value.toLowerCase() === prev)) {
+	        sel.value = prev;
+	      } else {
+	        sel.value = sel.options[0].value;
+	      }
+	    }
+	    async function refreshVideoCaptureDevices() {
+	      const sel = document.getElementById("rtcVideoCaptureInput");
+	      if (!sel) return;
+	      const prev = (sel.value || "").trim();
+	      sel.innerHTML = "";
+	      const defaultOpt = document.createElement("option");
+	      defaultOpt.value = "";
+	      defaultOpt.textContent = "(server default)";
+	      sel.appendChild(defaultOpt);
+	      try {
+	        const res = await fetch("/api/video/dshow/devices");
+	        if (!res.ok) return;
+	        const j = await res.json().catch(() => null);
+	        const list = (j && j.ok && Array.isArray(j.devices)) ? j.devices : [];
+	        for (const dev of list) {
+	          const name = (typeof dev === "string")
+	            ? dev.trim()
+	            : String((dev && (dev.Name || dev.name || dev.DeviceName || dev.deviceName || dev.Label || dev.label)) || "").trim();
+	          if (!name) continue;
+	          const alt = (typeof dev === "object" && dev)
+	            ? String(dev.AlternativeName || dev.alternativeName || "").trim()
+	            : "";
+	          const opt = document.createElement("option");
+	          opt.value = name;
+	          opt.textContent = alt ? `${name} (${alt})` : name;
+	          sel.appendChild(opt);
+	        }
+	      } catch {}
+	      if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+	        sel.value = prev;
+	      }
+	      await refreshVideoCaptureModes();
 	    }
 	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
 	    function setRoom(r) {
@@ -574,12 +945,7 @@ app.MapGet("/", () =>
 	          try {
 	            const parsed = (typeof data === "string") ? JSON.parse(data) : data;
 	            if (parsed && parsed.type === "video.status") {
-	              const event = String(parsed.event || "");
-	              const mode = String(parsed.mode || "");
-	              const detail = String(parsed.detail || "");
-	              if (rtcVideoMeta) {
-	                rtcVideoMeta.textContent = `video status: ${event} (${mode})${detail ? " - " + detail : ""}`;
-	              }
+	              renderVideoStatus(parsed);
 	              rtcLog({ webrtc: "video.status", payload: parsed });
 	              return;
 	            }
@@ -599,6 +965,11 @@ app.MapGet("/", () =>
 	              const kind = (ev && ev.track && ev.track.kind) ? ev.track.kind : "unknown";
 	              rtcVideoMeta.textContent = "remote track: " + kind;
 	            }
+	            if (ev && ev.track && ev.track.kind === "video" && rtcPerf.connectClickAt > 0 && rtcPerf.trackAt === 0) {
+	              rtcPerf.trackAt = Date.now();
+	              updateRtcPerf();
+	            }
+	            startVideoPerfProbe();
 	          } catch (e) {
 	            rtcLog({ webrtc: "ui.track_error", error: String(e) });
 	          }
@@ -608,6 +979,64 @@ app.MapGet("/", () =>
 	    applyDefaultVideoQualityForLan();
 	    updateRtcModeUi();
 	    resetWebRtcClient();
+	    setRemoteInputEnabled(false);
+	    if (rtcVideoFullscreen) {
+	      rtcVideoFullscreen.addEventListener("click", async () => {
+	        if (!rtcRemoteVideo) return;
+	        try {
+	          if (document.fullscreenElement === rtcRemoteVideo) {
+	            await document.exitFullscreen();
+	          } else {
+	            await rtcRemoteVideo.requestFullscreen();
+	          }
+	        } catch (e) {
+	          rtcLog({ webrtc: "ui.fullscreen_error", error: String(e) });
+	        }
+	      });
+	    }
+	    if (rtcVideoInputToggle) {
+	      rtcVideoInputToggle.addEventListener("click", () => setRemoteInputEnabled(!rtcRemoteInputEnabled));
+	    }
+	    if (rtcRemoteVideo) {
+	      rtcRemoteVideo.addEventListener("click", () => {
+	        try { rtcRemoteVideo.focus(); } catch {}
+	      });
+	      rtcRemoteVideo.addEventListener("contextmenu", (e) => {
+	        if (rtcRemoteInputEnabled) e.preventDefault();
+	      });
+	      rtcRemoteVideo.addEventListener("mousemove", (e) => {
+	        if (!rtcRemoteInputEnabled || getMode() !== "video") return;
+	        if (rtcLastMouseX == null || rtcLastMouseY == null) {
+	          rtcLastMouseX = e.clientX;
+	          rtcLastMouseY = e.clientY;
+	          return;
+	        }
+	        const dx = e.clientX - rtcLastMouseX;
+	        const dy = e.clientY - rtcLastMouseY;
+	        rtcLastMouseX = e.clientX;
+	        rtcLastMouseY = e.clientY;
+	        queueMouseMove(dx, dy);
+	      });
+	      rtcRemoteVideo.addEventListener("mouseleave", () => {
+	        rtcLastMouseX = null;
+	        rtcLastMouseY = null;
+	      });
+	      rtcRemoteVideo.addEventListener("mousedown", (e) => {
+	        if (!rtcRemoteInputEnabled || getMode() !== "video") return;
+	        e.preventDefault();
+	        const button = (e.button === 2) ? "right" : (e.button === 1 ? "middle" : "left");
+	        postQuiet("/api/mouse/click", { button });
+	      });
+	      rtcRemoteVideo.addEventListener("keydown", (e) => {
+	        if (!rtcRemoteInputEnabled || getMode() !== "video") return;
+	        if (e.repeat) return;
+	        const chord = keyboardChordFromEvent(e);
+	        if (!chord) return;
+	        e.preventDefault();
+	        e.stopPropagation();
+	        postQuiet("/api/keyboard/chord", chord);
+	      });
+	    }
 
 	    async function refreshWebRtcConfig() {
 	      try {
@@ -675,6 +1104,7 @@ app.MapGet("/", () =>
 	      if (!rtcVideoMeta) return;
 	      if (!j || !j.ok) {
 	        rtcVideoMeta.textContent = "video runtime: n/a";
+	        if (rtcVideoStability) rtcVideoStability.textContent = "video stability: n/a";
 	        return;
 	      }
 	      const modeReq = j.sourceModeRequested || "?";
@@ -683,6 +1113,17 @@ app.MapGet("/", () =>
 	      const fallback = j.fallbackUsed ? "fallback=yes" : "fallback=no";
 	      const err = j.lastVideoError ? ` error=${j.lastVideoError}` : "";
 	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${err}`;
+	      if (rtcVideoStability) {
+	        const parts = [];
+	        if (typeof j.measuredFps === "number" && j.measuredFps > 0) parts.push(`fps=${j.measuredFps.toFixed(1)}`);
+	        if (typeof j.measuredKbps === "number" && j.measuredKbps > 0) parts.push(`kbps=${j.measuredKbps}`);
+	        if (typeof j.targetFps === "number" && j.targetFps > 0) parts.push(`target-fps=${j.targetFps}`);
+	        if (typeof j.targetBitrateKbps === "number" && j.targetBitrateKbps > 0) parts.push(`target-kbps=${j.targetBitrateKbps}`);
+	        if (typeof j.frames === "number" && j.frames > 0) parts.push(`frames=${j.frames}`);
+	        if (typeof j.packets === "number" && j.packets > 0) parts.push(`packets=${j.packets}`);
+	        parts.push(`fallback=${j.fallbackUsed ? "yes" : "no"}`);
+	        rtcVideoStability.textContent = "video stability: " + parts.join(", ");
+	      }
 	    }
 
 	    async function refreshVideoPeerRuntime(room) {
@@ -719,7 +1160,10 @@ app.MapGet("/", () =>
 	              room,
 	              qualityPreset: getVideoQualityPreset(),
 	              bitrateKbps: getVideoBitrateKbps(),
-	              fps: getVideoFps()
+	              imageQuality: getVideoImageQuality(),
+	              captureInput: getVideoCaptureInput(),
+	              encoder: getVideoEncoder(),
+	              codec: getVideoCodec()
 	            })
 	          });
 	          const j = await res.json().catch(() => null);
@@ -779,7 +1223,10 @@ app.MapGet("/", () =>
 	          ? {
 	              qualityPreset: getVideoQualityPreset(),
 	              bitrateKbps: getVideoBitrateKbps(),
-	              fps: getVideoFps()
+	              imageQuality: getVideoImageQuality(),
+	              captureInput: getVideoCaptureInput(),
+	              encoder: getVideoEncoder(),
+	              codec: getVideoCodec()
 	            }
 	          : {};
 	        const res = await fetch(createUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -817,10 +1264,21 @@ app.MapGet("/", () =>
 	      } catch {}
 	    })();
 	    refreshWebRtcConfig();
+	    refreshVideoCaptureDevices();
 	    refreshRooms();
+	    document.getElementById("rtcVideoCaptureInput")?.addEventListener("change", () => {
+	      refreshVideoCaptureModes();
+	    });
+	    document.getElementById("rtcVideoCaptureMode")?.addEventListener("change", () => {
+	      refreshVideoEncoders();
+	    });
 	    document.getElementById("rtcMode").addEventListener("change", () => {
 	      updateRtcModeUi();
 	      resetWebRtcClient();
+	      if (getMode() === "video") {
+	        refreshVideoCaptureDevices();
+	        refreshVideoEncoders();
+	      }
 	      refreshRooms();
 	    });
 
@@ -898,7 +1356,10 @@ app.MapGet("/", () =>
 	              room: wanted,
 	              qualityPreset: getVideoQualityPreset(),
 	              bitrateKbps: getVideoBitrateKbps(),
-	              fps: getVideoFps()
+	              imageQuality: getVideoImageQuality(),
+	              captureInput: getVideoCaptureInput(),
+	              encoder: getVideoEncoder(),
+	              codec: getVideoCodec()
 	            })
 	          });
 	          const created = await createRes.json().catch(() => null);
@@ -912,12 +1373,28 @@ app.MapGet("/", () =>
 	          return false;
 	        }
 
+	        // Fast path for non-default rooms: if helper is already present, avoid POST and continue immediately.
+	        try {
+	          const listRes = await fetch(prefix);
+	          const list = await listRes.json().catch(() => null);
+	          if (list && list.ok && Array.isArray(list.rooms)) {
+	            const rr = list.rooms.find(x => x && x.room && String(x.room).toLowerCase() === wantedLc);
+	            if (rr && rr.hasHelper) {
+	              rtcLog({ webrtc: "ui.ensure_helper_existing", room: wanted, endpoint: prefix });
+	              return true;
+	            }
+	          }
+	        } catch {}
+
 	        const body = isVideoRoomId(wanted)
 	          ? {
 	              room: wanted,
 	              qualityPreset: getVideoQualityPreset(),
 	              bitrateKbps: getVideoBitrateKbps(),
-	              fps: getVideoFps()
+	              imageQuality: getVideoImageQuality(),
+	              captureInput: getVideoCaptureInput(),
+	              encoder: getVideoEncoder(),
+	              codec: getVideoCodec()
 	            }
 	          : { room: wanted };
 	        const res = await fetch(prefix, {
@@ -940,29 +1417,48 @@ app.MapGet("/", () =>
 	      return false;
 	    }
 
-	    async function waitForHelperPeer(room, timeoutMs) {
+	    async function getRoomState(room) {
+	      const wanted = (room || "").toLowerCase();
 	      const prefix = getRoomsApiPrefix(room);
+	      try {
+	        const res = await fetch(prefix);
+	        if (!res.ok) return null;
+	        const j = await res.json().catch(() => null);
+	        if (!j || !j.ok || !Array.isArray(j.rooms)) return null;
+	        const rr = j.rooms.find(x => x && x.room && String(x.room).toLowerCase() === wanted);
+	        if (!rr) return null;
+	        return {
+	          hasHelper: !!rr.hasHelper,
+	          peers: Number.isFinite(rr.peers) ? rr.peers : 0
+	        };
+	      } catch {
+	        return null;
+	      }
+	    }
+
+	    async function waitForHelperPeer(room, timeoutMs) {
 	      const start = Date.now();
+	      // Fast path to avoid unnecessary waiting when helper is already in room.
+	      const first = await getRoomState(room);
+	      if (first && first.hasHelper && first.peers >= 1) return true;
 	      while (Date.now() - start < timeoutMs) {
-	        try {
-	          const res = await fetch(prefix);
-	          if (res.ok) {
-	            const j = await res.json().catch(() => null);
-	            if (j && j.ok && Array.isArray(j.rooms)) {
-	              const rr = j.rooms.find(x => x && x.room && x.room.toLowerCase() === room.toLowerCase());
-	              if (rr && rr.hasHelper && typeof rr.peers === "number" && rr.peers >= 1) return true;
-	            }
-	          }
-	        } catch {}
-	        await new Promise(r => setTimeout(r, 150));
+	        const rr = await getRoomState(room);
+	        if (rr && rr.hasHelper && rr.peers >= 1) return true;
+	        const elapsed = Date.now() - start;
+	        const sleepMs = timeoutMs <= 4000 ? 50 : (elapsed < 3000 ? 100 : 150);
+	        await new Promise(r => setTimeout(r, sleepMs));
 	      }
 	      return false;
 	    }
 
-	    function getHelperReadyTimeoutMs(room) {
+	    function getHelperReadyTimeoutMs(room, helperAlreadyPresent) {
 	      const r = (room || "").toLowerCase();
 	      const base = Math.max(1000, rtcCfg.connectTimeoutMs || 0);
-	      // Video helper often starts slower on first run (go toolchain warm-up).
+	      if (helperAlreadyPresent) {
+	        // Warm start: helper process is already visible in room list.
+	        return Math.min(8000, Math.max(2000, Math.floor(base * 0.8)));
+	      }
+	      // Cold start: helper may need process spawn/build warm-up.
 	      if (r === "video" || r.startsWith("hb-v-") || r.startsWith("video-")) {
 	        return Math.min(60000, Math.max(20000, base * 4));
 	      }
@@ -971,9 +1467,10 @@ app.MapGet("/", () =>
 
 	    document.getElementById("rtcStartHelper").addEventListener("click", async () => {
 	      const room = getRoom();
+	      const before = await getRoomState(room);
 	      const ok = await ensureHelper(room);
 	      if (ok) {
-	        const ready = await waitForHelperPeer(room, getHelperReadyTimeoutMs(room));
+	        const ready = await waitForHelperPeer(room, getHelperReadyTimeoutMs(room, !!(before && before.hasHelper)));
 	        rtcLog({ webrtc: "ui.helper_ready", room, ready });
 	      }
 	      await refreshRooms();
@@ -984,11 +1481,14 @@ app.MapGet("/", () =>
 	      if (!webrtcClient) return;
 	      try {
 	        const room = getRoom();
+	        const roomBeforeEnsure = await getRoomState(room);
+	        rtcPerf.connectClickAt = Date.now();
+	        updateRtcPerf();
 	        // If the room has no helper yet, start it before calling (gives a consistent UX for generated rooms).
 	        const helperOk = await ensureHelper(room);
 	        if (!helperOk) return;
 	        // Important: signaling is a relay. If we send an offer before the helper joins the room, it will be lost.
-	        const helperReadyTimeoutMs = getHelperReadyTimeoutMs(room);
+	        const helperReadyTimeoutMs = getHelperReadyTimeoutMs(room, !!(roomBeforeEnsure && roomBeforeEnsure.hasHelper));
 	        const ready = await waitForHelperPeer(room, helperReadyTimeoutMs);
 	        if (!ready) {
 	          show({
@@ -1000,6 +1500,9 @@ app.MapGet("/", () =>
 	          });
 	          return;
 	        }
+	        rtcPerf.helperReadyAt = Date.now();
+	        updateRtcPerf();
+	        rtcPerf.callAt = Date.now();
 	        await webrtcClient.call();
 	        const connectedOk = await connectWithTimeout(rtcCfg.connectTimeoutMs);
 	        if (!connectedOk) {
@@ -1059,6 +1562,7 @@ app.MapGet("/", () =>
 
 	    document.getElementById("rtcHangup").addEventListener("click", async () => {
 	      if (webrtcClient) webrtcClient.hangup();
+	      setRemoteInputEnabled(false);
 	      clearRemoteVideo();
 	      setRtcStatus("disconnected");
 	    });
@@ -1297,26 +1801,130 @@ app.MapGet("/api/webrtc/video/peers/{room}", async (string room, CancellationTok
     }
 });
 
-app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken ct) =>
+app.MapGet("/api/video/dshow/devices", async (CancellationToken ct) =>
 {
     try
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        string url = $"{serverUrl.TrimEnd('/')}/video/dshow/devices";
+        using var resp = await http.GetAsync(url, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = "{\"ok\":false,\"devices\":[]}";
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { ok = false, devices = Array.Empty<string>(), error = "timeout" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, devices = Array.Empty<string>(), error = ex.Message });
+    }
+});
+
+app.MapGet("/api/video/dshow/modes", async (string? device, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(device))
+    {
+        return Results.Json(new { ok = false, error = "device_required", modes = Array.Empty<object>() });
+    }
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        string url = $"{serverUrl.TrimEnd('/')}/video/dshow/modes?device={Uri.EscapeDataString(device.Trim())}";
+        using var resp = await http.GetAsync(url, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = "{\"ok\":false,\"modes\":[]}";
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { ok = false, modes = Array.Empty<object>(), error = "timeout" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, modes = Array.Empty<object>(), error = ex.Message });
+    }
+});
+
+app.MapGet("/api/video/webrtc/encoders", async (CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
+        string url = $"{serverUrl.TrimEnd('/')}/video/webrtc/encoders";
+        using var resp = await http.GetAsync(url, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = "{\"ok\":false,\"encoders\":[]}";
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { ok = false, encoders = Array.Empty<object>(), error = "timeout" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, encoders = Array.Empty<object>(), error = ex.Message });
+    }
+});
+
+app.MapPost("/api/webrtc/video/rooms", async (HttpRequest req, CancellationToken ct) =>
+{
+    HidControl.Contracts.WebRtcCreateVideoRoomRequest body = new(null, null, null, null, null, null, null, null);
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-        var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct)
-            ?? new HidControl.Contracts.WebRtcCreateVideoRoomRequest(null, null, null, null);
+        body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct) ?? body;
         var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcVideoRoomAsync(
             client,
             body.Room,
             body.QualityPreset,
             body.BitrateKbps,
             body.Fps,
-            ct);
+            body.ImageQuality,
+            body.CaptureInput,
+            body.Encoder,
+            body.Codec,
+            CancellationToken.None);
         return Results.Json(res ?? new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "create_failed"));
     }
     catch (TaskCanceledException)
     {
+        try
+        {
+            // Best-effort recovery: helper startup may complete while the proxy request times out.
+            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            if (!string.IsNullOrWhiteSpace(token)) probe.DefaultRequestHeaders.Add("X-HID-Token", token);
+            var client = new HidControl.ClientSdk.HidControlClient(probe, new Uri(serverUrl));
+            var list = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, CancellationToken.None);
+            var wanted = body.Room;
+            if (!string.IsNullOrWhiteSpace(wanted))
+            {
+                bool exists = list?.Rooms?.Any(r => string.Equals(r.Room, wanted, StringComparison.OrdinalIgnoreCase)) == true;
+                if (exists)
+                {
+                    return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(true, wanted, false, null, null));
+                }
+            }
+        }
+        catch
+        {
+            // fall through to timeout response
+        }
         return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false, null, false, null, "timeout"));
     }
     catch (Exception ex)
@@ -1337,6 +1945,22 @@ app.MapDelete("/api/webrtc/video/rooms/{room}", async (string room, Cancellation
     }
     catch (TaskCanceledException)
     {
+        try
+        {
+            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            if (!string.IsNullOrWhiteSpace(token)) probe.DefaultRequestHeaders.Add("X-HID-Token", token);
+            var client = new HidControl.ClientSdk.HidControlClient(probe, new Uri(serverUrl));
+            var list = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, ct);
+            bool stillExists = list?.Rooms?.Any(r => string.Equals(r.Room, room, StringComparison.OrdinalIgnoreCase)) == true;
+            if (!stillExists)
+            {
+                return Results.Json(new HidControl.Contracts.WebRtcDeleteRoomResponse(true, room, true, null));
+            }
+        }
+        catch
+        {
+            // fall through to timeout response
+        }
         return Results.Json(new HidControl.Contracts.WebRtcDeleteRoomResponse(false, room, false, "timeout"));
     }
     catch (Exception ex)

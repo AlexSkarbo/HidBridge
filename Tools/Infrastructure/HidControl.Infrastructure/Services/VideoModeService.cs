@@ -101,7 +101,7 @@ public static class VideoModeService
     /// <returns>Modes and MJPEG support.</returns>
     public static VideoModesResult ListDshowModes(string ffmpegPath, string deviceName)
     {
-        var modes = new Dictionary<(int w, int h), double>();
+        var modes = new Dictionary<(int w, int h, string fmt), double>();
         var psi = new ProcessStartInfo
         {
             FileName = ffmpegPath,
@@ -122,6 +122,7 @@ public static class VideoModeService
 
         var sizeRegex = new Regex(@"s=(\d+)x(\d+)", RegexOptions.IgnoreCase);
         var fpsRegex = new Regex(@"fps=([0-9]+(?:\.[0-9]+)?)", RegexOptions.IgnoreCase);
+        var formatRegex = new Regex(@"(pixel_format|vcodec)=([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
         var mjpegRegex = new Regex(@"(pixel_format|vcodec)=mjpeg", RegexOptions.IgnoreCase);
         bool supportsMjpeg = mjpegRegex.IsMatch(stderr);
         foreach (string rawLine in stderr.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
@@ -134,6 +135,28 @@ public static class VideoModeService
             MatchCollection sizes = sizeRegex.Matches(line);
             MatchCollection fpsMatches = fpsRegex.Matches(line);
             if (sizes.Count == 0 || fpsMatches.Count == 0) continue;
+            string format = "unknown";
+            MatchCollection formatMatches = formatRegex.Matches(line);
+            if (formatMatches.Count > 0)
+            {
+                // Prefer vcodec if present (mjpeg/h264/etc), otherwise pixel_format.
+                string? fromVcodec = null;
+                string? fromPixel = null;
+                foreach (Match fm in formatMatches)
+                {
+                    string key = fm.Groups[1].Value;
+                    string value = fm.Groups[2].Value;
+                    if (string.Equals(key, "vcodec", StringComparison.OrdinalIgnoreCase))
+                    {
+                        fromVcodec = value;
+                    }
+                    else if (string.Equals(key, "pixel_format", StringComparison.OrdinalIgnoreCase))
+                    {
+                        fromPixel = value;
+                    }
+                }
+                format = (fromVcodec ?? fromPixel ?? "unknown").ToLowerInvariant();
+            }
 
             List<double> fpsValues = new();
             foreach (Match m in fpsMatches)
@@ -151,7 +174,7 @@ public static class VideoModeService
                 if (!int.TryParse(s.Groups[1].Value, out int w)) continue;
                 if (!int.TryParse(s.Groups[2].Value, out int h)) continue;
                 double fps = fpsValues.Count == sizes.Count ? fpsValues[i] : fpsValues.Max();
-                var key = (w, h);
+                var key = (w, h, format);
                 if (modes.TryGetValue(key, out double existing))
                 {
                     if (fps > existing) modes[key] = fps;
@@ -164,8 +187,10 @@ public static class VideoModeService
         }
 
         var list = modes
-            .Select(kv => new VideoMode(kv.Key.w, kv.Key.h, kv.Value))
+            .Select(kv => new VideoMode(kv.Key.w, kv.Key.h, kv.Value, kv.Key.fmt))
             .OrderBy(m => m.Width * m.Height)
+            .ThenBy(m => m.Format ?? "unknown")
+            .ThenByDescending(m => m.MaxFps)
             .ToList();
         return new VideoModesResult(list, supportsMjpeg);
     }

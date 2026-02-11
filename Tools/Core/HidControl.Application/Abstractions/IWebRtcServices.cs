@@ -27,9 +27,13 @@ public interface IWebRtcRoomsService
     /// <param name="qualityPreset">Optional video quality preset.</param>
     /// <param name="bitrateKbps">Optional target bitrate (kbps).</param>
     /// <param name="fps">Optional target FPS.</param>
+    /// <param name="imageQuality">Optional image quality level (1-100).</param>
+    /// <param name="captureInput">Optional capture input string passed to helper.</param>
+    /// <param name="encoder">Optional encoder selection passed to helper.</param>
+    /// <param name="codec">Optional codec selection passed to helper.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create result.</returns>
-    Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, CancellationToken ct);
+    Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct);
 
     /// <summary>
     /// Stops a room helper and removes the room (where applicable).

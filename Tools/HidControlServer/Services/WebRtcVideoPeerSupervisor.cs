@@ -34,7 +34,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         DateTimeOffset? StartedAtUtc,
         DateTimeOffset UpdatedAtUtc,
         int? Pid,
-        bool Running);
+        bool Running,
+        string? Encoder = null,
+        string? Codec = null,
+        string? QualityPreset = null,
+        int? TargetBitrateKbps = null,
+        int? TargetFps = null,
+        double? MeasuredFps = null,
+        int? MeasuredKbps = null,
+        long? Frames = null,
+        long? Packets = null);
 
     /// <summary>
     /// Snapshot of video peer runtime state for a single room.
@@ -48,7 +57,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         DateTimeOffset? StartedAtUtc,
         DateTimeOffset UpdatedAtUtc,
         int? Pid,
-        bool Running);
+        bool Running,
+        string? Encoder = null,
+        string? Codec = null,
+        string? QualityPreset = null,
+        int? TargetBitrateKbps = null,
+        int? TargetFps = null,
+        double? MeasuredFps = null,
+        int? MeasuredKbps = null,
+        long? Frames = null,
+        long? Packets = null);
 
     /// <summary>
     /// Creates an instance.
@@ -124,7 +142,11 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         string room,
         string? qualityPreset = null,
         int? bitrateKbps = null,
-        int? fps = null)
+        int? fps = null,
+        int? imageQuality = null,
+        string? captureInput = null,
+        string? encoder = null,
+        string? codec = null)
     {
         if (string.IsNullOrWhiteSpace(room))
         {
@@ -159,7 +181,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                             startedAt,
                             DateTimeOffset.UtcNow,
                             existing.Process.Id,
-                            Running: true);
+                            Running: true,
+                            Encoder: roomState?.Encoder,
+                            Codec: roomState?.Codec,
+                            QualityPreset: roomState?.QualityPreset,
+                            TargetBitrateKbps: roomState?.TargetBitrateKbps,
+                            TargetFps: roomState?.TargetFps,
+                            MeasuredFps: roomState?.MeasuredFps,
+                            MeasuredKbps: roomState?.MeasuredKbps,
+                            Frames: roomState?.Frames,
+                            Packets: roomState?.Packets);
                     });
                     EnsureCaptureManualStops(room);
                     return (true, false, existing.Process.Id, null);
@@ -188,7 +219,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
 
             int? bitrateNorm = NormalizeBitrateKbpsForEnv(bitrateKbps);
             int? fpsNorm = NormalizeFpsForEnv(fps);
-            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcVideoPeerStun, qualityPreset, bitrateNorm, fpsNorm);
+            int? imageQualityNorm = NormalizeImageQualityForEnv(imageQuality);
+            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcVideoPeerStun, qualityPreset, bitrateNorm, fpsNorm, imageQualityNorm, captureInput, encoder, codec);
             if (psi is null)
             {
                 ServerEventLog.Log("webrtc.videopeer", "autostart_skipped", new { reason = "unsupported_os", os = Environment.OSVersion.Platform.ToString() });
@@ -316,9 +348,11 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     stun = _opt.WebRtcVideoPeerStun,
                     sourceMode = _opt.WebRtcVideoPeerSourceMode,
                     qualityPreset = NormalizeQualityPresetForEnv(qualityPreset) ?? _opt.WebRtcVideoPeerQualityPreset,
+                    codec = NormalizeCodecForEnv(codec) ?? "auto",
                     bitrateKbps = bitrateNorm,
                     fps = fpsNorm,
-                    captureInputSet = !string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput),
+                    imageQuality = imageQualityNorm,
+                    captureInputSet = !string.IsNullOrWhiteSpace(captureInput) || !string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput),
                     ffmpegArgsSet = !string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerFfmpegArgs),
                     pid = p.Id,
                     exe = psi.FileName,
@@ -473,7 +507,8 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         }
         const int startupGraceSeconds = 20;
 
-        // "video" should be stable; don't auto-stop it.
+        // Video rooms should be stable; don't auto-stop them on idle.
+        // They are explicitly stopped by room delete/stop actions.
         var peers = _signaling.GetRoomPeerCountsSnapshot();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
@@ -481,7 +516,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         {
             foreach (var room in _procs.Keys.ToArray())
             {
-                if (string.Equals(room, "video", StringComparison.OrdinalIgnoreCase))
+                if (IsVideoRoom(room))
                 {
                     continue;
                 }
@@ -582,7 +617,11 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         string stun,
         string? qualityPreset,
         int? bitrateKbps,
-        int? fps)
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec)
     {
         string effectiveQualityPreset = NormalizeQualityPresetForEnv(qualityPreset) ?? _opt.WebRtcVideoPeerQualityPreset;
         if (OperatingSystem.IsWindows())
@@ -610,9 +649,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             psi.Environment["HIDBRIDGE_VIDEO_SOURCE_MODE"] = string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerSourceMode)
                 ? "testsrc"
                 : _opt.WebRtcVideoPeerSourceMode;
-            if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput))
+            string? effectiveCaptureInput = !string.IsNullOrWhiteSpace(captureInput)
+                ? captureInput.Trim()
+                : _opt.WebRtcVideoPeerCaptureInput;
+            if (!string.IsNullOrWhiteSpace(effectiveCaptureInput))
             {
-                psi.Environment["HIDBRIDGE_VIDEO_CAPTURE_INPUT"] = _opt.WebRtcVideoPeerCaptureInput;
+                psi.Environment["HIDBRIDGE_VIDEO_CAPTURE_INPUT"] = effectiveCaptureInput;
             }
             if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerFfmpegArgs))
             {
@@ -622,6 +664,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 psi.Environment["HIDBRIDGE_VIDEO_QUALITY_PRESET"] = effectiveQualityPreset;
             }
+            string? effectiveEncoder = NormalizeEncoderForEnv(encoder);
+            if (!string.IsNullOrWhiteSpace(effectiveEncoder))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_ENCODER"] = effectiveEncoder;
+            }
+            string? effectiveCodec = NormalizeCodecForEnv(codec);
+            if (!string.IsNullOrWhiteSpace(effectiveCodec))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_CODEC"] = effectiveCodec;
+            }
             if (bitrateKbps is int b)
             {
                 psi.Environment["HIDBRIDGE_VIDEO_BITRATE_KBPS"] = b.ToString();
@@ -629,6 +681,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             if (fps is int f)
             {
                 psi.Environment["HIDBRIDGE_VIDEO_FPS"] = f.ToString();
+            }
+            if (imageQuality is int iq)
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_IMAGE_QUALITY"] = iq.ToString();
             }
             if (!string.IsNullOrWhiteSpace(_opt.FfmpegPath))
             {
@@ -657,9 +713,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             psi.Environment["HIDBRIDGE_VIDEO_SOURCE_MODE"] = string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerSourceMode)
                 ? "testsrc"
                 : _opt.WebRtcVideoPeerSourceMode;
-            if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerCaptureInput))
+            string? effectiveCaptureInput = !string.IsNullOrWhiteSpace(captureInput)
+                ? captureInput.Trim()
+                : _opt.WebRtcVideoPeerCaptureInput;
+            if (!string.IsNullOrWhiteSpace(effectiveCaptureInput))
             {
-                psi.Environment["HIDBRIDGE_VIDEO_CAPTURE_INPUT"] = _opt.WebRtcVideoPeerCaptureInput;
+                psi.Environment["HIDBRIDGE_VIDEO_CAPTURE_INPUT"] = effectiveCaptureInput;
             }
             if (!string.IsNullOrWhiteSpace(_opt.WebRtcVideoPeerFfmpegArgs))
             {
@@ -669,6 +728,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 psi.Environment["HIDBRIDGE_VIDEO_QUALITY_PRESET"] = effectiveQualityPreset;
             }
+            string? effectiveEncoder = NormalizeEncoderForEnv(encoder);
+            if (!string.IsNullOrWhiteSpace(effectiveEncoder))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_ENCODER"] = effectiveEncoder;
+            }
+            string? effectiveCodec = NormalizeCodecForEnv(codec);
+            if (!string.IsNullOrWhiteSpace(effectiveCodec))
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_CODEC"] = effectiveCodec;
+            }
             if (bitrateKbps is int b)
             {
                 psi.Environment["HIDBRIDGE_VIDEO_BITRATE_KBPS"] = b.ToString();
@@ -676,6 +745,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             if (fps is int f)
             {
                 psi.Environment["HIDBRIDGE_VIDEO_FPS"] = f.ToString();
+            }
+            if (imageQuality is int iq)
+            {
+                psi.Environment["HIDBRIDGE_VIDEO_IMAGE_QUALITY"] = iq.ToString();
             }
             if (!string.IsNullOrWhiteSpace(_opt.FfmpegPath))
             {
@@ -721,6 +794,49 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             return null;
         }
         return fps;
+    }
+
+    private static int? NormalizeImageQualityForEnv(int? imageQuality)
+    {
+        if (imageQuality is null)
+        {
+            return null;
+        }
+        if (imageQuality < 1 || imageQuality > 100)
+        {
+            return null;
+        }
+        return imageQuality.Value;
+    }
+
+    private static string? NormalizeEncoderForEnv(string? encoder)
+    {
+        if (string.IsNullOrWhiteSpace(encoder))
+        {
+            return null;
+        }
+
+        string e = encoder.Trim().ToLowerInvariant();
+        return e switch
+        {
+            "auto" or "cpu" or "hw" or "nvenc" or "amf" or "qsv" or "v4l2m2m" or "vaapi" => e,
+            _ => null
+        };
+    }
+
+    private static string? NormalizeCodecForEnv(string? codec)
+    {
+        if (string.IsNullOrWhiteSpace(codec))
+        {
+            return null;
+        }
+
+        string c = codec.Trim().ToLowerInvariant();
+        return c switch
+        {
+            "auto" or "vp8" or "h264" => c,
+            _ => null
+        };
     }
 
     /// <summary>
@@ -931,7 +1047,31 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     /// <param name="eventName">Status event name.</param>
     /// <param name="sourceModeActive">Current active source mode.</param>
     /// <param name="detail">Optional detail/error string.</param>
-    public void ReportRuntimeStatus(string room, string? eventName, string? sourceModeActive, string? detail)
+    /// <param name="encoder">Optional encoder name.</param>
+    /// <param name="codec">Optional codec name.</param>
+    /// <param name="qualityPreset">Optional quality preset.</param>
+    /// <param name="targetBitrateKbps">Optional target bitrate.</param>
+    /// <param name="targetFps">Optional target fps.</param>
+    /// <param name="measuredFps">Optional measured fps.</param>
+    /// <param name="measuredKbps">Optional measured bitrate.</param>
+    /// <param name="frames">Optional total frame count.</param>
+    /// <param name="packets">Optional total packet count.</param>
+    /// <param name="fallbackUsed">Optional fallback flag from helper.</param>
+    public void ReportRuntimeStatus(
+        string room,
+        string? eventName,
+        string? sourceModeActive,
+        string? detail,
+        string? encoder = null,
+        string? codec = null,
+        string? qualityPreset = null,
+        int? targetBitrateKbps = null,
+        int? targetFps = null,
+        double? measuredFps = null,
+        int? measuredKbps = null,
+        long? frames = null,
+        long? packets = null,
+        bool? fallbackUsed = null)
     {
         if (string.IsNullOrWhiteSpace(room))
         {
@@ -952,6 +1092,20 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             DateTimeOffset? startedAt = prev?.StartedAtUtc;
             int? pid = prev?.Pid;
             bool running = prev?.Running ?? _procs.TryGetValue(room, out _);
+            string? encoderNow = string.IsNullOrWhiteSpace(encoder) ? prev?.Encoder : encoder.Trim().ToLowerInvariant();
+            string? codecNow = string.IsNullOrWhiteSpace(codec) ? prev?.Codec : codec.Trim().ToLowerInvariant();
+            string? qualityNow = string.IsNullOrWhiteSpace(qualityPreset) ? prev?.QualityPreset : qualityPreset.Trim().ToLowerInvariant();
+            int? bitrateNow = targetBitrateKbps ?? prev?.TargetBitrateKbps;
+            int? targetFpsNow = targetFps ?? prev?.TargetFps;
+            double? measuredFpsNow = measuredFps ?? prev?.MeasuredFps;
+            int? measuredKbpsNow = measuredKbps ?? prev?.MeasuredKbps;
+            long? framesNow = frames ?? prev?.Frames;
+            long? packetsNow = packets ?? prev?.Packets;
+
+            if (fallbackUsed.HasValue)
+            {
+                fallback = fallbackUsed.Value;
+            }
 
             if (eventNorm == "fallback")
             {
@@ -985,7 +1139,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 startedAt,
                 now,
                 pid,
-                running);
+                running,
+                encoderNow,
+                codecNow,
+                qualityNow,
+                bitrateNow,
+                targetFpsNow,
+                measuredFpsNow,
+                measuredKbpsNow,
+                framesNow,
+                packetsNow);
         }
     }
 
@@ -1014,7 +1177,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     st.StartedAtUtc,
                     st.UpdatedAtUtc,
                     st.Pid,
-                    st.Running);
+                    st.Running,
+                    st.Encoder,
+                    st.Codec,
+                    st.QualityPreset,
+                    st.TargetBitrateKbps,
+                    st.TargetFps,
+                    st.MeasuredFps,
+                    st.MeasuredKbps,
+                    st.Frames,
+                    st.Packets);
             }
 
             if (_procs.TryGetValue(room, out var procState))
@@ -1042,6 +1214,18 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     {
         string x = string.IsNullOrWhiteSpace(mode) ? "testsrc" : mode.Trim().ToLowerInvariant();
         return x == "capture" ? "capture" : "testsrc";
+    }
+
+    private static bool IsVideoRoom(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return false;
+        }
+
+        return string.Equals(room, "video", StringComparison.OrdinalIgnoreCase)
+            || room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase)
+            || room.StartsWith("video-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeSourceModeForStateOrNull(string? mode)
@@ -1081,7 +1265,16 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             prev?.StartedAtUtc,
             now,
             Pid: null,
-            Running: false);
+            Running: false,
+            Encoder: prev?.Encoder,
+            Codec: prev?.Codec,
+            QualityPreset: prev?.QualityPreset,
+            TargetBitrateKbps: prev?.TargetBitrateKbps,
+            TargetFps: prev?.TargetFps,
+            MeasuredFps: prev?.MeasuredFps,
+            MeasuredKbps: prev?.MeasuredKbps,
+            Frames: prev?.Frames,
+            Packets: prev?.Packets);
     }
 
     private static void DeletePidFile(string toolDir, string room)
