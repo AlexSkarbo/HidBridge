@@ -110,6 +110,7 @@ public static class WebRtcStatusEndpoints
                 sourceModeActive = st.SourceModeActive,
                 fallbackUsed = st.FallbackUsed,
                 lastVideoError = st.LastVideoError,
+                startupTimeoutReason = st.StartupTimeoutReason,
                 startedAtUtc = st.StartedAtUtc,
                 updatedAtUtc = st.UpdatedAtUtc,
                 pid = st.Pid,

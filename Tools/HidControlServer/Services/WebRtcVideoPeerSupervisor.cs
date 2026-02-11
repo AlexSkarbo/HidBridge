@@ -47,6 +47,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         string? SourceModeActive,
         bool FallbackUsed,
         string? LastVideoError,
+        string? StartupTimeoutReason,
         DateTimeOffset? StartedAtUtc,
         DateTimeOffset UpdatedAtUtc,
         int? Pid,
@@ -71,6 +72,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         string? SourceModeActive,
         bool FallbackUsed,
         string? LastVideoError,
+        string? StartupTimeoutReason,
         DateTimeOffset? StartedAtUtc,
         DateTimeOffset UpdatedAtUtc,
         int? Pid,
@@ -210,6 +212,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                             active,
                             fallback,
                             lastError,
+                            roomState?.StartupTimeoutReason,
                             startedAt,
                             DateTimeOffset.UtcNow,
                             existing.Process.Id,
@@ -328,6 +331,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                                 NormalizeSourceModeForState(_opt.WebRtcVideoPeerSourceMode),
                                 FallbackUsed: false,
                                 LastVideoError: null,
+                                StartupTimeoutReason: null,
                                 StartedAtUtc: DateTimeOffset.UtcNow,
                                 UpdatedAtUtc: DateTimeOffset.UtcNow,
                                 Pid: livePid,
@@ -343,6 +347,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                             null,
                             FallbackUsed: false,
                             LastVideoError: "exit_0",
+                            StartupTimeoutReason: "exited_early_exit_0",
                             StartedAtUtc: null,
                             UpdatedAtUtc: DateTimeOffset.UtcNow,
                             Pid: null,
@@ -359,6 +364,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                         null,
                         FallbackUsed: false,
                         LastVideoError: $"exit_{code}",
+                        StartupTimeoutReason: $"exited_early_exit_{code}",
                         StartedAtUtc: null,
                         UpdatedAtUtc: DateTimeOffset.UtcNow,
                         Pid: null,
@@ -377,6 +383,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     NormalizeSourceModeForState(_opt.WebRtcVideoPeerSourceMode),
                     FallbackUsed: false,
                     LastVideoError: null,
+                    StartupTimeoutReason: null,
                     StartedAtUtc: DateTimeOffset.UtcNow,
                     UpdatedAtUtc: DateTimeOffset.UtcNow,
                     Pid: p.Id,
@@ -411,6 +418,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     null,
                     FallbackUsed: false,
                     LastVideoError: ex.Message,
+                    StartupTimeoutReason: ex.Message,
                     StartedAtUtc: null,
                     UpdatedAtUtc: DateTimeOffset.UtcNow,
                     Pid: null,
@@ -1135,6 +1143,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             string? active = activeModeNorm ?? prev?.SourceModeActive ?? requested;
             bool fallback = prev?.FallbackUsed ?? false;
             string? lastError = prev?.LastVideoError;
+            string? startupTimeoutReason = prev?.StartupTimeoutReason;
             DateTimeOffset? startedAt = prev?.StartedAtUtc;
             int? pid = prev?.Pid;
             bool running = prev?.Running ?? _procs.TryGetValue(room, out _);
@@ -1169,12 +1178,18 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     lastError = detail;
                 }
             }
+            else if (eventNorm == "startup_timeout")
+            {
+                lastError = string.IsNullOrWhiteSpace(detail) ? "startup_timeout" : detail;
+                startupTimeoutReason = lastError;
+            }
             else if (eventNorm == "pipeline_started")
             {
                 if (startedAt is null)
                 {
                     startedAt = now;
                 }
+                startupTimeoutReason = null;
             }
 
             if (startupMsNow is null && startedAt.HasValue)
@@ -1197,6 +1212,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 active,
                 fallback,
                 lastError,
+                startupTimeoutReason,
                 startedAt,
                 now,
                 pid,
@@ -1236,6 +1252,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     st.SourceModeActive,
                     st.FallbackUsed,
                     st.LastVideoError,
+                    st.StartupTimeoutReason,
                     st.StartedAtUtc,
                     st.UpdatedAtUtc,
                     st.Pid,
@@ -1263,6 +1280,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     requested,
                     FallbackUsed: false,
                     LastVideoError: null,
+                    StartupTimeoutReason: null,
                     procState.StartedAtUtc,
                     DateTimeOffset.UtcNow,
                     pid,
@@ -1439,9 +1457,11 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         string? active = prev?.SourceModeActive;
         bool fallback = prev?.FallbackUsed ?? false;
         string? lastError = prev?.LastVideoError;
+        string? startupTimeoutReason = prev?.StartupTimeoutReason;
         if (exitCode is int c && c != 0)
         {
             lastError = $"exit_{c}";
+            startupTimeoutReason = $"helper_exit_{c}";
         }
 
         _runtimeByRoom[room] = new VideoPeerRuntimeState(
@@ -1450,6 +1470,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             active,
             fallback,
             lastError,
+            startupTimeoutReason,
             prev?.StartedAtUtc,
             now,
             Pid: null,

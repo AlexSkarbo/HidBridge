@@ -614,6 +614,7 @@ app.MapGet("/", () =>
         startupMs: 0,
         codec: "",
         encoder: "",
+        startupTimeoutReason: "",
         abrCurrentKbps: 0,
         abrTargetKbps: 0,
         abrMeasuredKbps: 0,
@@ -803,6 +804,7 @@ app.MapGet("/", () =>
         rtcVideoRuntime.startupMs = 0;
         rtcVideoRuntime.codec = "";
         rtcVideoRuntime.encoder = "";
+        rtcVideoRuntime.startupTimeoutReason = "";
         rtcVideoRuntime.abrCurrentKbps = 0;
         rtcVideoRuntime.abrTargetKbps = 0;
         rtcVideoRuntime.abrMeasuredKbps = 0;
@@ -1788,7 +1790,8 @@ app.MapGet("/", () =>
 	    function renderVideoPeerRuntime(j) {
 	      if (!rtcVideoMeta) return;
 	      if (!j || !j.ok) {
-	        rtcVideoMeta.textContent = "video runtime: n/a";
+	        const runtimeError = (j && j.error) ? String(j.error) : "n/a";
+	        rtcVideoMeta.textContent = `video runtime: error=${runtimeError}`;
 	        if (rtcVideoStability) rtcVideoStability.textContent = "video stability: n/a";
           rtcPerf.runtimeStartupMs = 0;
           rtcVideoRuntime.running = false;
@@ -1796,6 +1799,7 @@ app.MapGet("/", () =>
           rtcVideoRuntime.startupMs = 0;
           rtcVideoRuntime.codec = "";
           rtcVideoRuntime.encoder = "";
+          rtcVideoRuntime.startupTimeoutReason = runtimeError === "n/a" ? "" : runtimeError;
           rtcVideoRuntime.abrCurrentKbps = 0;
           rtcVideoRuntime.abrTargetKbps = 0;
           rtcVideoRuntime.abrMeasuredKbps = 0;
@@ -1809,16 +1813,19 @@ app.MapGet("/", () =>
 	      const running = j.running ? "running" : "stopped";
 	      const fallback = j.fallbackUsed ? "fallback=yes" : "fallback=no";
         const startupMs = Number(j.startupMs || 0);
+        const startupTimeoutReason = String(j.startupTimeoutReason || "").trim();
         const errClass = classifyVideoError(j.lastVideoError);
 	      const err = j.lastVideoError ? ` error=${j.lastVideoError}` : "";
         const errClassText = errClass ? ` class=${errClass}` : "";
-	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${startupMs > 0 ? ` startup=${Math.round(startupMs)}ms` : ""}${errClassText}${err}`;
+        const startupReasonText = startupTimeoutReason ? ` startup-timeout=${startupTimeoutReason}` : "";
+	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${startupMs > 0 ? ` startup=${Math.round(startupMs)}ms` : ""}${startupReasonText}${errClassText}${err}`;
         rtcPerf.runtimeStartupMs = startupMs > 0 ? startupMs : 0;
         rtcVideoRuntime.running = !!j.running;
         rtcVideoRuntime.fallbackUsed = !!j.fallbackUsed;
         rtcVideoRuntime.startupMs = startupMs > 0 ? startupMs : 0;
         rtcVideoRuntime.codec = String(j.codec || "").trim().toLowerCase();
         rtcVideoRuntime.encoder = String(j.encoder || "").trim().toLowerCase();
+        rtcVideoRuntime.startupTimeoutReason = startupTimeoutReason;
         rtcVideoRuntime.abrTargetKbps = Number(j.targetBitrateKbps || rtcVideoRuntime.abrTargetKbps || 0);
         rtcVideoRuntime.abrMeasuredKbps = Number(j.measuredKbps || rtcVideoRuntime.abrMeasuredKbps || 0);
         updateVideoKpiPanel();
