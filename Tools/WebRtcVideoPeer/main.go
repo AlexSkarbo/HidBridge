@@ -671,7 +671,7 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQualit
 		}
 		args := append([]string{}, inputArgs...)
 		args = append(args, "-an")
-		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps)...)
+		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps, fps)...)
 		return args, nil
 	case "testsrc":
 		args := []string{
@@ -679,7 +679,7 @@ func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQualit
 			"-i", fmt.Sprintf("testsrc=size=1280x720:rate=%d", clamp(fps, 5, 60)),
 			"-an",
 		}
-		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps)...)
+		args = append(args, defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps, fps)...)
 		return args, nil
 	default:
 		return nil, fmt.Errorf("unsupported source mode: %s", sourceMode)
@@ -838,10 +838,11 @@ func normalizeDshowDeviceSelector(inputVal string) string {
 	return "video=" + val
 }
 
-func defaultEncoderArgs(preset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int) []string {
+func defaultEncoderArgs(preset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int) []string {
 	enc := normalizeEncoderMode(encoderMode)
 	codec := normalizeCodecMode(codecMode)
 	iq := normalizeImageQuality(imageQuality)
+	fps = clamp(fps, 5, 60)
 	adjustedBitrate := applyImageQualityToBitrate(bitrateKbps, iq)
 	if codec == "auto" {
 		switch enc {
@@ -853,46 +854,49 @@ func defaultEncoderArgs(preset string, imageQuality int, encoderMode string, cod
 	}
 
 	if codec == "h264" {
-		return defaultH264ByEncoderArgs(preset, iq, enc, adjustedBitrate)
+		return defaultH264ByEncoderArgs(preset, iq, enc, adjustedBitrate, fps)
 	}
-	return defaultVp8EncoderArgs(preset, iq, adjustedBitrate)
+	return defaultVp8EncoderArgs(preset, iq, adjustedBitrate, fps)
 }
 
-func defaultH264ByEncoderArgs(preset string, imageQuality int, encoderMode string, bitrateKbps int) []string {
+func defaultH264ByEncoderArgs(preset string, imageQuality int, encoderMode string, bitrateKbps int, fps int) []string {
 	switch normalizeEncoderMode(encoderMode) {
 	case "nvenc":
-		return defaultH264EncoderArgs("h264_nvenc", "yuv420p", preset, bitrateKbps)
+		args := defaultH264EncoderArgs("h264_nvenc", "yuv420p", preset, bitrateKbps, fps)
+		return append(args, "-tune", "ll")
 	case "amf":
-		return defaultH264EncoderArgs("h264_amf", "nv12", preset, bitrateKbps)
+		args := defaultH264EncoderArgs("h264_amf", "nv12", preset, bitrateKbps, fps)
+		return append(args, "-usage", "lowlatency")
 	case "qsv":
-		args := defaultH264EncoderArgs("h264_qsv", "nv12", preset, bitrateKbps)
+		args := defaultH264EncoderArgs("h264_qsv", "nv12", preset, bitrateKbps, fps)
 		return append([]string{"-look_ahead", "0"}, args...)
 	case "v4l2m2m":
-		return defaultH264EncoderArgs("h264_v4l2m2m", "yuv420p", preset, bitrateKbps)
+		return defaultH264EncoderArgs("h264_v4l2m2m", "yuv420p", preset, bitrateKbps, fps)
 	case "vaapi":
 		// Works only when host ffmpeg + driver expose VAAPI; otherwise probe/API should hide it.
+		gop, maxrate, bufsize := qualityRateControl(preset, clamp(bitrateKbps, 200, 12000), fps)
 		return []string{
 			"-vaapi_device", "/dev/dri/renderD128",
 			"-vf", "format=nv12,hwupload",
 			"-c:v", "h264_vaapi",
-			"-g", "60",
+			"-g", strconv.Itoa(gop),
 			"-b:v", fmt.Sprintf("%dk", clamp(bitrateKbps, 200, 12000)),
-			"-maxrate", fmt.Sprintf("%dk", int(float64(clamp(bitrateKbps, 200, 12000))*1.2)),
-			"-bufsize", fmt.Sprintf("%dk", clamp(bitrateKbps, 200, 12000)*2),
+			"-maxrate", fmt.Sprintf("%dk", maxrate),
+			"-bufsize", fmt.Sprintf("%dk", bufsize),
 		}
 	case "hw":
 		// Legacy generic HW mode keeps behavior stable by using CPU H.264.
-		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps)
+		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps, fps)
 	case "cpu", "auto":
-		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps)
+		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps, fps)
 	default:
-		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps)
+		return defaultH264CpuArgs(preset, imageQuality, bitrateKbps, fps)
 	}
 }
 
-func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int) []string {
+func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int, fps int) []string {
 	bitrate := clamp(bitrateKbps, 200, 12000)
-	gop, maxrate, bufsize := qualityRateControl(preset, bitrate)
+	gop, maxrate, bufsize := qualityRateControl(preset, bitrate, fps)
 	keyintMin := gop
 	xPreset := "veryfast"
 	crf := imageQualityToX264Crf(imageQuality)
@@ -914,6 +918,7 @@ func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int) []stri
 		"-level", "3.1",
 		"-vf", "format=yuv420p",
 		"-g", strconv.Itoa(gop),
+		"-bf", "0",
 		"-keyint_min", strconv.Itoa(keyintMin),
 		"-sc_threshold", "0",
 		"-b:v", fmt.Sprintf("%dk", bitrate),
@@ -926,9 +931,9 @@ func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int) []stri
 	return args
 }
 
-func defaultVp8EncoderArgs(preset string, imageQuality int, bitrateKbps int) []string {
+func defaultVp8EncoderArgs(preset string, imageQuality int, bitrateKbps int, fps int) []string {
 	bitrate := clamp(bitrateKbps, 200, 12000)
-	gop, maxrate, bufsize := qualityRateControl(preset, bitrate)
+	gop, maxrate, bufsize := qualityRateControl(preset, bitrate, fps)
 	crf := imageQualityToVp8Crf(imageQuality)
 
 	appendCrf := func(args []string) []string {
@@ -956,6 +961,10 @@ func defaultVp8EncoderArgs(preset string, imageQuality int, bitrateKbps int) []s
 			"-c:v", "libvpx",
 			"-deadline", "realtime",
 			"-cpu-used", "12",
+			"-lag-in-frames", "0",
+			"-error-resilient", "1",
+			"-auto-alt-ref", "0",
+			"-row-mt", "1",
 			"-vf", "format=yuv420p",
 			"-g", strconv.Itoa(gop),
 			"-b:v", fmt.Sprintf("%dk", bitrate),
@@ -1002,12 +1011,13 @@ func defaultVp8EncoderArgs(preset string, imageQuality int, bitrateKbps int) []s
 	}
 }
 
-func defaultH264EncoderArgs(encoder string, pixFmt string, preset string, bitrateKbps int) []string {
+func defaultH264EncoderArgs(encoder string, pixFmt string, preset string, bitrateKbps int, fps int) []string {
 	bitrate := clamp(bitrateKbps, 200, 12000)
-	gop, maxrate, bufsize := qualityRateControl(preset, bitrate)
+	gop, maxrate, bufsize := qualityRateControl(preset, bitrate, fps)
 	return []string{
 		"-c:v", encoder,
 		"-g", strconv.Itoa(gop),
+		"-bf", "0",
 		"-b:v", fmt.Sprintf("%dk", bitrate),
 		"-maxrate", fmt.Sprintf("%dk", maxrate),
 		"-bufsize", fmt.Sprintf("%dk", bufsize),
@@ -1017,19 +1027,20 @@ func defaultH264EncoderArgs(encoder string, pixFmt string, preset string, bitrat
 
 // qualityRateControl centralizes preset tuning so low and low-latency can be
 // intentionally different across all encoder backends.
-func qualityRateControl(preset string, bitrate int) (gop int, maxrate int, bufsize int) {
+func qualityRateControl(preset string, bitrate int, fps int) (gop int, maxrate int, bufsize int) {
 	b := clamp(bitrate, 200, 12000)
+	f := clamp(fps, 5, 60)
 	switch normalizeQualityPreset(preset) {
 	case "low":
-		return 90, int(float64(b) * 1.15), b * 3
+		return clamp(f*3, 30, 180), int(float64(b) * 1.15), b * 3
 	case "low-latency":
-		return 30, int(float64(b) * 1.05), b
+		return clamp(f, 15, 60), int(float64(b) * 1.05), b
 	case "high":
-		return 60, int(float64(b) * 1.2), b * 2
+		return clamp(f*2, 30, 120), int(float64(b) * 1.2), b * 2
 	case "optimal":
-		return 120, int(float64(b) * 1.15), b * 4
+		return clamp(f*4, 60, 240), int(float64(b) * 1.15), b * 4
 	default: // balanced
-		return 60, int(float64(b) * 1.2), b * 2
+		return clamp(f*2, 30, 120), int(float64(b) * 1.2), b * 2
 	}
 }
 

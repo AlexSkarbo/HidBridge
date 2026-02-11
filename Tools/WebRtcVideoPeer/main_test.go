@@ -74,8 +74,8 @@ func TestNormalizeDshowInputArgs_IgnoresNonDshowArgs(t *testing.T) {
 }
 
 func TestDefaultVp8EncoderArgs_LowLatencyDiffersFromLow(t *testing.T) {
-	low := defaultVp8EncoderArgs("low", 70, 1200)
-	lat := defaultVp8EncoderArgs("low-latency", 70, 1200)
+	low := defaultVp8EncoderArgs("low", 70, 1200, 30)
+	lat := defaultVp8EncoderArgs("low-latency", 70, 1200, 30)
 
 	if got := argValue(low, "-cpu-used"); got != "10" {
 		t.Fatalf("low cpu-used mismatch, got=%q", got)
@@ -92,8 +92,8 @@ func TestDefaultVp8EncoderArgs_LowLatencyDiffersFromLow(t *testing.T) {
 }
 
 func TestDefaultH264CpuArgs_LowLatencyDiffersFromLow(t *testing.T) {
-	low := defaultH264CpuArgs("low", 70, 1200)
-	lat := defaultH264CpuArgs("low-latency", 70, 1200)
+	low := defaultH264CpuArgs("low", 70, 1200, 30)
+	lat := defaultH264CpuArgs("low-latency", 70, 1200, 30)
 
 	if got := argValue(low, "-preset"); got != "superfast" {
 		t.Fatalf("low preset mismatch, got=%q", got)
@@ -110,8 +110,8 @@ func TestDefaultH264CpuArgs_LowLatencyDiffersFromLow(t *testing.T) {
 }
 
 func TestDefaultVp8EncoderArgs_ImageQualityAddsCrf(t *testing.T) {
-	lowQ := defaultVp8EncoderArgs("balanced", 20, 1200)
-	highQ := defaultVp8EncoderArgs("balanced", 90, 1200)
+	lowQ := defaultVp8EncoderArgs("balanced", 20, 1200, 30)
+	highQ := defaultVp8EncoderArgs("balanced", 90, 1200, 30)
 	lowCrf := argValue(lowQ, "-crf")
 	highCrf := argValue(highQ, "-crf")
 	if lowCrf == "" || highCrf == "" {
@@ -128,14 +128,14 @@ func TestDefaultVp8EncoderArgs_ImageQualityAddsCrf(t *testing.T) {
 }
 
 func TestDefaultVp8EncoderArgs_ImageQualityAutoOmitsCrf(t *testing.T) {
-	args := defaultVp8EncoderArgs("balanced", 0, 1200)
+	args := defaultVp8EncoderArgs("balanced", 0, 1200, 30)
 	if got := argValue(args, "-crf"); got != "" {
 		t.Fatalf("expected no -crf for auto image quality, got=%q", got)
 	}
 }
 
 func TestDefaultH264EncoderArgs_LowLatencyRateControl(t *testing.T) {
-	args := defaultH264EncoderArgs("h264_nvenc", "yuv420p", "low-latency", 1200)
+	args := defaultH264EncoderArgs("h264_nvenc", "yuv420p", "low-latency", 1200, 30)
 
 	if got := argValue(args, "-g"); got != "30" {
 		t.Fatalf("low-latency gop mismatch, got=%q", got)
@@ -145,6 +145,30 @@ func TestDefaultH264EncoderArgs_LowLatencyRateControl(t *testing.T) {
 	}
 	if got := argValue(args, "-bufsize"); got != "1200k" {
 		t.Fatalf("low-latency bufsize mismatch, got=%q", got)
+	}
+}
+
+func TestQualityRateControl_LowLatencyScalesWithFps(t *testing.T) {
+	gop30, _, _ := qualityRateControl("low-latency", 1200, 30)
+	gop60, _, _ := qualityRateControl("low-latency", 1200, 60)
+	if gop30 != 30 {
+		t.Fatalf("expected gop=30 for 30fps, got=%d", gop30)
+	}
+	if gop60 != 60 {
+		t.Fatalf("expected gop=60 for 60fps, got=%d", gop60)
+	}
+}
+
+func TestDefaultVp8EncoderArgs_LowLatencyAddsRealtimeFlags(t *testing.T) {
+	args := defaultVp8EncoderArgs("low-latency", 70, 1200, 30)
+	if got := argValue(args, "-lag-in-frames"); got != "0" {
+		t.Fatalf("expected -lag-in-frames 0, got=%q", got)
+	}
+	if got := argValue(args, "-error-resilient"); got != "1" {
+		t.Fatalf("expected -error-resilient 1, got=%q", got)
+	}
+	if got := argValue(args, "-auto-alt-ref"); got != "0" {
+		t.Fatalf("expected -auto-alt-ref 0, got=%q", got)
 	}
 }
 
