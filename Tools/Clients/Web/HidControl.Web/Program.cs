@@ -615,6 +615,7 @@ app.MapGet("/", () =>
         codec: "",
         encoder: "",
         startupTimeoutReason: "",
+        lastErrorAt: "",
         abrCurrentKbps: 0,
         abrTargetKbps: 0,
         abrMeasuredKbps: 0,
@@ -628,6 +629,13 @@ app.MapGet("/", () =>
         const hangupBtn = document.getElementById("rtcHangup");
         if (connectBtn) connectBtn.disabled = rtcConnectInFlight || rtcHangupInFlight;
         if (hangupBtn) hangupBtn.disabled = rtcConnectInFlight || rtcHangupInFlight;
+      }
+
+      function formatLocalDateTime(isoOrDate) {
+        if (!isoOrDate) return "";
+        const d = isoOrDate instanceof Date ? isoOrDate : new Date(String(isoOrDate));
+        if (Number.isNaN(d.getTime())) return "";
+        return d.toLocaleString();
       }
 
       function mouseButtonName(button) {
@@ -805,6 +813,7 @@ app.MapGet("/", () =>
         rtcVideoRuntime.codec = "";
         rtcVideoRuntime.encoder = "";
         rtcVideoRuntime.startupTimeoutReason = "";
+        rtcVideoRuntime.lastErrorAt = "";
         rtcVideoRuntime.abrCurrentKbps = 0;
         rtcVideoRuntime.abrTargetKbps = 0;
         rtcVideoRuntime.abrMeasuredKbps = 0;
@@ -1791,7 +1800,8 @@ app.MapGet("/", () =>
 	      if (!rtcVideoMeta) return;
 	      if (!j || !j.ok) {
 	        const runtimeError = (j && j.error) ? String(j.error) : "n/a";
-	        rtcVideoMeta.textContent = `video runtime: error=${runtimeError}`;
+          const errAt = formatLocalDateTime(new Date());
+	        rtcVideoMeta.textContent = `video runtime: error=${runtimeError}${errAt ? ` last-error-at=${errAt}` : ""}`;
 	        if (rtcVideoStability) rtcVideoStability.textContent = "video stability: n/a";
           rtcPerf.runtimeStartupMs = 0;
           rtcVideoRuntime.running = false;
@@ -1800,6 +1810,7 @@ app.MapGet("/", () =>
           rtcVideoRuntime.codec = "";
           rtcVideoRuntime.encoder = "";
           rtcVideoRuntime.startupTimeoutReason = runtimeError === "n/a" ? "" : runtimeError;
+          rtcVideoRuntime.lastErrorAt = runtimeError === "n/a" ? "" : errAt;
           rtcVideoRuntime.abrCurrentKbps = 0;
           rtcVideoRuntime.abrTargetKbps = 0;
           rtcVideoRuntime.abrMeasuredKbps = 0;
@@ -1816,9 +1827,12 @@ app.MapGet("/", () =>
         const startupTimeoutReason = String(j.startupTimeoutReason || "").trim();
         const errClass = classifyVideoError(j.lastVideoError);
 	      const err = j.lastVideoError ? ` error=${j.lastVideoError}` : "";
+        const hasErr = !!(j.lastVideoError || startupTimeoutReason);
+        const errAtSrc = j.updatedAtUtc || new Date();
+        const errAt = hasErr ? formatLocalDateTime(errAtSrc) : "";
         const errClassText = errClass ? ` class=${errClass}` : "";
         const startupReasonText = startupTimeoutReason ? ` startup-timeout=${startupTimeoutReason}` : "";
-	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${startupMs > 0 ? ` startup=${Math.round(startupMs)}ms` : ""}${startupReasonText}${errClassText}${err}`;
+	      rtcVideoMeta.textContent = `video runtime: ${running}, mode=${modeAct} (requested=${modeReq}), ${fallback}${startupMs > 0 ? ` startup=${Math.round(startupMs)}ms` : ""}${startupReasonText}${errClassText}${err}${errAt ? ` last-error-at=${errAt}` : ""}`;
         rtcPerf.runtimeStartupMs = startupMs > 0 ? startupMs : 0;
         rtcVideoRuntime.running = !!j.running;
         rtcVideoRuntime.fallbackUsed = !!j.fallbackUsed;
@@ -1826,6 +1840,7 @@ app.MapGet("/", () =>
         rtcVideoRuntime.codec = String(j.codec || "").trim().toLowerCase();
         rtcVideoRuntime.encoder = String(j.encoder || "").trim().toLowerCase();
         rtcVideoRuntime.startupTimeoutReason = startupTimeoutReason;
+        rtcVideoRuntime.lastErrorAt = errAt;
         rtcVideoRuntime.abrTargetKbps = Number(j.targetBitrateKbps || rtcVideoRuntime.abrTargetKbps || 0);
         rtcVideoRuntime.abrMeasuredKbps = Number(j.measuredKbps || rtcVideoRuntime.abrMeasuredKbps || 0);
         updateVideoKpiPanel();
