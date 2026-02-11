@@ -1761,8 +1761,12 @@ app.MapGet("/", () =>
 	          const status = (r.peers >= 2) ? "busy" : (r.hasHelper ? "idle" : "empty");
 	          const canDelete = !r.isControl && room.toLowerCase() !== "video";
 	          const canStart = !r.hasHelper && status !== "busy";
+	          const canRestart = isVideo && !!r.hasHelper;
 	          const canConnect = status !== "busy" || room.toLowerCase() === getRoom().toLowerCase();
             const canHangup = room.toLowerCase() === activeRoom && activeSession;
+            const restartBtn = isVideo
+              ? `<button data-act="restart" data-room="${room}" ${canRestart ? "" : "disabled"} title="${canRestart ? "restart helper for this video room" : "helper is not running"}">Restart</button>`
+              : "";
 
 	          const tr = document.createElement("tr");
 	          tr.innerHTML = `
@@ -1773,6 +1777,7 @@ app.MapGet("/", () =>
 	            <td style="padding: 6px 4px">${status}</td>
 	            <td style="padding: 6px 4px">
 	              <button data-act="start" data-room="${room}" ${canStart ? "" : "disabled"} title="${canStart ? "start helper for this room" : (r.hasHelper ? "helper already started" : "room is busy")}">Start</button>
+                ${restartBtn}
 	              <button data-act="use" data-room="${room}">Use</button>
 	              <button data-act="connect" data-room="${room}" ${canConnect ? "" : "disabled"} title="${canConnect ? "connect using this room" : "room is busy"}">Connect</button>
 	              <button data-act="hangup" data-room="${room}" ${canHangup ? "" : "disabled"} title="${canHangup ? "disconnect current WebRTC session" : "no active session for this room"}">Hangup</button>
@@ -1915,6 +1920,32 @@ app.MapGet("/", () =>
 	          await refreshRooms();
 	        } catch (e) {
 	          rtcLog({ webrtc: "ui.room_start_error", room, error: String(e) });
+	          show({ ok: false, error: String(e) });
+	        }
+	        return;
+	      }
+	      if (act === "restart") {
+	        try {
+	          const prefix = getRoomsApiPrefix(room);
+            if (getRoom().toLowerCase() === room.toLowerCase()) {
+              resetWebRtcClient();
+              clearRemoteVideo();
+              setRtcStatus("disconnected");
+            }
+            const delRes = await fetch(prefix + "/" + encodeURIComponent(room), { method: "DELETE" });
+            const delJson = await delRes.json().catch(() => null);
+            rtcLog({ webrtc: "ui.room_restart_stop", room, endpoint: prefix, payload: delJson });
+            const startRes = await fetch(prefix, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(buildVideoRoomRequest(room))
+            });
+            const startJson = await startRes.json().catch(() => null);
+            rtcLog({ webrtc: "ui.room_restart_start", room, endpoint: prefix, payload: startJson });
+            show(startJson || { ok: false, error: "restart_failed" });
+	          await refreshRooms();
+	        } catch (e) {
+	          rtcLog({ webrtc: "ui.room_restart_error", room, error: String(e) });
 	          show({ ok: false, error: String(e) });
 	        }
 	        return;
