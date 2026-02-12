@@ -1197,9 +1197,27 @@ app.MapGet("/", () =>
       return (rtcRelayOnly && rtcRelayOnly.checked) ? "relay" : "all";
     }
 
-    const rtcLogLines = [];
+	    const rtcLogLines = [];
     let rtcLogRenderScheduled = false;
     const rtcLastRuntimeSig = new Map();
+    let rtcLastVideoStatusUiAt = 0;
+    let rtcLastRoomsRefreshAt = 0;
+    let rtcRoomsRefreshInFlight = false;
+    let rtcRoomsRefreshPending = false;
+    let rtcRuntimeStateSig = "";
+    let rtcRoomsSnapshotSig = "";
+
+    function isRtcSessionActive() {
+      const s = String((rtcStatus && rtcStatus.textContent) || "").toLowerCase();
+      if (!s) return false;
+      if (s.startsWith("disconnected") || s.startsWith("error:")) return false;
+      return true;
+    }
+    function getRoomsRefreshIntervalMs() {
+      return canHandleRemoteInput()
+        ? 15000
+        : (isRtcSessionActive() ? 10000 : 2000);
+    }
 
     function scheduleRtcLogRender() {
       if (rtcLogRenderScheduled) return;
@@ -1286,6 +1304,12 @@ app.MapGet("/", () =>
 	      const p = payload || {};
 	      const event = String(p.event || "");
         const eventLower = event.toLowerCase();
+        const nowMs = Date.now();
+        if (eventLower === "stats" && (nowMs - rtcLastVideoStatusUiAt) < 1200) {
+          // Keep control/input path smooth by rate-limiting high-frequency telemetry DOM updates.
+          return;
+        }
+        rtcLastVideoStatusUiAt = nowMs;
 	      const mode = String(p.mode || "");
 	      const detail = String(p.detail || "");
 	      const measuredFps = Number(p.measuredFps || 0);
@@ -1823,7 +1847,8 @@ app.MapGet("/", () =>
 	            if (parsed && parsed.type === "video.status") {
 	              renderVideoStatus(parsed);
                 const ev = String(parsed.event || "status");
-	              rtcLogMaybe({ webrtc: "video.status", payload: parsed }, "video.status." + ev, 1500);
+                const minLogMs = ev === "stats" ? 10000 : 1500;
+	              rtcLogMaybe({ webrtc: "video.status", payload: parsed }, "video.status." + ev, minLogMs);
 	              return;
 	            }
 	          } catch {}
@@ -1903,7 +1928,7 @@ app.MapGet("/", () =>
           const j = await res.json().catch(() => null);
           rtcLog({ webrtc: "ui.video_apply_now", room, payload: j });
           show(j || { ok: false, error: "apply_failed" });
-          await refreshRooms();
+          await refreshRooms(true);
           if (j && j.ok) {
             const isActiveRoom = String(getRoom() || "").toLowerCase() === room.toLowerCase();
             const isLive = rtcStatus.textContent === "datachannel: open" || rtcStatus.textContent === "calling...";
@@ -2030,66 +2055,111 @@ app.MapGet("/", () =>
 	      } catch {}
 	    }
 
-	    async function refreshRooms() {
+	    async function refreshRooms(force) {
+        const now = Date.now();
+        const intervalMs = getRoomsRefreshIntervalMs();
+        if (rtcAutoRefreshMsEl) rtcAutoRefreshMsEl.textContent = String(intervalMs);
+        if (!force && (now - rtcLastRoomsRefreshAt) < intervalMs) return;
+        if (rtcRoomsRefreshInFlight) {
+          rtcRoomsRefreshPending = true;
+          return;
+        }
+        rtcRoomsRefreshInFlight = true;
+        rtcLastRoomsRefreshAt = now;
 	      try {
-	        const res = await fetch("/api/webrtc/rooms");
+          const mode = getMode();
+          const listUrl = mode === "video" ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
+	        const res = await fetch(listUrl);
 	        if (!res.ok) return;
 	        const j = await res.json();
-	        if (!j || !j.ok || !Array.isArray(j.rooms)) return;
+          const ok = !!(j && (j.ok === true || j.Ok === true));
+          const roomsRaw = Array.isArray(j?.rooms) ? j.rooms : (Array.isArray(j?.Rooms) ? j.Rooms : []);
+	        if (!ok) return;
 	        const body = document.getElementById("rtcRoomsBody");
 	        body.innerHTML = "";
-	        const mode = getMode();
+	        
           const activeRoom = getRoom().toLowerCase();
           const statusNow = (rtcStatus && rtcStatus.textContent ? rtcStatus.textContent : "").trim().toLowerCase();
           const activeSession = !!statusNow && !statusNow.startsWith("disconnected") && !statusNow.startsWith("error:");
-	        for (const r of j.rooms) {
-	          const room = String(r.room || "");
-	          const isVideo = isVideoRoomId(room);
-	          const kind = isVideo ? "video" : "control";
-	          if (mode !== "video" && isVideo) continue;
-	          if (mode === "video" && !isVideo) continue;
+          const renderedRooms = new Set();
+          const appendRoomRow = (room, peers, hasHelper, isControl, synthetic) => {
+            const isVideo = isVideoRoomId(room);
+            const kind = isVideo ? "video" : "control";
+            if (mode !== "video" && isVideo) return;
+            if (mode === "video" && !isVideo) return;
 
-	          const tags = [];
-	          if (r.isControl) tags.push("control");
-	          if (isVideo) tags.push("video");
-	          if (r.hasHelper) tags.push("helper");
+            const tags = [];
+            if (isControl) tags.push("control");
+            if (isVideo) tags.push("video");
+            if (hasHelper) tags.push("helper");
+            if (synthetic) tags.push("runtime");
 
-	          const status = (r.peers >= 2) ? "busy" : (r.hasHelper ? "idle" : "empty");
-	          const canDelete = !r.isControl && room.toLowerCase() !== "video";
-	          const canStart = !r.hasHelper && status !== "busy";
-	          const canRestart = isVideo && !!r.hasHelper;
-	          const canConnect = status !== "busy" || room.toLowerCase() === getRoom().toLowerCase();
+            const status = (peers >= 2) ? "busy" : (hasHelper ? "idle" : "empty");
+            const canDelete = !isControl && room.toLowerCase() !== "video";
+            const canStart = !hasHelper && status !== "busy";
+            const canRestart = isVideo && !!hasHelper;
+            const canConnect = status !== "busy" || room.toLowerCase() === getRoom().toLowerCase();
             const canHangup = room.toLowerCase() === activeRoom && activeSession;
             const restartBtn = isVideo
               ? `<button data-act="restart" data-room="${room}" ${canRestart ? "" : "disabled"} title="${canRestart ? "restart helper for this video room" : "helper is not running"}">Restart</button>`
               : "";
 
-	          const tr = document.createElement("tr");
-	          tr.innerHTML = `
-	            <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${room}</td>
-	            <td style="padding: 6px 4px"><code>${kind}</code></td>
-	            <td style="padding: 6px 4px">${r.peers}</td>
-	            <td style="padding: 6px 4px" class="muted">${tags.join(", ") || "-"}</td>
-	            <td style="padding: 6px 4px">${status}</td>
-	            <td style="padding: 6px 4px">
-	              <button data-act="start" data-room="${room}" ${canStart ? "" : "disabled"} title="${canStart ? "start helper for this room" : (r.hasHelper ? "helper already started" : "room is busy")}">Start</button>
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${room}</td>
+              <td style="padding: 6px 4px"><code>${kind}</code></td>
+              <td style="padding: 6px 4px">${peers}</td>
+              <td style="padding: 6px 4px" class="muted">${tags.join(", ") || "-"}</td>
+              <td style="padding: 6px 4px">${status}</td>
+              <td style="padding: 6px 4px">
+                <button data-act="start" data-room="${room}" ${canStart ? "" : "disabled"} title="${canStart ? "start helper for this room" : (hasHelper ? "helper already started" : "room is busy")}">Start</button>
                 ${restartBtn}
-	              <button data-act="use" data-room="${room}">Use</button>
-	              <button data-act="connect" data-room="${room}" ${canConnect ? "" : "disabled"} title="${canConnect ? "connect using this room" : "room is busy"}">Connect</button>
-	              <button data-act="hangup" data-room="${room}" ${canHangup ? "" : "disabled"} title="${canHangup ? "disconnect current WebRTC session" : "no active session for this room"}">Hangup</button>
-	              <button data-act="delete" data-room="${room}" ${canDelete ? "" : "disabled"} title="${canDelete ? "stop helper for this room" : "default room cannot be deleted"}">Delete</button>
-	            </td>
-	          `;
-	          body.appendChild(tr);
+                <button data-act="use" data-room="${room}">Use</button>
+                <button data-act="connect" data-room="${room}" ${canConnect ? "" : "disabled"} title="${canConnect ? "connect using this room" : "room is busy"}">Connect</button>
+                <button data-act="hangup" data-room="${room}" ${canHangup ? "" : "disabled"} title="${canHangup ? "disconnect current WebRTC session" : "no active session for this room"}">Hangup</button>
+                <button data-act="delete" data-room="${room}" ${canDelete ? "" : "disabled"} title="${canDelete ? "stop helper for this room" : "default room cannot be deleted"}">Delete</button>
+              </td>
+            `;
+            body.appendChild(tr);
+            renderedRooms.add(String(room || "").toLowerCase());
+          };
+
+	        for (const r of roomsRaw) {
+	          const room = String(r?.room ?? r?.Room ?? "");
+            const peers = Number(r?.peers ?? r?.Peers ?? 0);
+            const hasHelper = !!(r?.hasHelper ?? r?.HasHelper);
+            const isControl = !!(r?.isControl ?? r?.IsControl);
+            appendRoomRow(room, peers, hasHelper, isControl, false);
 	        }
-	      } catch {}
-	      if (getMode() === "video") {
-          const now = Date.now();
-          const runtimePollMs = canHandleRemoteInput() ? 10000 : 4000;
-          if ((now - rtcLastRuntimePollAt) >= runtimePollMs) {
-            await refreshVideoPeerRuntime(getRoom());
+
+          // If a freshly created video room isn't visible in the rooms list yet
+          // (helper/list snapshot lag), render a temporary row so user can act.
+          if (mode === "video" && isVideoRoomId(activeRoom) && !renderedRooms.has(activeRoom)) {
+            appendRoomRow(activeRoom, 1, true, false, true);
           }
-	      }
+          const roomsSnapshotSig = `${mode}:${renderedRooms.size}:${Array.from(renderedRooms).sort().join(",")}`;
+          if (roomsSnapshotSig !== rtcRoomsSnapshotSig) {
+            rtcRoomsSnapshotSig = roomsSnapshotSig;
+            rtcLog({ webrtc: "ui.rooms_snapshot", mode, count: renderedRooms.size });
+          }
+	      } catch (e) {
+          rtcLog({ webrtc: "ui.rooms_refresh_error", error: String(e) });
+        }
+	      try {
+	        if (getMode() === "video") {
+            const now = Date.now();
+            const runtimePollMs = canHandleRemoteInput() ? 15000 : (isRtcSessionActive() ? 10000 : 6000);
+            if ((now - rtcLastRuntimePollAt) >= runtimePollMs) {
+              await refreshVideoPeerRuntime(getRoom());
+            }
+	        }
+        } finally {
+          rtcRoomsRefreshInFlight = false;
+          if (rtcRoomsRefreshPending) {
+            rtcRoomsRefreshPending = false;
+            setTimeout(() => { refreshRooms(true); }, 0);
+          }
+        }
 	    }
 
       function classifyVideoError(errText) {
@@ -2172,7 +2242,18 @@ app.MapGet("/", () =>
 	        if (!res.ok) return;
 	        const j = await res.json().catch(() => null);
 	        renderVideoPeerRuntime(j);
-	        rtcLogMaybe({ webrtc: "ui.video_runtime", room: target, payload: j }, "ui.video_runtime." + target, 10000);
+          const stateSig = JSON.stringify({
+            ok: !!(j && j.ok),
+            running: !!(j && j.running),
+            fallbackUsed: !!(j && j.fallbackUsed),
+            sourceModeActive: String((j && j.sourceModeActive) || ""),
+            startupTimeoutReason: String((j && j.startupTimeoutReason) || ""),
+            lastVideoError: String((j && j.lastVideoError) || "")
+          });
+          if (stateSig !== rtcRuntimeStateSig) {
+            rtcRuntimeStateSig = stateSig;
+            rtcLog({ webrtc: "ui.video_runtime_state", room: target, payload: j });
+          }
           rtcLastRuntimePollAt = Date.now();
 	      } catch {}
 	    }
@@ -2196,7 +2277,7 @@ app.MapGet("/", () =>
 	    }
 
 	    document.getElementById("rtcRefreshRooms").addEventListener("click", async () => {
-	      await refreshRooms();
+	      await refreshRooms(true);
 	      rtcLog({ webrtc: "ui.rooms_refreshed" });
 	    });
 
@@ -2218,7 +2299,7 @@ app.MapGet("/", () =>
 	          const j = await res.json().catch(() => null);
 	          rtcLog({ webrtc: "ui.room_started", room, endpoint: prefix, payload: j });
 	          show(j || { ok: false, error: "start_failed" });
-	          await refreshRooms();
+	          await refreshRooms(true);
 	        } catch (e) {
 	          rtcLog({ webrtc: "ui.room_start_error", room, error: String(e) });
 	          show({ ok: false, error: String(e) });
@@ -2273,7 +2354,7 @@ app.MapGet("/", () =>
               rtcLastRestartRoom = room.toLowerCase();
               rtcLastRestartAt = Date.now();
             }
-            await refreshRooms();
+            await refreshRooms(true);
             if (restartJson && restartJson.ok && wasConnected) {
               if (!rtcConnectInFlight && !rtcHangupInFlight) {
                 rtcLog({ webrtc: "ui.room_restart_autoconnect", room });
@@ -2303,7 +2384,7 @@ app.MapGet("/", () =>
             setRoom(room);
           }
           document.getElementById("rtcHangup").click();
-          await refreshRooms();
+          await refreshRooms(true);
 	        return;
 	      }
 	      if (act === "delete") {
@@ -2328,7 +2409,7 @@ app.MapGet("/", () =>
 	            const tr = rowBtn ? rowBtn.closest("tr") : null;
 	            if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
 	          }
-	          await refreshRooms();
+	          await refreshRooms(true);
 	        } catch (e) {
 	          rtcLog({ webrtc: "ui.room_delete_error", room, error: String(e) });
 	          show({ ok: false, error: String(e) });
@@ -2352,7 +2433,7 @@ app.MapGet("/", () =>
 	        }
 	        setRoom(j.room);
 	        rtcLog({ webrtc: "ui.room_created", room: j.room, started: j.started, pid: j.pid });
-	        await refreshRooms();
+	        await refreshRooms(true);
 	      } catch (e) {
 	        rtcLog({ webrtc: "ui.room_create_error", error: String(e) });
 	        show({ ok: false, error: String(e) });
@@ -2384,7 +2465,7 @@ app.MapGet("/", () =>
 	    })();
 	    refreshWebRtcConfig();
 	    refreshVideoCaptureDevices();
-	    refreshRooms();
+	    refreshRooms(true);
       document.getElementById("rtcVideoQuality")?.addEventListener("change", saveRtcVideoPrefs);
       document.getElementById("rtcVideoImageQuality")?.addEventListener("input", saveRtcVideoPrefs);
       document.getElementById("rtcVideoBitrateKbps")?.addEventListener("input", saveRtcVideoPrefs);
@@ -2411,7 +2492,7 @@ app.MapGet("/", () =>
 	        refreshVideoCaptureDevices();
 	        refreshVideoEncoders();
 	      }
-	      refreshRooms();
+	      refreshRooms(true);
 	    });
 
 	    // Room list auto-refresh (best-effort).
@@ -2420,9 +2501,10 @@ app.MapGet("/", () =>
 	    let rtcRoomsTimer = null;
 	    function startRoomsTimer() {
 	      stopRoomsTimer();
-	      const intervalMs = 2000;
-	      rtcAutoRefreshMsEl.textContent = String(intervalMs);
-	      rtcRoomsTimer = setInterval(() => { if (rtcAutoRefresh.checked) refreshRooms(); }, intervalMs);
+	      rtcRoomsTimer = setInterval(() => {
+          if (!rtcAutoRefresh.checked) return;
+          refreshRooms(false);
+        }, 1000);
 	    }
 	    function stopRoomsTimer() {
 	      if (!rtcRoomsTimer) return;
@@ -2629,7 +2711,7 @@ app.MapGet("/", () =>
 	        const ready = await waitForHelperPeer(room, getHelperReadyTimeoutMs(room, !!(before && before.hasHelper)));
 	        rtcLog({ webrtc: "ui.helper_ready", room, ready });
 	      }
-	      await refreshRooms();
+	      await refreshRooms(true);
 	    });
 
 	    document.getElementById("rtcConnect").addEventListener("click", async () => {
