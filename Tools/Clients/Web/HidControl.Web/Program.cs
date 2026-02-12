@@ -665,6 +665,8 @@ app.MapGet("/", () =>
       let rtcLastRuntimePollAt = 0;
       let rtcConnectInFlight = false;
       let rtcHangupInFlight = false;
+      let rtcLastRestartRoom = "";
+      let rtcLastRestartAt = 0;
 
       function setRtcMainActionBusy() {
         const connectBtn = document.getElementById("rtcConnect");
@@ -2189,7 +2191,12 @@ app.MapGet("/", () =>
 	      if (act === "restart") {
 	        try {
 	          const prefix = getRoomsApiPrefix(room);
-            if (getRoom().toLowerCase() === room.toLowerCase()) {
+            const selectedSameRoom = getRoom().toLowerCase() === room.toLowerCase();
+            const wasConnected =
+              selectedSameRoom &&
+              (rtcStatus.textContent === "datachannel: open" ||
+               rtcStatus.textContent === "connected");
+            if (selectedSameRoom) {
               resetWebRtcClient();
               clearRemoteVideo();
               setRtcStatus("disconnected");
@@ -2199,10 +2206,46 @@ app.MapGet("/", () =>
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(buildVideoRoomRequest(room))
             });
-            const restartJson = await restartRes.json().catch(() => null);
-            rtcLog({ webrtc: "ui.room_restart", room, endpoint: prefix, payload: restartJson });
+            const restartText = await restartRes.text().catch(() => "");
+            let restartJson = null;
+            if (restartText) {
+              try {
+                restartJson = JSON.parse(restartText);
+              } catch {
+                restartJson = {
+                  ok: restartRes.ok,
+                  room,
+                  error: restartRes.ok ? null : `http_${restartRes.status}`,
+                  raw: restartText.slice(0, 256)
+                };
+              }
+            } else {
+              restartJson = restartRes.ok
+                ? { ok: true, room, started: false, note: "empty_restart_response" }
+                : { ok: false, room, error: `http_${restartRes.status}` };
+            }
+            rtcLog({
+              webrtc: "ui.room_restart",
+              room,
+              endpoint: prefix,
+              httpStatus: restartRes.status,
+              payload: restartJson
+            });
             show(restartJson || { ok: false, error: "restart_failed" });
-	          await refreshRooms();
+            if (restartJson && restartJson.ok) {
+              rtcLastRestartRoom = room.toLowerCase();
+              rtcLastRestartAt = Date.now();
+            }
+            await refreshRooms();
+            if (restartJson && restartJson.ok && wasConnected) {
+              if (!rtcConnectInFlight && !rtcHangupInFlight) {
+                rtcLog({ webrtc: "ui.room_restart_autoconnect", room });
+                setRoom(room);
+                document.getElementById("rtcConnect").click();
+              } else {
+                rtcLog({ webrtc: "ui.room_restart_autoconnect_skipped_busy", room });
+              }
+            }
 	        } catch (e) {
 	          rtcLog({ webrtc: "ui.room_restart_error", room, error: String(e) });
 	          show({ ok: false, error: String(e) });
@@ -2570,7 +2613,15 @@ app.MapGet("/", () =>
 	        const helperOk = await ensureHelper(room);
 	        if (!helperOk) return;
 	        // Important: signaling is a relay. If we send an offer before the helper joins the room, it will be lost.
-	        const helperReadyTimeoutMs = getHelperReadyTimeoutMs(room, !!(roomBeforeEnsure && roomBeforeEnsure.hasHelper));
+          let helperReadyTimeoutMs = getHelperReadyTimeoutMs(room, !!(roomBeforeEnsure && roomBeforeEnsure.hasHelper));
+          const justRestartedSameRoom =
+            rtcLastRestartRoom === String(room || "").toLowerCase() &&
+            (Date.now() - rtcLastRestartAt) < 45000;
+          if (justRestartedSameRoom) {
+            // After explicit restart helper can still be warming up; avoid false timeout on first connect.
+            helperReadyTimeoutMs = Math.max(helperReadyTimeoutMs, 25000);
+            rtcLog({ webrtc: "ui.connect_after_restart", room, helperReadyTimeoutMs });
+          }
 	        const ready = await waitForHelperPeer(room, helperReadyTimeoutMs);
 	        if (!ready) {
 	          show({

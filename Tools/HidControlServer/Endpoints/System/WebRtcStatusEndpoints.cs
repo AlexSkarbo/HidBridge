@@ -88,7 +88,7 @@ public static class WebRtcStatusEndpoints
             return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
         });
 
-        app.MapPost("/status/webrtc/video/rooms/{room}/restart", async (string room, HttpRequest req, RestartWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        app.MapPost("/status/webrtc/video/rooms/{room}/restart", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] RestartWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
             (_, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec) = await ReadRequestedVideoRoomAsync(req, ct);
             var res = await uc.Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, ct);

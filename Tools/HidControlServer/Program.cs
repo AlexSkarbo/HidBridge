@@ -114,6 +114,7 @@ builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOutputSt
 
 // WebRTC use-cases.
 builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.CreateWebRtcVideoRoomUseCase>();
+builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.RestartWebRtcVideoRoomUseCase>();
 builder.Services.AddSingleton<HidControl.Application.UseCases.WebRtc.DeleteWebRtcVideoRoomUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOutputApplier, VideoOutputApplierAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoFfmpegStarter, VideoFfmpegStarterAdapter>();
