@@ -204,7 +204,7 @@ func TestAdaptiveBitrateNext_DownWhenMeasuredLow(t *testing.T) {
 }
 
 func TestAdaptiveBitrateNext_UpWhenMeasuredHighAndBelowTarget(t *testing.T) {
-	next, reason, changed := adaptiveBitrateNext(900, 1200, 1300, 400, 6000)
+	next, reason, changed := adaptiveBitrateNext(900, 1200, 1400, 400, 6000)
 	if !changed {
 		t.Fatalf("expected bitrate change")
 	}

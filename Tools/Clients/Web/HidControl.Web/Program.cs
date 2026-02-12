@@ -82,6 +82,36 @@ app.Map("/ws/webrtc", async ctx =>
     try { await serverWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", CancellationToken.None); } catch { }
 });
 
+app.Map("/ws/hid", async ctx =>
+{
+    if (!ctx.WebSockets.IsWebSocketRequest)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await ctx.Response.WriteAsync("expected websocket request", ctx.RequestAborted);
+        return;
+    }
+
+    using WebSocket browserWs = await ctx.WebSockets.AcceptWebSocketAsync();
+
+    var serverHttpBase = new Uri(serverUrl);
+    Uri serverWsUri = ToWsUri(serverHttpBase, "/ws/hid");
+
+    using var serverWs = new ClientWebSocket();
+    if (!string.IsNullOrWhiteSpace(token))
+    {
+        serverWs.Options.SetRequestHeader("X-HID-Token", token!);
+    }
+
+    await serverWs.ConnectAsync(serverWsUri, ctx.RequestAborted);
+
+    var toServer = PumpAsync(browserWs, serverWs, ctx.RequestAborted);
+    var toBrowser = PumpAsync(serverWs, browserWs, ctx.RequestAborted);
+
+    await Task.WhenAny(toServer, toBrowser);
+    try { await browserWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", CancellationToken.None); } catch { }
+    try { await serverWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", CancellationToken.None); } catch { }
+});
+
 app.MapGet("/", () =>
 {
     // Minimal UI to prove that the SDK can drive `/ws/hid`.
@@ -603,11 +633,19 @@ app.MapGet("/", () =>
 	    let rtcMoveAccumX = 0;
 	    let rtcMoveAccumY = 0;
 	    let rtcMoveTimer = null;
+      let rtcMoveSendInFlight = false;
+      const rtcMoveFlushMs = 6;
 	    let rtcLastMouseX = null;
 	    let rtcLastMouseY = null;
       let rtcRemoteInputFocused = false;
       const rtcHeldButtons = new Set();
       const rtcPressedCodes = new Set();
+      let rtcInputWs = null;
+      let rtcInputWsConnected = false;
+      const rtcInputWsQueue = [];
+      let rtcKeyboardSendInFlight = false;
+      let rtcKeyboardDirty = false;
+      let rtcLastKeyboardSig = "";
       let rtcVideoFitMode = "fit"; // fit=contain, fill=cover
       const rtcVideoRuntime = {
         running: false,
@@ -622,6 +660,7 @@ app.MapGet("/", () =>
         abrMeasuredKbps: 0,
         abrReason: ""
       };
+      let rtcLastRuntimePollAt = 0;
       let rtcConnectInFlight = false;
       let rtcHangupInFlight = false;
 
@@ -664,22 +703,46 @@ app.MapGet("/", () =>
         return { mods, keys };
       }
 
-      async function syncKeyboardReport() {
-        const rpt = buildKeyboardReportFromPressed();
-        await postQuiet("/api/keyboard/report", { mods: rpt.mods, keys: rpt.keys, applyMapping: true });
+      function keyboardReportSig(rpt) {
+        const mods = Number(rpt && Number.isFinite(rpt.mods) ? rpt.mods : 0);
+        const keys = Array.isArray(rpt && rpt.keys) ? rpt.keys : [];
+        return `${mods}:${keys.join(",")}`;
+      }
+
+      async function syncKeyboardReport(force) {
+        rtcKeyboardDirty = true;
+        if (rtcKeyboardSendInFlight) return;
+        rtcKeyboardSendInFlight = true;
+        try {
+          while (rtcKeyboardDirty) {
+            rtcKeyboardDirty = false;
+            const rpt = buildKeyboardReportFromPressed();
+            const sig = keyboardReportSig(rpt);
+            if (!force && sig === rtcLastKeyboardSig) continue;
+            sendKeyboardReportInput(rpt.mods, rpt.keys);
+            rtcLastKeyboardSig = sig;
+            force = false;
+          }
+        } finally {
+          rtcKeyboardSendInFlight = false;
+        }
       }
 
       async function releaseHeldRemoteInput() {
         try {
           for (const b of Array.from(rtcHeldButtons)) {
-            await postQuiet("/api/mouse/button", { button: b, down: false });
+            sendMouseButtonInput(b, false);
           }
           rtcHeldButtons.clear();
           rtcPressedCodes.clear();
-          await postQuiet("/api/keyboard/report", { mods: 0, keys: [], applyMapping: true });
+          sendKeyboardReportInput(0, []);
+          rtcLastKeyboardSig = "0:";
+          rtcKeyboardDirty = false;
         } catch {
           rtcHeldButtons.clear();
           rtcPressedCodes.clear();
+          rtcLastKeyboardSig = "";
+          rtcKeyboardDirty = false;
         }
       }
 
@@ -714,6 +777,9 @@ app.MapGet("/", () =>
             try { document.exitPointerLock(); } catch {}
           }
           await releaseHeldRemoteInput();
+          closeInputWs();
+	      } else {
+          ensureInputWs();
 	      }
 	      if (rtcRemoteVideo) {
 	        rtcRemoteVideo.style.cursor = rtcRemoteInputEnabled ? "crosshair" : "default";
@@ -734,22 +800,139 @@ app.MapGet("/", () =>
 	      }
 	    }
 
-	    function flushMouseMove() {
+      function toLocalWs(path) {
+        const proto = location.protocol === "https:" ? "wss://" : "ws://";
+        return proto + location.host + path;
+      }
+
+      function flushInputWsQueue() {
+        if (!rtcInputWsConnected || !rtcInputWs) return;
+        while (rtcInputWsQueue.length > 0) {
+          const msg = rtcInputWsQueue.shift();
+          try {
+            rtcInputWs.send(msg);
+          } catch {
+            break;
+          }
+        }
+      }
+
+      function ensureInputWs() {
+        if (rtcInputWs && (rtcInputWs.readyState === WebSocket.OPEN || rtcInputWs.readyState === WebSocket.CONNECTING)) return;
+        try {
+          const ws = new WebSocket(toLocalWs("/ws/hid"));
+          rtcInputWs = ws;
+          rtcInputWsConnected = false;
+          ws.addEventListener("open", () => {
+            if (rtcInputWs !== ws) return;
+            rtcInputWsConnected = true;
+            flushInputWsQueue();
+          });
+          ws.addEventListener("close", () => {
+            if (rtcInputWs !== ws) return;
+            rtcInputWsConnected = false;
+            rtcInputWsQueue.length = 0;
+          });
+          ws.addEventListener("error", () => {
+            if (rtcInputWs !== ws) return;
+            rtcInputWsConnected = false;
+            rtcInputWsQueue.length = 0;
+          });
+          ws.addEventListener("message", () => { });
+        } catch {
+          rtcInputWsConnected = false;
+        }
+      }
+
+      function closeInputWs() {
+        const ws = rtcInputWs;
+        rtcInputWs = null;
+        rtcInputWsConnected = false;
+        rtcInputWsQueue.length = 0;
+        if (!ws) return;
+        try { ws.close(); } catch { }
+      }
+
+      function sendInputWs(payload, opts) {
+        if (!payload) return false;
+        const options = opts || {};
+        const allowQueue = options.allowQueue !== false;
+        ensureInputWs();
+        const text = JSON.stringify(payload);
+        if (rtcInputWsConnected && rtcInputWs && rtcInputWs.readyState === WebSocket.OPEN) {
+          try {
+            rtcInputWs.send(text);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+        if (allowQueue && rtcInputWsQueue.length < 256) rtcInputWsQueue.push(text);
+        return false;
+      }
+
+      function sendMouseMoveInput(dx, dy) {
+        // Realtime pointer path: never queue stale move events, never fallback to HTTP flood.
+        return sendInputWs({ type: "mouse.move", dx, dy }, { allowQueue: false });
+      }
+
+      function sendMouseButtonInput(button, down) {
+        if (sendInputWs({ type: "mouse.button", button, down }, { allowQueue: false })) return;
+        postQuiet("/api/mouse/button", { button, down });
+      }
+
+      function sendMouseWheelInput(delta) {
+        if (sendInputWs({ type: "mouse.wheel", delta }, { allowQueue: false })) return;
+        postQuiet("/api/mouse/wheel", { delta });
+      }
+
+      function sendKeyboardReportInput(mods, keys) {
+        if (sendInputWs({ type: "keyboard.report", mods, keys, applyMapping: true }, { allowQueue: false })) return;
+        postQuiet("/api/keyboard/report", { mods, keys, applyMapping: true });
+      }
+
+      function scheduleMouseFlush(delayMs) {
+        if (rtcMoveTimer) return;
+        rtcMoveTimer = setTimeout(() => { flushMouseMove().catch(() => { }); }, delayMs);
+      }
+
+	    async function flushMouseMove() {
 	      rtcMoveTimer = null;
-	      const dx = Math.round(rtcMoveAccumX);
-	      const dy = Math.round(rtcMoveAccumY);
-	      rtcMoveAccumX = 0;
-	      rtcMoveAccumY = 0;
+        if (rtcMoveSendInFlight) {
+          scheduleMouseFlush(2);
+          return;
+        }
+        if (!rtcInputWsConnected || !rtcInputWs || rtcInputWs.readyState !== WebSocket.OPEN) {
+          scheduleMouseFlush(8);
+          return;
+        }
+        // Backpressure guard: avoid buffering stale pointer deltas in browser/socket internals.
+        if ((rtcInputWs.bufferedAmount || 0) > 16384) {
+          scheduleMouseFlush(4);
+          return;
+        }
+        const dx = Math.round(rtcMoveAccumX);
+        const dy = Math.round(rtcMoveAccumY);
 	      if (dx === 0 && dy === 0) return;
-	      postQuiet("/api/mouse/move", { dx, dy });
+        rtcMoveSendInFlight = true;
+        try {
+          const sent = sendMouseMoveInput(dx, dy);
+          if (sent) {
+            rtcMoveAccumX -= dx;
+            rtcMoveAccumY -= dy;
+          }
+        } finally {
+          rtcMoveSendInFlight = false;
+        }
+        if (Math.abs(rtcMoveAccumX) >= 0.5 || Math.abs(rtcMoveAccumY) >= 0.5) {
+          scheduleMouseFlush(0);
+        }
 	    }
 
 	    function queueMouseMove(dx, dy) {
 	      rtcMoveAccumX += dx;
 	      rtcMoveAccumY += dy;
-	      if (!rtcMoveTimer) {
-	        rtcMoveTimer = setTimeout(flushMouseMove, 25);
-	      }
+        scheduleMouseFlush(rtcMoveFlushMs);
 	    }
 
 	    function keyboardChordFromEvent(e) {
@@ -908,7 +1091,8 @@ app.MapGet("/", () =>
       }
       function startRtcStatsProbe() {
         if (rtcPerf.statsTimer) clearInterval(rtcPerf.statsTimer);
-        rtcPerf.statsTimer = setInterval(() => { collectRtcStats().catch(() => { }); }, 1000);
+        // 2s is enough for KPI and reduces main-thread pressure vs 1s polling.
+        rtcPerf.statsTimer = setInterval(() => { collectRtcStats().catch(() => { }); }, 5000);
       }
 	    function startVideoPerfProbe() {
 	      if (!rtcRemoteVideo || typeof rtcRemoteVideo.requestVideoFrameCallback !== "function") return;
@@ -966,12 +1150,60 @@ app.MapGet("/", () =>
       try { return JSON.parse(t); } catch { return []; }
     }
 
+    const rtcLogLines = [];
+    let rtcLogRenderScheduled = false;
+    const rtcLastRuntimeSig = new Map();
+
+    function scheduleRtcLogRender() {
+      if (rtcLogRenderScheduled) return;
+      rtcLogRenderScheduled = true;
+      requestAnimationFrame(() => {
+        rtcLogRenderScheduled = false;
+        rtcOut.textContent = rtcLogLines.join("\n");
+      });
+    }
+
+    function shouldSkipRtcLog(entry) {
+      try {
+        const kind = String(entry && entry.webrtc || "");
+        if (kind === "video.status") {
+          const ev = String(entry.payload && entry.payload.event || "");
+          // High-frequency stats are already shown in KPI row; avoid UI log spam/jank.
+          if (ev === "stats") return true;
+        }
+        if (kind === "send" || kind === "recv") {
+          const payload = entry && entry.payload ? entry.payload : {};
+          const t = String(payload.type || "").toLowerCase();
+          // SDP/candidate signaling is too noisy for normal runtime and hurts UI smoothness.
+          if (t === "signal" || t === "webrtc.signal") return true;
+        }
+        if (kind === "pc.iceGatheringState" || kind === "candidate.eoc_local") {
+          return true;
+        }
+        if (kind === "ui.video_runtime") {
+          const room = String(entry.room || "");
+          const payload = entry.payload || {};
+          const sig = JSON.stringify({
+            ok: !!payload.ok,
+            room: String(payload.room || room || ""),
+            running: !!payload.running,
+            fallbackUsed: !!payload.fallbackUsed,
+            sourceModeActive: String(payload.sourceModeActive || ""),
+            pid: Number(payload.pid || 0)
+          });
+          const prev = rtcLastRuntimeSig.get(room);
+          if (prev === sig) return true;
+          rtcLastRuntimeSig.set(room, sig);
+        }
+      } catch {}
+      return false;
+    }
+
     function rtcLog(entry) {
-      const line = JSON.stringify(entry);
-      const lines = rtcOut.textContent.split("\n");
-      lines.push(line);
-      while (lines.length > 60) lines.shift();
-      rtcOut.textContent = lines.join("\n");
+      if (shouldSkipRtcLog(entry)) return;
+      rtcLogLines.push(JSON.stringify(entry));
+      while (rtcLogLines.length > 80) rtcLogLines.shift();
+      scheduleRtcLogRender();
     }
     const rtcLogThrottleState = new Map();
     function rtcLogMaybe(entry, key, minMs) {
@@ -1507,6 +1739,7 @@ app.MapGet("/", () =>
 	      }
 	    }
 	    function resetWebRtcClient() {
+        closeInputWs();
 	      if (webrtcClient) {
 	        try { webrtcClient.hangup(); } catch {}
 	      }
@@ -1684,7 +1917,7 @@ app.MapGet("/", () =>
         if (!button) return;
         e.preventDefault();
         rtcHeldButtons.add(button);
-        postQuiet("/api/mouse/button", { button, down: true });
+        sendMouseButtonInput(button, true);
       }, { capture: true });
 
       window.addEventListener("mouseup", (e) => {
@@ -1693,14 +1926,14 @@ app.MapGet("/", () =>
         if (!button) return;
         e.preventDefault();
         rtcHeldButtons.delete(button);
-        postQuiet("/api/mouse/button", { button, down: false });
+        sendMouseButtonInput(button, false);
       }, { capture: true });
 
       window.addEventListener("wheel", (e) => {
         if (!canHandleRemoteInput()) return;
         e.preventDefault();
         const direction = Math.sign(e.deltaY);
-        if (direction !== 0) postQuiet("/api/mouse/wheel", { delta: direction });
+        if (direction !== 0) sendMouseWheelInput(direction);
       }, { passive: false, capture: true });
 
       // Global fullscreen shortcut for video preview.
@@ -1801,7 +2034,11 @@ app.MapGet("/", () =>
 	        }
 	      } catch {}
 	      if (getMode() === "video") {
-	        await refreshVideoPeerRuntime(getRoom());
+          const now = Date.now();
+          const runtimePollMs = canHandleRemoteInput() ? 10000 : 4000;
+          if ((now - rtcLastRuntimePollAt) >= runtimePollMs) {
+            await refreshVideoPeerRuntime(getRoom());
+          }
 	      }
 	    }
 
@@ -1885,7 +2122,8 @@ app.MapGet("/", () =>
 	        if (!res.ok) return;
 	        const j = await res.json().catch(() => null);
 	        renderVideoPeerRuntime(j);
-	        rtcLogMaybe({ webrtc: "ui.video_runtime", room: target, payload: j }, "ui.video_runtime." + target, 2000);
+	        rtcLogMaybe({ webrtc: "ui.video_runtime", room: target, payload: j }, "ui.video_runtime." + target, 10000);
+          rtcLastRuntimePollAt = Date.now();
 	      } catch {}
 	    }
 

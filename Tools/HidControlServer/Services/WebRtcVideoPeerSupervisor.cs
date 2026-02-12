@@ -297,8 +297,13 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                             _procs.Remove(room);
                         }
                         MarkRuntimeStopped(room, p, code);
-                        ReleaseManualStopsForRoom(room);
                         scheduleRestart = ShouldScheduleRestart_NoLock(room, code);
+                        // Keep capture manual-stop while auto-restart is pending.
+                        // Otherwise watchdog can grab the same source and start the legacy MJPEG pipeline.
+                        if (!scheduleRestart)
+                        {
+                            ReleaseManualStopsForRoom(room);
+                        }
                     }
 
                     if (scheduleRestart)
@@ -1375,6 +1380,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 attempts,
                 maxAttempts = RestartMaxAttempts
             });
+            lock (_lock)
+            {
+                ReleaseManualStopsForRoom(room);
+            }
             return;
         }
 
@@ -1434,11 +1443,19 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                         room,
                         error = started.error
                     });
+                    lock (_lock)
+                    {
+                        ReleaseManualStopsForRoom(room);
+                    }
                 }
             }
             catch (Exception ex)
             {
                 ServerEventLog.Log("webrtc.videopeer", "autorestart_error", new { room, error = ex.Message });
+                lock (_lock)
+                {
+                    ReleaseManualStopsForRoom(room);
+                }
             }
         });
     }

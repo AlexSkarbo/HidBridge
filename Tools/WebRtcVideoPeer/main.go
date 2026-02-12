@@ -169,6 +169,7 @@ type peerState struct {
 	pcMu         sync.Mutex
 	pc           *webrtc.PeerConnection
 	streamCancel context.CancelFunc
+	disconnectTimer *time.Timer
 
 	activePeerId string
 	dcMu         sync.Mutex
@@ -257,15 +258,15 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		log.Printf("pc state: %s", s.String())
-		if s == webrtc.PeerConnectionStateDisconnected || s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
-			p.pcMu.Lock()
-			defer p.pcMu.Unlock()
-			if p.streamCancel != nil {
-				p.streamCancel()
-				p.streamCancel = nil
-			}
-			p.pc = nil
-			p.activePeerId = ""
+		switch s {
+		case webrtc.PeerConnectionStateConnected:
+			p.cancelDisconnectTeardown()
+		case webrtc.PeerConnectionStateDisconnected:
+			// Browsers can transiently enter disconnected and recover.
+			// Keep PC/stream alive for a grace period to avoid unnecessary full restarts.
+			p.scheduleDisconnectTeardown(25 * time.Second)
+		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+			p.teardownPeerConnection()
 		}
 	})
 
@@ -303,6 +304,59 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 
 	p.pc = pc
 	return pc, nil
+}
+
+func (p *peerState) scheduleDisconnectTeardown(delay time.Duration) {
+	p.pcMu.Lock()
+	defer p.pcMu.Unlock()
+
+	if p.disconnectTimer != nil {
+		p.disconnectTimer.Stop()
+	}
+	p.disconnectTimer = time.AfterFunc(delay, func() {
+		p.pcMu.Lock()
+		defer p.pcMu.Unlock()
+
+		if p.pc == nil {
+			return
+		}
+		if p.pc.ConnectionState() != webrtc.PeerConnectionStateDisconnected {
+			return
+		}
+		log.Printf("pc disconnected timeout: forcing teardown")
+		p.teardownPeerConnectionLocked()
+	})
+}
+
+func (p *peerState) cancelDisconnectTeardown() {
+	p.pcMu.Lock()
+	defer p.pcMu.Unlock()
+	if p.disconnectTimer != nil {
+		p.disconnectTimer.Stop()
+		p.disconnectTimer = nil
+	}
+}
+
+func (p *peerState) teardownPeerConnection() {
+	p.pcMu.Lock()
+	defer p.pcMu.Unlock()
+	p.teardownPeerConnectionLocked()
+}
+
+func (p *peerState) teardownPeerConnectionLocked() {
+	if p.disconnectTimer != nil {
+		p.disconnectTimer.Stop()
+		p.disconnectTimer = nil
+	}
+	if p.streamCancel != nil {
+		p.streamCancel()
+		p.streamCancel = nil
+	}
+	if p.pc != nil {
+		_ = p.pc.Close()
+	}
+	p.pc = nil
+	p.activePeerId = ""
 }
 
 func (p *peerState) notifyVideoStatus(event string, mode string, detail string, extra map[string]any) {
@@ -453,14 +507,22 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	restartWindowSec := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_WINDOW_SEC", 60, 5, 600)
 	restartBaseDelayMs := envIntInRange("HIDBRIDGE_VIDEO_PIPELINE_RESTART_DELAY_MS", 500, 50, 10000)
 	startupPacketTimeoutMs := envIntInRange("HIDBRIDGE_VIDEO_STARTUP_PACKET_TIMEOUT_MS", 15000, 2000, 120000)
-	abrEnabled := envBool("HIDBRIDGE_VIDEO_ABR_ENABLED", true)
+	// ABR currently requires pipeline restart for bitrate changes, which can cause
+	// visible freezes on live control sessions. Keep it opt-in by default.
+	abrEnabled := envBool("HIDBRIDGE_VIDEO_ABR_ENABLED", false)
 	abrIntervalSec := envIntInRange("HIDBRIDGE_VIDEO_ABR_INTERVAL_SEC", 6, 2, 30)
 	abrMinKbps := envIntInRange("HIDBRIDGE_VIDEO_ABR_MIN_KBPS", 400, 200, 12000)
 	abrMaxKbps := envIntInRange("HIDBRIDGE_VIDEO_ABR_MAX_KBPS", 6000, 200, 20000)
+	abrConsecutiveRequired := envIntInRange("HIDBRIDGE_VIDEO_ABR_CONSECUTIVE_REQUIRED", 3, 1, 8)
+	abrMinChangeIntervalSec := envIntInRange("HIDBRIDGE_VIDEO_ABR_MIN_CHANGE_INTERVAL_SEC", 20, 2, 120)
 	configuredBitrateKbps := clamp(bitrateKbps, 200, 12000)
 	currentBitrateKbps := configuredBitrateKbps
 	lastAbrEvalAt := time.Now()
 	pendingReconfigureReason := ""
+	abrTrend := ""
+	abrTrendCount := 0
+	abrLastChangeAt := time.Time{}
+	abrEmaKbps := float64(configuredBitrateKbps)
 	var restartTimestamps []time.Time
 	var cmd *exec.Cmd
 	var waitCh chan error
@@ -703,21 +765,46 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 			measuredKbps := int(float64((totalBytes-lastAbrBytes)*8) / interval / 1000.0)
 			lastAbrAt = now
 			lastAbrBytes = totalBytes
-			if nextBitrate, reason, changed := adaptiveBitrateNext(currentBitrateKbps, configuredBitrateKbps, measuredKbps, abrMinKbps, abrMaxKbps); changed {
-				prev := currentBitrateKbps
-				currentBitrateKbps = nextBitrate
-				pendingReconfigureReason = "abr_" + reason
-				if onStatus != nil {
-					onStatus("abr_update", modeInUse, reason, map[string]any{
-						"bitrateKbps":    currentBitrateKbps,
-						"bitratePrevKbps": prev,
-						"measuredKbps":   measuredKbps,
-						"fallbackUsed":   fallbackUsed,
-					})
-				}
-				if cmd != nil && cmd.Process != nil {
-					_ = cmd.Process.Kill()
-				}
+			// Smooth short bitrate spikes/drops to avoid ABR flapping.
+			abrEmaKbps = (abrEmaKbps * 0.75) + (float64(measuredKbps) * 0.25)
+			smoothedKbps := int(abrEmaKbps)
+			nextBitrate, reason, changed := adaptiveBitrateNext(currentBitrateKbps, configuredBitrateKbps, smoothedKbps, abrMinKbps, abrMaxKbps)
+			if !changed {
+				abrTrend = ""
+				abrTrendCount = 0
+				continue
+			}
+
+			if reason == abrTrend {
+				abrTrendCount++
+			} else {
+				abrTrend = reason
+				abrTrendCount = 1
+			}
+			if abrTrendCount < abrConsecutiveRequired {
+				continue
+			}
+			if !abrLastChangeAt.IsZero() && now.Sub(abrLastChangeAt) < time.Duration(abrMinChangeIntervalSec)*time.Second {
+				continue
+			}
+
+			prev := currentBitrateKbps
+			currentBitrateKbps = nextBitrate
+			abrLastChangeAt = now
+			abrTrend = ""
+			abrTrendCount = 0
+			pendingReconfigureReason = "abr_" + reason
+			if onStatus != nil {
+				onStatus("abr_update", modeInUse, reason, map[string]any{
+					"bitrateKbps":     currentBitrateKbps,
+					"bitratePrevKbps": prev,
+					"measuredKbps":    measuredKbps,
+					"smoothedKbps":    smoothedKbps,
+					"fallbackUsed":    fallbackUsed,
+				})
+			}
+			if cmd != nil && cmd.Process != nil {
+				_ = cmd.Process.Kill()
 			}
 		}
 
@@ -739,33 +826,43 @@ func adaptiveBitrateNext(current int, configured int, measured int, minKbps int,
 	if measured <= 0 {
 		return cur, "", false
 	}
+	minDeltaDown := maxInt(80, int(float64(cur)*0.05))
+	minDeltaUp := maxInt(40, int(float64(cur)*0.03))
 
-	downThreshold := int(float64(cur) * 0.80)
+	// Use conservative hysteresis to avoid bitrate oscillation and ffmpeg restarts.
+	downThreshold := int(float64(cur) * 0.65)
 	if measured < downThreshold {
-		proposed := int(float64(measured) * 1.10)
+		proposed := int(float64(measured) * 1.18)
 		proposed = clamp(proposed, minV, maxV)
-		if proposed < cur-80 {
+		if proposed < cur-minDeltaDown {
 			return proposed, "down", true
 		}
 	}
 
-	upThreshold := int(float64(cur) * 1.25)
+	upThreshold := int(float64(cur) * 1.45)
 	if measured > upThreshold && cur < cfg {
-		proposed := int(float64(cur) * 1.12)
+		proposed := int(float64(cur) * 1.06)
 		proposed = clamp(proposed, minV, minInt(maxV, cfg))
-		if proposed > cur+80 {
+		if proposed > cur+minDeltaUp {
 			return proposed, "up", true
 		}
 	}
 
 	if cur > cfg {
 		proposed := clamp(cfg, minV, maxV)
-		if proposed < cur-80 {
+		if proposed < cur-minDeltaDown {
 			return proposed, "back_to_target", true
 		}
 	}
 
 	return cur, "", false
+}
+
+func maxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func buildVideoPipelineArgs(sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string) ([]string, error) {
@@ -1065,8 +1162,7 @@ func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int, fps in
 		"-c:v", "libx264",
 		"-preset", xPreset,
 		"-tune", "zerolatency",
-		"-profile:v", "baseline",
-		"-level", "3.1",
+		"-profile:v", "main",
 		"-vf", "format=yuv420p",
 		"-g", strconv.Itoa(gop),
 		"-bf", "0",
@@ -1075,6 +1171,10 @@ func defaultH264CpuArgs(preset string, imageQuality int, bitrateKbps int, fps in
 		"-b:v", fmt.Sprintf("%dk", bitrate),
 		"-maxrate", fmt.Sprintf("%dk", maxrate),
 		"-bufsize", fmt.Sprintf("%dk", bufsize),
+		// Improve loss recovery on unstable links:
+		// - repeat SPS/PPS in keyframes
+		// - keep NAL units below MTU-ish size to reduce burst-loss impact
+		"-x264-params", "repeat-headers=1:slice-max-size=1100",
 	}
 	if crf >= 0 {
 		args = append(args, "-crf", strconv.Itoa(crf))
@@ -1115,7 +1215,6 @@ func defaultVp8EncoderArgs(preset string, imageQuality int, bitrateKbps int, fps
 			"-lag-in-frames", "0",
 			"-error-resilient", "1",
 			"-auto-alt-ref", "0",
-			"-row-mt", "1",
 			"-vf", "format=yuv420p",
 			"-g", strconv.Itoa(gop),
 			"-b:v", fmt.Sprintf("%dk", bitrate),
@@ -1187,11 +1286,13 @@ func qualityRateControl(preset string, bitrate int, fps int) (gop int, maxrate i
 	case "low-latency":
 		return clamp(f, 15, 60), int(float64(b) * 1.10), b * 2
 	case "high":
-		return clamp(f*2, 30, 120), int(float64(b) * 1.2), b * 2
+		// Shorter GOP improves visual recovery after packet loss.
+		return clamp((f*3)/2, 20, 90), int(float64(b) * 1.2), b * 2
 	case "optimal":
-		return clamp(f*4, 60, 240), int(float64(b) * 1.15), b * 4
+		// Keep "optimal" quality but prefer robustness on live control links.
+		return clamp(f, 20, 60), int(float64(b) * 1.08), b * 2
 	default: // balanced
-		return clamp(f*2, 30, 120), int(float64(b) * 1.2), b * 2
+		return clamp((f*3)/2, 20, 90), int(float64(b) * 1.2), b * 2
 	}
 }
 
@@ -1211,8 +1312,9 @@ func applyImageQualityToBitrate(bitrateKbps int, imageQuality int) int {
 		return bitrate
 	}
 
-	// 1..100 maps to 0.6x..1.4x bitrate. This works uniformly across CPU/HW encoders.
-	scale := 0.6 + (0.8 * float64(q-1) / 99.0)
+	// Keep image quality influence gentle to avoid aggressive bandwidth swings.
+	// 1..100 maps to 0.85x..1.15x bitrate.
+	scale := 0.85 + (0.30 * float64(q-1) / 99.0)
 	scaled := int(float64(bitrate) * scale)
 	return clamp(scaled, 200, 12000)
 }
