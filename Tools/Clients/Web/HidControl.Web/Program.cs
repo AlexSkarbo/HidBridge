@@ -1163,6 +1163,16 @@ app.MapGet("/", () =>
 	      };
 	      rtcPerf.frameCbId = rtcRemoteVideo.requestVideoFrameCallback(onFrame);
 	    }
+      let rtcLastStatusRoomsRefreshAt = 0;
+      function maybeRefreshRoomsOnStatus(s) {
+        const t = String(s || "").toLowerCase();
+        const important = t === "datachannel: open" || t === "datachannel: closed" || t === "disconnected" || t.startsWith("error:");
+        if (!important) return;
+        const now = Date.now();
+        if ((now - rtcLastStatusRoomsRefreshAt) < 400) return;
+        rtcLastStatusRoomsRefreshAt = now;
+        setTimeout(() => { refreshRooms(true); }, 0);
+      }
 	    function setRtcStatus(s) {
 	      rtcStatus.textContent = s;
 	      if (s === "datachannel: open" && rtcPerf.connectClickAt > 0 && rtcPerf.dcOpenAt === 0) {
@@ -1183,6 +1193,25 @@ app.MapGet("/", () =>
 	      rtcSendTextBtn.disabled = !open;
 	      rtcMouseMoveBtn.disabled = !open;
 	      for (const b of document.querySelectorAll(".rtcClick")) b.disabled = !open;
+        // Fail-open UI sync: if room list API lags/fails, still reflect current session state in table row.
+        try {
+          const activeRoom = String(rtcSelectedRoom || getRoom() || "").toLowerCase();
+          const body = document.getElementById("rtcRoomsBody");
+          if (body && activeRoom) {
+            for (const tr of Array.from(body.querySelectorAll("tr"))) {
+              const tds = tr.querySelectorAll("td");
+              if (!tds || tds.length < 6) continue;
+              const roomCell = String((tds[0].textContent || "")).trim().toLowerCase();
+              if (roomCell !== activeRoom) continue;
+              if (tds[2]) tds[2].textContent = open ? "2" : "1";
+              if (tds[4]) tds[4].textContent = open ? "busy" : "idle";
+              const hangupBtn = tr.querySelector('button[data-act="hangup"]');
+              if (hangupBtn) hangupBtn.disabled = !open;
+              break;
+            }
+          }
+        } catch {}
+        maybeRefreshRoomsOnStatus(s);
 	    }
 
     function getIceServers() {
@@ -1207,6 +1236,7 @@ app.MapGet("/", () =>
     let rtcRuntimeStateSig = "";
     let rtcRoomsSnapshotSig = "";
     let rtcRoomsRenderSig = "";
+    let rtcSelectedRoom = "control";
 
     function isRtcSessionActive() {
       const s = String((rtcStatus && rtcStatus.textContent) || "").toLowerCase();
@@ -1799,9 +1829,17 @@ app.MapGet("/", () =>
 	      }
 	      await refreshVideoCaptureModes();
 	    }
-	    function getRoom() { return (document.getElementById("rtcRoom").value.trim() || "control"); }
+	    function getRoom() {
+        const raw = (document.getElementById("rtcRoom").value || "").trim();
+        if (raw) {
+          rtcSelectedRoom = raw;
+          return raw;
+        }
+        return rtcSelectedRoom || "control";
+      }
 	    function setRoom(r) {
 	      if (!r) return;
+        rtcSelectedRoom = String(r).trim() || rtcSelectedRoom || "control";
 	      document.getElementById("rtcRoom").value = r;
 	      document.getElementById("rtcMode").value = isVideoRoomId(r) ? "video" : "control";
 	      updateRtcModeUi();
@@ -1809,9 +1847,7 @@ app.MapGet("/", () =>
           const body = document.getElementById("rtcRoomsBody");
           if (body) {
             const roomLc = String(r).toLowerCase();
-            const exists = !!body.querySelector(`button[data-room="${CSS.escape(r)}"]`);
-            if (!exists) {
-              body.innerHTML = `<tr>
+            body.innerHTML = `<tr>
                 <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${r}</td>
                 <td style="padding: 6px 4px"><code>video</code></td>
                 <td style="padding: 6px 4px">1</td>
@@ -1826,8 +1862,9 @@ app.MapGet("/", () =>
                   <button data-act="delete" data-room="${r}">Delete</button>
                 </td>
               </tr>`;
-              rtcRoomsRenderSig = `setRoom:${roomLc}`;
-            }
+            rtcRoomsRenderSig = `setRoom:${roomLc}`;
+            rtcRoomsSnapshotSig = `video:1:${roomLc}`;
+            rtcLog({ webrtc: "ui.rooms_snapshot", mode: "video", count: 1, reason: "selected_room_optimistic" });
           }
         }
 	      resetWebRtcClient();
@@ -2093,38 +2130,46 @@ app.MapGet("/", () =>
         rtcRoomsRefreshInFlight = true;
         rtcLastRoomsRefreshAt = now;
 	      try {
-          const roomNow = getRoom();
+          const roomNow = rtcSelectedRoom || getRoom();
           const mode = isVideoRoomId(roomNow) ? "video" : getMode();
+          const activeRoomNow = String(getRoom() || "").toLowerCase();
+          const statusNowText = (rtcStatus && rtcStatus.textContent ? rtcStatus.textContent : "").trim().toLowerCase();
+          const activeSessionNow = !!statusNowText && !statusNowText.startsWith("disconnected") && !statusNowText.startsWith("error:");
           // Keep dropdown in sync with selected room kind, otherwise refresh can query wrong endpoint.
           const modeEl = document.getElementById("rtcMode");
           if (modeEl && modeEl.value !== mode) modeEl.value = mode;
           const listUrl = mode === "video" ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
 	        const res = await fetch(listUrl);
           const body = document.getElementById("rtcRoomsBody");
-	        if (!res.ok) {
-            if (mode === "video" && isVideoRoomId(roomNow)) {
-              // Fail-open for UX: still show currently selected video room.
-              const fallbackRow = `
-                <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${roomNow}</td>
-                <td style="padding: 6px 4px"><code>video</code></td>
-                <td style="padding: 6px 4px">1</td>
-                <td style="padding: 6px 4px" class="muted">video, helper, runtime</td>
-                <td style="padding: 6px 4px">idle</td>
-                <td style="padding: 6px 4px">
-                  <button data-act="start" data-room="${roomNow}" disabled>Start</button>
-                  <button data-act="restart" data-room="${roomNow}" title="restart helper for this video room">Restart</button>
-                  <button data-act="use" data-room="${roomNow}">Use</button>
-                  <button data-act="connect" data-room="${roomNow}">Connect</button>
-                  <button data-act="hangup" data-room="${roomNow}" disabled>Hangup</button>
-                  <button data-act="delete" data-room="${roomNow}">Delete</button>
-                </td>
-              `;
-              const fallbackSig = `http_${res.status}:${mode}:${roomNow}`;
-              if (body && rtcRoomsRenderSig !== fallbackSig) {
-                body.innerHTML = `<tr>${fallbackRow}</tr>`;
-                rtcRoomsRenderSig = fallbackSig;
-              }
+          const renderVideoFallback = (reason) => {
+            if (mode !== "video" || !isVideoRoomId(roomNow)) return;
+            const isActiveRoom = roomNow.toLowerCase() === activeRoomNow;
+            const effectivePeers = (isActiveRoom && activeSessionNow) ? 2 : 1;
+            const status = (effectivePeers >= 2) ? "busy" : "idle";
+            const canHangup = isActiveRoom && activeSessionNow;
+            const fallbackRow = `
+              <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${roomNow}</td>
+              <td style="padding: 6px 4px"><code>video</code></td>
+              <td style="padding: 6px 4px">${effectivePeers}</td>
+              <td style="padding: 6px 4px" class="muted">video, helper, runtime</td>
+              <td style="padding: 6px 4px">${status}</td>
+              <td style="padding: 6px 4px">
+                <button data-act="start" data-room="${roomNow}" disabled>Start</button>
+                <button data-act="restart" data-room="${roomNow}" title="restart helper for this video room">Restart</button>
+                <button data-act="use" data-room="${roomNow}">Use</button>
+                <button data-act="connect" data-room="${roomNow}">Connect</button>
+                <button data-act="hangup" data-room="${roomNow}" ${canHangup ? "" : "disabled"}>Hangup</button>
+                <button data-act="delete" data-room="${roomNow}">Delete</button>
+              </td>
+            `;
+            const fallbackSig = `${reason}:${mode}:${roomNow}:${canHangup ? 1 : 0}:${effectivePeers}`;
+            if (body && rtcRoomsRenderSig !== fallbackSig) {
+              body.innerHTML = `<tr>${fallbackRow}</tr>`;
+              rtcRoomsRenderSig = fallbackSig;
             }
+          };
+	        if (!res.ok) {
+            renderVideoFallback("http_" + res.status);
             rtcLog({ webrtc: "ui.rooms_snapshot", mode, count: body ? body.children.length : 0, reason: "http_" + res.status });
             return;
           }
@@ -2133,26 +2178,7 @@ app.MapGet("/", () =>
           const roomsRaw = Array.isArray(j?.rooms) ? j.rooms : (Array.isArray(j?.Rooms) ? j.Rooms : []);
 	        if (!ok && roomsRaw.length === 0) {
             if (mode === "video" && isVideoRoomId(roomNow)) {
-              const fallbackRow = `
-                <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${roomNow}</td>
-                <td style="padding: 6px 4px"><code>video</code></td>
-                <td style="padding: 6px 4px">1</td>
-                <td style="padding: 6px 4px" class="muted">video, helper, runtime</td>
-                <td style="padding: 6px 4px">idle</td>
-                <td style="padding: 6px 4px">
-                  <button data-act="start" data-room="${roomNow}" disabled>Start</button>
-                  <button data-act="restart" data-room="${roomNow}" title="restart helper for this video room">Restart</button>
-                  <button data-act="use" data-room="${roomNow}">Use</button>
-                  <button data-act="connect" data-room="${roomNow}">Connect</button>
-                  <button data-act="hangup" data-room="${roomNow}" disabled>Hangup</button>
-                  <button data-act="delete" data-room="${roomNow}">Delete</button>
-                </td>
-              `;
-              const fallbackSig = `payload_not_ok:${mode}:${roomNow}`;
-              if (body && rtcRoomsRenderSig !== fallbackSig) {
-                body.innerHTML = `<tr>${fallbackRow}</tr>`;
-                rtcRoomsRenderSig = fallbackSig;
-              }
+              renderVideoFallback("payload_not_ok");
             } else if (body && rtcRoomsRenderSig !== "payload_not_ok:empty") {
               body.innerHTML = "";
               rtcRoomsRenderSig = "payload_not_ok:empty";
@@ -2177,6 +2203,8 @@ app.MapGet("/", () =>
             const kind = isVideo ? "video" : "control";
             if (mode !== "video" && isVideo) return;
             if (mode === "video" && !isVideo) return;
+            const isActiveRoom = room.toLowerCase() === activeRoom;
+            const effectivePeers = (isActiveRoom && activeSession) ? Math.max(2, peers) : peers;
 
             const tags = [];
             if (isControl) tags.push("control");
@@ -2184,12 +2212,12 @@ app.MapGet("/", () =>
             if (hasHelper) tags.push("helper");
             if (synthetic) tags.push("runtime");
 
-            const status = (peers >= 2) ? "busy" : (hasHelper ? "idle" : "empty");
+            const status = (effectivePeers >= 2) ? "busy" : (hasHelper ? "idle" : "empty");
             const canDelete = !isControl && room.toLowerCase() !== "video";
             const canStart = !hasHelper && status !== "busy";
             const canRestart = isVideo && !!hasHelper;
             const canConnect = status !== "busy" || room.toLowerCase() === getRoom().toLowerCase();
-            const canHangup = room.toLowerCase() === activeRoom && activeSession;
+            const canHangup = isActiveRoom && activeSession;
             const restartBtn = isVideo
               ? `<button data-act="restart" data-room="${room}" ${canRestart ? "" : "disabled"} title="${canRestart ? "restart helper for this video room" : "helper is not running"}">Restart</button>`
               : "";
@@ -2198,7 +2226,7 @@ app.MapGet("/", () =>
               <tr>
               <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${room}</td>
               <td style="padding: 6px 4px"><code>${kind}</code></td>
-              <td style="padding: 6px 4px">${peers}</td>
+              <td style="padding: 6px 4px">${effectivePeers}</td>
               <td style="padding: 6px 4px" class="muted">${tags.join(", ") || "-"}</td>
               <td style="padding: 6px 4px">${status}</td>
               <td style="padding: 6px 4px">
@@ -2227,7 +2255,7 @@ app.MapGet("/", () =>
             appendRoomRow(activeRoom, 1, true, false, true);
           }
 
-          const renderSig = `${mode}|${activeRoom}|${activeSession ? 1 : 0}|${Array.from(renderedRooms).sort().join(",")}`;
+          const renderSig = `${mode}|${activeRoom}|${activeSession ? 1 : 0}|${rowHtml.join("")}`;
           if (body && rtcRoomsRenderSig !== renderSig) {
             body.innerHTML = rowHtml.join("");
             rtcRoomsRenderSig = renderSig;
@@ -3059,19 +3087,24 @@ app.MapGet("/api/webrtc/rooms", async (CancellationToken ct) =>
 {
     try
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-        var res = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcRoomsAsync(client, ct);
-        return Results.Json(res ?? new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+        string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/rooms";
+        using var resp = await http.GetAsync(url, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = JsonSerializer.Serialize(new { ok = false, rooms = Array.Empty<object>(), error = "empty_response" });
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
     }
     catch (TaskCanceledException)
     {
-        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+        return Results.Json(new { ok = false, rooms = Array.Empty<object>(), error = "timeout" });
     }
     catch (Exception ex)
     {
-        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+        return Results.Json(new { ok = false, rooms = Array.Empty<object>(), error = ex.Message });
     }
 });
 
@@ -3124,17 +3157,22 @@ app.MapGet("/api/webrtc/video/rooms", async (CancellationToken ct) =>
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
-        var client = new HidControl.ClientSdk.HidControlClient(http, new Uri(serverUrl));
-        var res = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, ct);
-        return Results.Json(res ?? new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+        string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/video/rooms";
+        using var resp = await http.GetAsync(url, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = JsonSerializer.Serialize(new { ok = false, rooms = Array.Empty<object>(), error = "empty_response" });
+        }
+        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
     }
     catch (TaskCanceledException)
     {
-        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+        return Results.Json(new { ok = false, rooms = Array.Empty<object>(), error = "timeout" });
     }
-    catch
+    catch (Exception ex)
     {
-        return Results.Json(new HidControl.Contracts.WebRtcRoomsResponse(false, Array.Empty<HidControl.Contracts.WebRtcRoomDto>()));
+        return Results.Json(new { ok = false, rooms = Array.Empty<object>(), error = ex.Message });
     }
 });
 
