@@ -3085,26 +3085,52 @@ app.MapGet("/api/webrtc/config", async (CancellationToken ct) =>
 
 app.MapGet("/api/webrtc/rooms", async (CancellationToken ct) =>
 {
+    static string NormalizeRoomsPayload(string? body, bool forceOk, string? error = null)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    var root = doc.RootElement;
+                    bool hasRooms = root.TryGetProperty("rooms", out var roomsEl) && roomsEl.ValueKind == JsonValueKind.Array;
+                    bool hasOk = root.TryGetProperty("ok", out _);
+                    if (hasRooms && hasOk && !forceOk) return body!;
+                    if (hasRooms)
+                    {
+                        var rooms = root.GetProperty("rooms").Deserialize<object[]>() ?? Array.Empty<object>();
+                        return JsonSerializer.Serialize(new { ok = true, rooms, error });
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to normalized empty payload.
+        }
+
+        return JsonSerializer.Serialize(new { ok = true, rooms = Array.Empty<object>(), error });
+    }
+
     try
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
         if (!string.IsNullOrWhiteSpace(token)) http.DefaultRequestHeaders.Add("X-HID-Token", token);
         string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/rooms";
         using var resp = await http.GetAsync(url, ct);
         string body = await resp.Content.ReadAsStringAsync(ct);
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            body = JsonSerializer.Serialize(new { ok = false, rooms = Array.Empty<object>(), error = "empty_response" });
-        }
-        return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+        string normalized = NormalizeRoomsPayload(body, forceOk: !resp.IsSuccessStatusCode, error: resp.IsSuccessStatusCode ? null : $"http_{(int)resp.StatusCode}");
+        return Results.Content(normalized, "application/json", statusCode: StatusCodes.Status200OK);
     }
     catch (TaskCanceledException)
     {
-        return Results.Json(new { ok = false, rooms = Array.Empty<object>(), error = "timeout" });
+        return Results.Content(NormalizeRoomsPayload(null, forceOk: true, error: "timeout"), "application/json", statusCode: StatusCodes.Status200OK);
     }
     catch (Exception ex)
     {
-        return Results.Json(new { ok = false, rooms = Array.Empty<object>(), error = ex.Message });
+        return Results.Content(NormalizeRoomsPayload(null, forceOk: true, error: ex.Message), "application/json", statusCode: StatusCodes.Status200OK);
     }
 });
 
