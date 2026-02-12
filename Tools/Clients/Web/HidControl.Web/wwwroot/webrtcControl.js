@@ -64,7 +64,9 @@
 
     let ws = null;
     let pc = null;
-    let dc = null;
+    let dcControl = null;
+    let dcTelemetry = null;
+    let dcLegacy = null;
     let pendingCandidates = [];
     let remotePeerId = null;
     let localCandidateCount = 0;
@@ -240,8 +242,16 @@
         wsSend({ type: "signal", room, data: { kind: "candidate", candidate: cand } }).catch(() => { });
       };
       pc.ondatachannel = (e) => {
-        dc = e.channel;
-        wireDc();
+        const ch = e.channel;
+        const label = String((ch && ch.label) || "").toLowerCase();
+        if (label === "control") {
+          dcControl = ch;
+        } else if (label === "telemetry") {
+          dcTelemetry = ch;
+        } else {
+          dcLegacy = ch;
+        }
+        wireDc(ch);
       };
       pc.ontrack = (e) => {
         const payload = {
@@ -261,12 +271,30 @@
       return pc;
     }
 
-    function wireDc() {
+    function hasAnyOpenDc() {
+      const isOpen = (ch) => !!(ch && ch.readyState === "open");
+      return isOpen(dcControl) || isOpen(dcTelemetry) || isOpen(dcLegacy);
+    }
+
+    function wireDc(dc) {
       if (!dc) return;
+      const label = String((dc && dc.label) || "").toLowerCase();
       dc.onopen = () => setStatus("datachannel: open");
-      dc.onclose = () => setStatus("datachannel: closed");
+      dc.onclose = () => {
+        if (!hasAnyOpenDc()) setStatus("datachannel: closed");
+      };
       dc.onerror = () => setStatus("datachannel: error");
-      dc.onmessage = (e) => onMessage(e.data);
+      dc.onmessage = (e) => {
+        // Transport split: telemetry messages travel on "telemetry",
+        // control/input on "control". Keep legacy "data" compatible.
+        if (label === "telemetry" || label === "data") {
+          onMessage(e.data);
+          return;
+        }
+        if (label !== "control") {
+          onMessage(e.data);
+        }
+      };
     }
 
     async function handleSignal(from, data) {
@@ -353,8 +381,10 @@
       const p = await ensurePc();
       await join();
 
-      dc = p.createDataChannel("data");
-      wireDc();
+      dcControl = p.createDataChannel("control");
+      wireDc(dcControl);
+      dcTelemetry = p.createDataChannel("telemetry");
+      wireDc(dcTelemetry);
 
       // Compatibility fallback: some browsers behave better with explicit offerToReceiveVideo
       // even when we already added a recvonly transceiver.
@@ -370,10 +400,13 @@
     }
 
     function send(text) {
-      if (!dc || dc.readyState !== "open") {
+      const out = (dcControl && dcControl.readyState === "open")
+        ? dcControl
+        : ((dcLegacy && dcLegacy.readyState === "open") ? dcLegacy : null);
+      if (!out) {
         throw new Error("datachannel_not_open");
       }
-      dc.send(text);
+      out.send(text);
     }
 
     function getDebug() {
@@ -385,7 +418,11 @@
         lastIceGatheringState,
         lastConnectionState,
         lastJoinedPeers,
-        dcState: dc ? dc.readyState : null
+        dcState: {
+          control: dcControl ? dcControl.readyState : null,
+          telemetry: dcTelemetry ? dcTelemetry.readyState : null,
+          legacy: dcLegacy ? dcLegacy.readyState : null
+        }
       };
     }
 
@@ -397,10 +434,12 @@
     function hangup() {
       stopHeartbeat();
       try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "leave" })); } catch { }
-      try { if (dc) dc.close(); } catch { }
+      try { if (dcControl) dcControl.close(); } catch { }
+      try { if (dcTelemetry) dcTelemetry.close(); } catch { }
+      try { if (dcLegacy) dcLegacy.close(); } catch { }
       try { if (pc) pc.close(); } catch { }
       try { if (ws) ws.close(); } catch { }
-      ws = null; pc = null; dc = null;
+      ws = null; pc = null; dcControl = null; dcTelemetry = null; dcLegacy = null;
       pendingCandidates = [];
       remotePeerId = null;
       localCandidateCount = 0;

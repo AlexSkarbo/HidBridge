@@ -28,7 +28,10 @@ import (
 // - joins a signaling room via /ws/webrtc
 // - accepts offers from browser clients
 // - publishes a VP8 video track from ffmpeg (test source by default, capture mode optional)
-// - opens/accepts a DataChannel and echoes text messages back (debug/control)
+// - opens/accepts DataChannels:
+//   - "control" for input/control messages
+//   - "telemetry" for video status/health messages
+//   - legacy "data" remains supported for backward compatibility
 //
 // Later, this helper will publish real media tracks (video).
 
@@ -172,8 +175,9 @@ type peerState struct {
 	disconnectTimer *time.Timer
 
 	activePeerId string
-	dcMu         sync.Mutex
-	dc           *webrtc.DataChannel
+	dcMu          sync.Mutex
+	dcControl     *webrtc.DataChannel
+	dcTelemetry   *webrtc.DataChannel
 	pendingNotice string
 }
 
@@ -271,34 +275,52 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 	})
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		label := dc.Label()
+		label := strings.ToLower(strings.TrimSpace(dc.Label()))
 		log.Printf("datachannel: %s", label)
 		p.dcMu.Lock()
-		p.dc = dc
+		switch label {
+		case "telemetry":
+			p.dcTelemetry = dc
+		case "control":
+			p.dcControl = dc
+		default:
+			// Legacy single-channel mode.
+			p.dcControl = dc
+			p.dcTelemetry = dc
+		}
 		p.dcMu.Unlock()
 
 		dc.OnOpen(func() {
 			log.Printf("datachannel open: %s", label)
 			p.dcMu.Lock()
 			notice := p.pendingNotice
+			outTelemetry := p.dcTelemetry
 			p.dcMu.Unlock()
-			if strings.TrimSpace(notice) != "" {
-				_ = dc.SendText(notice)
+			if strings.TrimSpace(notice) != "" && outTelemetry == dc {
+				_ = outTelemetry.SendText(notice)
 			}
 		})
 		dc.OnClose(func() {
 			log.Printf("datachannel close: %s", label)
 			p.dcMu.Lock()
-			p.dc = nil
+			if p.dcControl == dc {
+				p.dcControl = nil
+			}
+			if p.dcTelemetry == dc {
+				p.dcTelemetry = nil
+			}
 			p.dcMu.Unlock()
 		})
 		dc.OnMessage(func(m webrtc.DataChannelMessage) {
 			if !m.IsString {
-				_ = dc.SendText(`{"ok":false,"error":"binary_not_supported"}`)
 				return
 			}
-			// Echo back. This is intentionally minimal until we add video tracks.
-			_ = dc.SendText(string(m.Data))
+			// Keep legacy "data" echo behavior for backward compatibility only.
+			// Dedicated "control" channel is intentionally non-echo to avoid
+			// unnecessary round-trips under high input rate.
+			if label == "data" {
+				_ = dc.SendText(string(m.Data))
+			}
 		})
 	})
 
@@ -381,7 +403,11 @@ func (p *peerState) notifyVideoStatus(event string, mode string, detail string, 
 
 	p.dcMu.Lock()
 	p.pendingNotice = msg
-	dc := p.dc
+	dc := p.dcTelemetry
+	if dc == nil {
+		// Backward compatibility: older clients may still use single "data"/control channel.
+		dc = p.dcControl
+	}
 	p.dcMu.Unlock()
 
 	if dc != nil {
