@@ -6,9 +6,12 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "HIDBRIDGE_SERVER_URL": "http://127.0.0.1:8080",
-        "HIDBRIDGE_TOKEN": ""
+        "HIDBRIDGE_TOKEN": "",
+        "HIDBRIDGE_WEB_BIND_ALL": "true",
+        "HIDBRIDGE_WEB_URL": "http://127.0.0.1:8085",
+        "HIDBRIDGE_WEB_HTTPS_URL": "https://127.0.0.1:8084"
       },
-      "applicationUrl": "https://localhost:8084;http://localhost:8085"
+      "applicationUrl": "https://127.0.0.1:8084;http://localhost:8085"
     }
   }
 }

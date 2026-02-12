@@ -6,12 +6,49 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.IO;
 using System.Text.Json.Serialization;
+using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(o =>
 {
     o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
+
+static bool ReadBoolEnv(string name, bool defaultValue = false)
+{
+    string? raw = Environment.GetEnvironmentVariable(name);
+    return bool.TryParse(raw, out bool value) ? value : defaultValue;
+}
+
+// Web client bind config:
+// - default keeps localhost behavior
+// - HIDBRIDGE_WEB_BIND_ALL=true exposes client on all NICs (LAN/Cloudflare tunnel origin)
+string webClientUrl = Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_URL") ?? "http://127.0.0.1:8085";
+string webClientHttpsUrl = Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_HTTPS_URL") ?? "https://127.0.0.1:8084";
+bool webBindAll = ReadBoolEnv("HIDBRIDGE_WEB_BIND_ALL");
+if (webBindAll)
+{
+    int port = 8085;
+    if (Uri.TryCreate(webClientUrl, UriKind.Absolute, out var parsed) && parsed.Port > 0)
+    {
+        port = parsed.Port;
+    }
+    else if (int.TryParse(Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_PORT"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int envPort) && envPort > 0)
+    {
+        port = envPort;
+    }
+
+    // Keep HTTPS local endpoint for Visual Studio launch/debug UX,
+    // while exposing HTTP on all interfaces for LAN/tunnel access.
+    builder.WebHost.UseUrls(
+        $"http://0.0.0.0:{port}",
+        $"http://127.0.0.1:{port}",
+        webClientHttpsUrl);
+}
+else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+{
+    builder.WebHost.UseUrls(webClientUrl, webClientHttpsUrl);
+}
 
 var app = builder.Build();
 app.UseWebSockets();

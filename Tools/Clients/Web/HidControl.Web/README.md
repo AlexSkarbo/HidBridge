@@ -12,14 +12,40 @@ Environment variables (server target):
 - `HIDBRIDGE_SERVER_URL` (default `http://127.0.0.1:8080`)
 - `HIDBRIDGE_TOKEN` (optional, sent as `X-HID-Token`)
 
+Environment variables (web bind):
+- `HIDBRIDGE_WEB_URL` (default `http://127.0.0.1:8085`)
+- `HIDBRIDGE_WEB_BIND_ALL` (`true|false`, default `false`)
+  - when `true`, app binds to `0.0.0.0:<port>` and `127.0.0.1:<port>`
+  - useful for LAN testing and Cloudflare Tunnel origin access
+
 Run:
 
 ```powershell
 dotnet run --project Tools\Clients\Web\HidControl.Web
 ```
 
+Run for LAN / tunnel:
+
+```powershell
+$env:HIDBRIDGE_WEB_BIND_ALL="true"
+$env:HIDBRIDGE_WEB_URL="http://127.0.0.1:8085"
+dotnet run --project Tools\Clients\Web\HidControl.Web
+```
+
+Cloudflare Tunnel example (origin on same host):
+
+```yaml
+ingress:
+  - hostname: hidbridge.example.com
+    service: http://127.0.0.1:8085
+  - service: http_status:404
+```
+
+Notes:
+- Tunnel must allow WebSocket upgrade (default Cloudflare Tunnel supports it).
+- Keep `HidControlServer` local (`http://127.0.0.1:8080`) unless you explicitly want to expose it too.
+
 Open the printed URL and use:
 - **Shortcuts** (`Ctrl+C`, `Alt+Tab`, `Win+R`, etc.)
 - **Keyboard text**: ASCII by default. For non-ASCII (layout-dependent), see `Docs/text_input_i18n.md`.
 - **Mouse**: relative move + click
-

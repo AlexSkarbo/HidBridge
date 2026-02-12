@@ -2,6 +2,39 @@
 
 This roadmap is a living plan for getting from the current state (control MVP + legacy video options) to a product-grade, clean-architecture codebase with WebRTC-based real-time KVM workflows.
 
+## Delivery Board (Updated)
+
+### Done
+
+- WebRTC control-plane MVP (DataChannel + signaling relay + helper auto-start)
+- WebRTC video rooms with runtime status, restart, delete, and room lifecycle reconciliation
+- Capture fallback (`capture -> testsrc`) with runtime visibility (`fallbackUsed`, `lastVideoError`)
+- Host-capability based encoder list in UI (`cpu/nvenc/amf/...` only when supported)
+- Video quality/codec/preset controls, Fit/Fill, fullscreen and keyboard/mouse control in player
+- Input smoothness hardening (reduced noisy runtime logging, lower control-plane pressure)
+- Unified test runner (`run_all_tests.ps1`) + integration tests for WebRTC room lifecycle
+- Runbook coverage for common failures in `Docs/webrtc_video_peer.md`
+
+### In Progress
+
+- Video stream stability tuning under real load (intermittent frame freezes on some CPU/H264 paths)
+- ABR/auto-tune behavior to avoid oscillation and unnecessary reconnect/restart loops
+
+### Next
+
+1. Finalize video stability profile for `capture + h264 + cpu`:
+   - minimize freeze/stall events,
+   - keep control input smooth under sustained load.
+2. Strengthen reconnect policy:
+   - no-connect timeout handling,
+   - safer restart sequencing with existing peer sessions.
+3. Cloud/LAN access hardening:
+   - web-client bind on all interfaces,
+   - documented Cloudflare Tunnel deployment path.
+4. Close documentation gap:
+   - explicit “production-ish” config examples (LAN vs Internet),
+   - known limits/tradeoffs per preset+codec.
+
 ## Current Status (Checkpoint)
 
 **Control MVP (WebRTC DataChannel)**

@@ -258,6 +258,27 @@ Actions:
 1. Stop legacy capture/ffmpeg pipelines for the same source.
 2. Delete stale video rooms in UI or via `DELETE /status/webrtc/video/rooms/{room}`.
 3. Retry with `capture` mode.
+
+### Cloudflare Tunnel / LAN access
+
+Goal:
+- expose only `HidControl.Web` to LAN/Internet,
+- keep `HidControlServer` local on the host.
+
+Steps:
+1. Start `HidControlServer` locally (`http://127.0.0.1:8080`).
+2. Start web client with all-interface bind:
+   - `HIDBRIDGE_WEB_BIND_ALL=true`
+   - `HIDBRIDGE_WEB_URL=http://127.0.0.1:8085`
+3. Point Cloudflare Tunnel to web client origin (`http://127.0.0.1:8085`).
+4. Open tunnel URL and verify:
+   - `/ws/webrtc` upgrades successfully,
+   - room create/connect works end-to-end.
+
+Why this layout:
+- browser talks only to web client origin,
+- web client proxies WebSocket/API to local server,
+- server and helpers can remain private on loopback.
 4. On Windows, verify who holds the device and kill stale workers first.
 
 ### Socket refused / bind error
