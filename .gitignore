@@ -21,6 +21,8 @@ Tools/HidControlServer/.deps/ffmpeg/
 Tools/HidControlServer/.deps/mediamtx/
 Tools/WebRtcControlPeer/logs/
 Tools/WebRtcVideoPeer/logs/
+Tools/WebRtcControlPeer/pids/
+Tools/WebRtcVideoPeer/pids/
 
 # Local machine config / caches
 Tools/HidControlServer/hidcontrol.config.json
