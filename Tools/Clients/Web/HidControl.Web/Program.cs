@@ -353,6 +353,7 @@ app.MapGet("/", () =>
             <button id="rtcPresetQuality" type="button">Quality</button>
             <button id="rtcAutoTune" type="button" title="Adjust quality/bitrate based on current runtime metrics">Auto tune</button>
             <button id="rtcApplyNow" type="button" title="Restart helper in this room with current settings">Apply now</button>
+            <label class="muted"><input id="rtcVideoRelayOnly" type="checkbox" /> Video: relay-only</label>
             <span id="rtcPresetHint" class="muted"></span>
           </div>
 	      </div>
@@ -600,6 +601,7 @@ app.MapGet("/", () =>
 	    const rtcSendTextBtn = document.getElementById("rtcSendTextBtn");
 	    const rtcMouseMoveBtn = document.getElementById("rtcMouseMoveBtn");
 	    const rtcRelayOnly = document.getElementById("rtcRelayOnly");
+      const rtcVideoRelayOnly = document.getElementById("rtcVideoRelayOnly");
 	    const rtcVideoPane = document.getElementById("rtcVideoPane");
 	    const rtcVideoSurface = document.getElementById("rtcVideoSurface");
 	    const rtcRemoteVideo = document.getElementById("rtcRemoteVideo");
@@ -1149,6 +1151,12 @@ app.MapGet("/", () =>
       if (!t) return [{ urls: "stun:stun.l.google.com:19302" }];
       try { return JSON.parse(t); } catch { return []; }
     }
+    function getIceTransportPolicy() {
+      if (getMode() === "video") {
+        return (rtcVideoRelayOnly && rtcVideoRelayOnly.checked) ? "relay" : "all";
+      }
+      return (rtcRelayOnly && rtcRelayOnly.checked) ? "relay" : "all";
+    }
 
     const rtcLogLines = [];
     let rtcLogRenderScheduled = false;
@@ -1363,6 +1371,7 @@ app.MapGet("/", () =>
             codec: document.getElementById("rtcVideoCodec")?.value || "vp8",
             captureInput: document.getElementById("rtcVideoCaptureInput")?.value || "",
             captureMode: document.getElementById("rtcVideoCaptureMode")?.value || "",
+            videoRelayOnly: !!(document.getElementById("rtcVideoRelayOnly") && document.getElementById("rtcVideoRelayOnly").checked),
             fitMode: rtcVideoFitMode
           };
           localStorage.setItem("hidbridge_rtc_video_prefs", JSON.stringify(payload));
@@ -1764,7 +1773,7 @@ app.MapGet("/", () =>
 	      webrtcClient = factory({
 	        room: getRoom(),
 	        iceServers: getIceServers(),
-	        iceTransportPolicy: rtcRelayOnly.checked ? "relay" : "all",
+	        iceTransportPolicy: getIceTransportPolicy(),
 	        joinTimeoutMs: rtcCfg.joinTimeoutMs,
 	        receiveVideo: mode === "video",
 	        onLog: rtcLog,
@@ -1807,11 +1816,13 @@ app.MapGet("/", () =>
 	    }
 	    applyDefaultVideoQualityForLan();
 	    const rtcLoadedPrefs = loadRtcVideoPrefs();
+      const rtcLoadedPrefsHasVideoRelayOnly = !!(rtcLoadedPrefs && Object.prototype.hasOwnProperty.call(rtcLoadedPrefs, "videoRelayOnly"));
 	    if (rtcLoadedPrefs) {
 	      if (document.getElementById("rtcVideoQuality")) document.getElementById("rtcVideoQuality").value = String(rtcLoadedPrefs.quality || document.getElementById("rtcVideoQuality").value);
 	      if (document.getElementById("rtcVideoImageQuality")) document.getElementById("rtcVideoImageQuality").value = String(rtcLoadedPrefs.imageQuality || "");
 	      if (document.getElementById("rtcVideoBitrateKbps")) document.getElementById("rtcVideoBitrateKbps").value = String(rtcLoadedPrefs.bitrateKbps || "");
 	      if (document.getElementById("rtcVideoCodec")) document.getElementById("rtcVideoCodec").value = String(rtcLoadedPrefs.codec || document.getElementById("rtcVideoCodec").value);
+        if (rtcVideoRelayOnly) rtcVideoRelayOnly.checked = !!rtcLoadedPrefs.videoRelayOnly;
 	      rtcVideoFitMode = (String(rtcLoadedPrefs.fitMode || "fit").toLowerCase() === "fill") ? "fill" : "fit";
 	    }
       applyVideoFitMode();
@@ -2282,7 +2293,12 @@ app.MapGet("/", () =>
 	          const ua = navigator.userAgent || "";
 	          const isEdge = ua.includes("Edg/");
 	          const isOpera = ua.includes("OPR/") || ua.includes("Opera");
-	          if (hasTurn && (isEdge || isOpera)) rtcRelayOnly.checked = true;
+	          if (hasTurn && (isEdge || isOpera)) {
+              rtcRelayOnly.checked = true;
+              if (rtcVideoRelayOnly && !rtcLoadedPrefsHasVideoRelayOnly) {
+                rtcVideoRelayOnly.checked = true;
+              }
+            }
 	        }
 	      } catch {}
 	    })();
@@ -2305,6 +2321,9 @@ app.MapGet("/", () =>
 	      saveRtcVideoPrefs();
 	      refreshVideoEncoders();
 	    });
+      document.getElementById("rtcVideoRelayOnly")?.addEventListener("change", () => {
+        saveRtcVideoPrefs();
+      });
 	    document.getElementById("rtcMode").addEventListener("change", () => {
 	      updateRtcModeUi();
 	      resetWebRtcClient();
