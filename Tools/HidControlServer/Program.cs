@@ -1,4 +1,6 @@
+using HidControl.Application.UseCases;
 using HidControlServer;
+using HidControlServer.Adapters.Application;
 using HidControlServer.Endpoints.Devices;
 using HidControlServer.Endpoints.Keyboard;
 using HidControlServer.Endpoints.Mouse;
@@ -6,11 +8,10 @@ using HidControlServer.Endpoints.Sys;
 using HidControlServer.Endpoints.Uart;
 using HidControlServer.Endpoints.Video;
 using HidControlServer.Endpoints.Ws;
-using HidControl.Application.UseCases;
-using HidControlServer.Adapters.Application;
 using HidControlServer.Services;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.OpenApi.Models;
+using Scalar.AspNetCore;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -78,7 +79,7 @@ builder.Services.AddSingleton(new VideoProfileStore(options.VideoProfiles, optio
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcSignalingService, HidControl.Infrastructure.Services.WebRtcSignalingService>();
 builder.Services.AddSingleton<WebRtcControlPeerSupervisor>();
 builder.Services.AddSingleton<WebRtcVideoPeerSupervisor>();
-builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcBackend, HidControlServer.Services.WebRtcBackendAdapter>();
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcBackend, WebRtcBackendAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcRoomIdService, HidControl.Infrastructure.Services.WebRtcRoomIdService>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcRoomsService, HidControl.Infrastructure.Services.WebRtcRoomsService>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcIceService, HidControl.Infrastructure.Services.WebRtcIceService>();
@@ -165,18 +166,41 @@ builder.Services.AddSingleton<MouseButtonsMaskUseCase>();
 
 builder.Services.AddRazorPages();
 builder.Services.AddEndpointsApiExplorer();
-
-builder.Services.AddSwaggerGen(c =>
+builder.Services.AddOpenApi(openApiOptions =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "HidControl Server", Version = "v1" });
+    openApiOptions.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        document.Info.Version = "0.9.9";
+        document.Info.Title = "HidBridge Server API";
+        document.Info.Description = "This API for the Hidden Bridge server for HID and remote KVM-style control.";
+        document.Info.Contact = new OpenApiContact
+        {
+            Name = "Alexander Skarbo",
+            Email = "alexandr.skarbo@gmail.com",
+            Url = new Uri("https://github.com/AlexSkarbo")
+        };
+        document.Info.License = new OpenApiLicense
+        {
+            Name = "MIT License",
+            Url = new Uri("https://opensource.org/licenses/MIT")
+        };
+        return Task.CompletedTask;
+    });
+    openApiOptions.AddScalarTransformers();
 });
+
+//builder.Services.AddSwaggerGen(c =>
+//{
+//    c.SwaggerDoc("v1", new OpenApiInfo { Title = "HidControl Server", Version = "v1" });
+//});
 
 // Build the web application pipeline.
 var app = builder.Build();
 
 // Developer UX endpoints.
-app.UseSwagger();
-app.UseSwaggerUI();
+//app.UseSwagger();
+//app.UseSwaggerUI();
+// Accessible at /scalar (default route)
 app.UseWebSockets();
 
 // Graceful shutdown cleanup for UART and ffmpeg processes.
@@ -283,5 +307,11 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 app.MapRazorPages();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference();//scalarOptions => scalarOptions.AddDocument("v1", "HidBridge Server API"));
+}
 
 app.Run();
