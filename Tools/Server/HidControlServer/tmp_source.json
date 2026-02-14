@@ -1,0 +1,8 @@
+{
+  "id":"win-5E61E649",
+  "kind":"uvc",
+  "url":"win:USB\\VID_345F&PID_2131&MI_00\\7&2637BD52&0&0000",
+  "name":"USB3.0 Video",
+  "enabled":true,
+  "ffmpegInputOverride":"-f dshow -i video=\"@device_pnp_\\\\?\\usb#vid_345f&pid_2131&mi_00#7&2637bd52&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\\global\""
+}

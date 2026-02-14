@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Remove="hidcontrol.config.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="hidcontrol.config.json" />
+  </ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
+		<PackageReference Include="Scalar.AspNetCore" Version="2.12.40" />
+		<PackageReference Include="Scalar.AspNetCore.Microsoft" Version="2.12.40" />
+		<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+		<PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.3" />
+		<PackageReference Include="Npgsql" Version="10.0.1" />
+		<PackageReference Include="System.IO.Ports" Version="10.0.3" />
+		<PackageReference Include="System.Management" Version="10.0.3" />
+		<PackageReference Include="Serilog" Version="4.3.1" />
+		<PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\Core\HidControl.Application\HidControl.Application.csproj" />
+		<ProjectReference Include="..\..\Infrastructure\\HidControl.Infrastructure\\HidControl.Infrastructure.csproj" />
+		<ProjectReference Include="..\..\Shared\HidControl.Contracts\HidControl.Contracts.csproj" />
+		<ProjectReference Include="..\..\Shared\HidControl.Core\HidControl.Core.csproj" />
+		<ProjectReference Include="..\..\Shared\HidControl.UseCases\HidControl.UseCases.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Update="hidcontrol.db">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
+
+
+
+	</ItemGroup>
+</Project>

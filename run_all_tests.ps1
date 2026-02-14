@@ -75,7 +75,7 @@ try {
             Invoke-External `
                 -Name "HidControlServer.Tests" `
                 -FilePath "dotnet" `
-                -Arguments @("test", "Tools/HidControlServer.Tests/HidControlServer.Tests.csproj", "-c", $Configuration, "-v", $DotnetVerbosity) `
+                -Arguments @("test", "Tools/Tests/HidControlServer.Tests/HidControlServer.Tests.csproj", "-c", $Configuration, "-v", $DotnetVerbosity) `
                 -WorkingDirectory $repoRoot
         }
     }

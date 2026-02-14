@@ -3156,7 +3156,7 @@ app.MapGet("/api/webrtc/ice",
                 null,
                 Array.Empty<HidControl.Contracts.WebRtcIceServerDto>()));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Keep the same response shape so the JS client can always parse it.
             return Results.Json(new HidControl.Contracts.WebRtcIceResponse(false,
@@ -3198,7 +3198,7 @@ app.MapGet("/api/webrtc/config",
                 0,
                 0));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return Results.Json(new HidControl.Contracts.WebRtcConfigResponse(false,
                 0,

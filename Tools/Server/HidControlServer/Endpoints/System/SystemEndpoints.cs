@@ -1,10 +1,8 @@
 using System.Reflection;
-using HidControlServer;
+using HidControlServer.Endpoints.Sys;
 using HidControlServer.Services;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 
-namespace HidControlServer.Endpoints.Sys;
+namespace HidControlServer.Endpoints.System;
 
 /// <summary>
 /// Registers System endpoints.

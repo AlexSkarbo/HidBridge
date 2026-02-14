@@ -13,12 +13,12 @@ build_wsl/
 
 # Logs / runtime artifacts
 *.log
-Tools/HidControlServer/video_hls/
-Tools/HidControlServer/video_logs/
-Tools/HidControlServer/webrtc_rooms.json
-Tools/HidControlServer/.deps/tmp/
-Tools/HidControlServer/.deps/ffmpeg/
-Tools/HidControlServer/.deps/mediamtx/
+Tools/Server/HidControlServer/video_hls/
+Tools/Server/HidControlServer/video_logs/
+Tools/Server/HidControlServer/webrtc_rooms.json
+Tools/Server/HidControlServer/.deps/tmp/
+Tools/Server/HidControlServer/.deps/ffmpeg/
+Tools/Server/HidControlServer/.deps/mediamtx/
 Tools/WebRtcControlPeer/logs/
 Tools/WebRtcVideoPeer/logs/
 Tools/WebRtcControlPeer/pids/
@@ -31,3 +31,4 @@ Tools/HidControlServer/tmp_source.json
 
 # Keep workspace editor settings
 !.vscode/*
+/Tools/Server/HidControlServer/mediamtx.yml

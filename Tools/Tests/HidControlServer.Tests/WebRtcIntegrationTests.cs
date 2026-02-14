@@ -419,7 +419,7 @@ public sealed class WebRtcIntegrationTests
             encoder: "cpu",
             codec: "vp8");
 
-        await Task.Delay(10);
+        await Task.Delay(10, TestContext.Current.CancellationToken);
 
         supervisor.ReportRuntimeStatus(
             room,

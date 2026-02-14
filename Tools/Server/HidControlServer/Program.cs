@@ -10,10 +10,11 @@ using HidControlServer.Endpoints.Video;
 using HidControlServer.Endpoints.Ws;
 using HidControlServer.Services;
 using Microsoft.AspNetCore.Http.Json;
-using Microsoft.OpenApi.Models;
 using Scalar.AspNetCore;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HidControlServer.Endpoints.System;
+using Microsoft.OpenApi;
 
 // Parse CLI/config options and resolve effective serial port settings.
 var options = Options.Parse(args);

@@ -2,7 +2,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Server", "Server", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{19ED0A59-F2FE-4EDD-BDC9-28A4606A9E37}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Shared", "Shared", "{AA681EFB-6EB7-45E5-A1AE-97175022A3F1}"
 EndProject
@@ -12,13 +14,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastru
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Clients", "Clients", "{BB430492-CF87-4F1D-AE72-447A5C3C474A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControlServer", "HidControlServer\HidControlServer.csproj", "{9A34A09D-004C-D7E5-4499-510DF3B6DB37}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControlServer", "Server\HidControlServer\HidControlServer.csproj", "{9A34A09D-004C-D7E5-4499-510DF3B6DB37}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Web", "Clients\\Web\\HidControl.Web\\HidControl.Web.csproj", "{3312C08C-A047-49AD-A55A-EA48992D5C3A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Web", "Clients\Web\HidControl.Web\HidControl.Web.csproj", "{3312C08C-A047-49AD-A55A-EA48992D5C3A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Desktop", "Clients\\Desktop\\HidControl.Desktop\\HidControl.Desktop.csproj", "{C5EF753B-A4AF-4CA6-9ECC-499EA2D1F869}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Desktop", "Clients\Desktop\HidControl.Desktop\HidControl.Desktop.csproj", "{C5EF753B-A4AF-4CA6-9ECC-499EA2D1F869}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Mobile", "Clients\\Mobile\\HidControl.Mobile\\HidControl.Mobile.csproj", "{EAF678B5-A622-42A1-A36F-50B2D7D0FEAA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Mobile", "Clients\Mobile\HidControl.Mobile\HidControl.Mobile.csproj", "{EAF678B5-A622-42A1-A36F-50B2D7D0FEAA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Contracts", "Shared\HidControl.Contracts\HidControl.Contracts.csproj", "{36D42C27-2E04-4540-B8E6-0B5BB9BB3014}"
 EndProject
@@ -31,6 +33,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Application", "Core\HidControl.Application\HidControl.Application.csproj", "{84E58E08-276B-4719-BB4D-10489CDE8C16}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControl.Infrastructure", "Infrastructure\HidControl.Infrastructure\HidControl.Infrastructure.csproj", "{A8C6D4D6-5DA0-4E09-B0F8-9E6B3CB9EE7C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidControlServer.Tests", "Tests\HidControlServer.Tests\HidControlServer.Tests.csproj", "{4928500D-3C1A-8B1C-B7B3-BBAD1403D57B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -78,13 +82,16 @@ Global
 		{A8C6D4D6-5DA0-4E09-B0F8-9E6B3CB9EE7C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A8C6D4D6-5DA0-4E09-B0F8-9E6B3CB9EE7C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A8C6D4D6-5DA0-4E09-B0F8-9E6B3CB9EE7C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4928500D-3C1A-8B1C-B7B3-BBAD1403D57B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4928500D-3C1A-8B1C-B7B3-BBAD1403D57B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4928500D-3C1A-8B1C-B7B3-BBAD1403D57B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4928500D-3C1A-8B1C-B7B3-BBAD1403D57B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{9A34A09D-004C-D7E5-4499-510DF3B6DB37} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
-		{BB430492-CF87-4F1D-AE72-447A5C3C474A} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{9A34A09D-004C-D7E5-4499-510DF3B6DB37} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{3312C08C-A047-49AD-A55A-EA48992D5C3A} = {BB430492-CF87-4F1D-AE72-447A5C3C474A}
 		{C5EF753B-A4AF-4CA6-9ECC-499EA2D1F869} = {BB430492-CF87-4F1D-AE72-447A5C3C474A}
 		{EAF678B5-A622-42A1-A36F-50B2D7D0FEAA} = {BB430492-CF87-4F1D-AE72-447A5C3C474A}
@@ -94,6 +101,7 @@ Global
 		{801A121C-D048-4E09-AF6E-0D9A0AF83380} = {AA681EFB-6EB7-45E5-A1AE-97175022A3F1}
 		{84E58E08-276B-4719-BB4D-10489CDE8C16} = {0A33657A-C582-47B3-9E26-9D0AC7CD8214}
 		{A8C6D4D6-5DA0-4E09-B0F8-9E6B3CB9EE7C} = {9ACADF67-6748-4781-B9B0-179769B54C56}
+		{4928500D-3C1A-8B1C-B7B3-BBAD1403D57B} = {19ED0A59-F2FE-4EDD-BDC9-28A4606A9E37}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {8C971625-7B6B-4BB7-837B-1F320C889434}
