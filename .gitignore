@@ -1,6 +1,7 @@
 # --- Build output / temp ---
 build/
 build_wsl/
+build_1502/
 **/bin/
 **/obj/
 
