@@ -1,20 +1,16 @@
-HidBridge License (Proprietary)
+HidBridge: PolyForm Noncommercial License 1.0.0
 
 Copyright (c) 2026 Skarbo Oleksandr / Alexander Skarbo
 Copyright (c) 2026 Скарбо Олександр / Alexander Skarbo
 
 All rights reserved.
 
-No permission is granted to use, copy, modify, merge, publish, distribute,
-sublicense, and/or sell copies of this software, in source or binary form,
-except under a separate written agreement signed by the copyright holder.
+This software is licensed under the **PolyForm Noncommercial License 1.0.0**.
 
-This repository is provided for viewing and evaluation purposes only.
+You may obtain a copy of the license at:
+https://polyformproject.org/licenses/noncommercial/1.0.0/
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Any commercial use of this software, including but not limited to distribution
+or sale, requires a separate commercial license agreement. Please see the
+file `COMMERCIAL_LICENSE.md` in this repository for information on commercial
+licensing.

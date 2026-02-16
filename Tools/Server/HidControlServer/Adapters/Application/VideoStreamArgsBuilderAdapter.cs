@@ -1,7 +1,4 @@
 using HidControl.Application.Abstractions;
-using HidControl.Contracts;
-using HidControl.UseCases;
-using HidControl.UseCases.Video;
 using HidControlServer.Services;
 
 namespace HidControlServer.Adapters.Application;

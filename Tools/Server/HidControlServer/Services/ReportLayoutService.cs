@@ -1,7 +1,3 @@
-using System;
-using HidControl.Core;
-using HidControlServer;
-
 namespace HidControlServer.Services;
 
 /// <summary>

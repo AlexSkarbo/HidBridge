@@ -1,8 +1,5 @@
-using HidControlServer;
 using HidControlServer.Services;
 using HidControl.Application.UseCases;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 
 namespace HidControlServer.Endpoints.Keyboard;
 

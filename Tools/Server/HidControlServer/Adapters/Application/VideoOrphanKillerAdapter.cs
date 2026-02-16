@@ -1,5 +1,4 @@
 using HidControl.Application.Abstractions;
-using HidControl.Contracts;
 using HidControlServer.Services;
 
 namespace HidControlServer.Adapters.Application;

@@ -2,8 +2,6 @@ using System.Collections.Concurrent;
 using System.Buffers;
 using System.Diagnostics;
 using System.Text;
-using HidControl.UseCases;
-using HidControl.UseCases.Video;
 
 namespace HidControlServer.Services;
 

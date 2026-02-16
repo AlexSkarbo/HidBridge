@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using HidControl.Contracts;
-using HidControl.Core;
 using HidControl.UseCases.Video;
 using HidControlServer.Services;
 

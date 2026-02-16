@@ -1,4 +1,3 @@
-using HidControl.Contracts;
 using InfraVideoModeService = HidControl.Infrastructure.Services.VideoModeService;
 
 namespace HidControlServer.Services;

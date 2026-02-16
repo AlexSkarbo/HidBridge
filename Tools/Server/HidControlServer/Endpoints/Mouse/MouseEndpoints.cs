@@ -1,9 +1,6 @@
 using System.Text.Json;
 using HidControl.Application.UseCases;
-using HidControlServer;
 using HidControlServer.Services;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 
 namespace HidControlServer.Endpoints.Mouse;
 

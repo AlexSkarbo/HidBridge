@@ -40,5 +40,5 @@
     "files.associations": {
         "timeout_helper.h": "c"
     },
-    "cmake.sourceDirectory": "C:/Work/Pocker/Server/pico_hid_bridge_v9.9/Firmware"
+    "cmake.sourceDirectory": "/mnt/c/Work/Pocker/Server/pico_hid_bridge_v9.9/Firmware"
 }

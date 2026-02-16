@@ -1,4 +1,3 @@
-using HidControl.Contracts;
 using HidControl.UseCases.Video;
 using VideoConfigHelpers = HidControlServer.Services.VideoConfigService;
 

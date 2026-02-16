@@ -4,7 +4,7 @@ HTTP server that injects mouse/keyboard input into `B_host` via the control UART
 
 ## Requirements
 
-- .NET SDK 9.0+
+- .NET SDK 10.0+
 - USB-UART adapter connected to `B_host` control UART pins:
   - TX (adapter) → `B_host` RX (`PROXY_CTRL_UART_RX_PIN`, default GPIO1)
   - RX (adapter) → `B_host` TX (`PROXY_CTRL_UART_TX_PIN`, default GPIO0)
@@ -342,7 +342,7 @@ curl -X POST http://127.0.0.1:8080/video/profiles/active \
    curl -X POST "http://127.0.0.1:8080/video/test-capture?id=cap-1"
    ```
 
-## MJPEG / HLS (без MediaMTX)
+## MJPEG / HLS
 
 Browser-friendly MJPEG stream:
 
@@ -366,7 +366,7 @@ MJPEG/HLS не потребують MediaMTX і працюють на Windows/Li
 The server keeps a shared capture process per source, so multiple MJPEG clients do not reopen the device.
 If you still get `device busy`, close other apps that might hold the capture device.
 
-## Screen capture (без MediaMTX)
+## Screen capture
 
 Source kind `screen` uses OS-specific capture:
 

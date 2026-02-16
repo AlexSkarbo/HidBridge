@@ -1,5 +1,3 @@
-using HidControl.UseCases;
-using HidControl.UseCases.Video;
 using HidControlServer.Services;
 
 namespace HidControlServer;

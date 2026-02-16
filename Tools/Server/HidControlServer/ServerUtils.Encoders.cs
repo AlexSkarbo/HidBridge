@@ -1,4 +1,3 @@
-using HidControl.UseCases;
 using HidControlServer.Services;
 
 namespace HidControlServer;

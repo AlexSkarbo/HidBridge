@@ -1,8 +1,6 @@
 using HidControl.Application.Abstractions;
-using HidControl.Application.Models;
 using HidControl.UseCases.Video;
 using AppConfigSaveResult = HidControl.Application.Models.ConfigSaveResult;
-using System.Collections.Generic;
 
 namespace HidControlServer.Adapters.Application;
 

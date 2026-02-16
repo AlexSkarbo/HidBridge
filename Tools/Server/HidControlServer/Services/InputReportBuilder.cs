@@ -1,10 +1,5 @@
-using System;
 using System.Globalization;
-using System.Linq;
 using System.Text.Json;
-using HidControl.Core;
-using HidControl.Contracts;
-using HidControlServer;
 
 namespace HidControlServer.Services;
 

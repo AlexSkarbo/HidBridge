@@ -1,4 +1,3 @@
-using HidControl.Contracts;
 using HidControlServer.Services;
 
 namespace HidControlServer;

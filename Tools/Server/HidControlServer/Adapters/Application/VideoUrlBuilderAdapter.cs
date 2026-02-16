@@ -1,5 +1,4 @@
 using HidControl.Application.Abstractions;
-using HidControl.Contracts;
 using InfraVideoUrlService = HidControl.Infrastructure.Services.VideoUrlService;
 
 namespace HidControlServer.Adapters.Application;

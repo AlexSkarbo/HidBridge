@@ -1,4 +1,3 @@
-using HidControl.Contracts;
 using InfraVideoUrlService = HidControl.Infrastructure.Services.VideoUrlService;
 
 namespace HidControlServer.Services;

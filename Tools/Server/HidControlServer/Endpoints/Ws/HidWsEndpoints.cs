@@ -1,8 +1,6 @@
 using System.Net.WebSockets;
 using System.Text.Json;
 using HidControl.Application.UseCases;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Encoding = global::System.Text.Encoding;
 
 namespace HidControlServer.Endpoints.Ws;

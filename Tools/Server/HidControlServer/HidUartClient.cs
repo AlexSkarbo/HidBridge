@@ -1,9 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Ports;
-using System.Linq;
 using System.Security.Cryptography;
-using System.Threading;
 using System.Threading.Channels;
 
 namespace HidControlServer;

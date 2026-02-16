@@ -5,7 +5,6 @@ using global::System.Text.Json;
 using HidControl.Application.Abstractions;
 using HidControl.Application.UseCases.WebRtc;
 using HidControlServer.Services;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace HidControlServer.Endpoints.Ws;
 

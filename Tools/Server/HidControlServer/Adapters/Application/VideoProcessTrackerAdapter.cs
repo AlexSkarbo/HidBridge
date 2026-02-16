@@ -1,6 +1,4 @@
 using HidControl.Application.Abstractions;
-using System.Linq;
-using System.Collections.Generic;
 
 namespace HidControlServer.Adapters.Application;
 

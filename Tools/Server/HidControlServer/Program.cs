@@ -4,7 +4,6 @@ using HidControlServer.Adapters.Application;
 using HidControlServer.Endpoints.Devices;
 using HidControlServer.Endpoints.Keyboard;
 using HidControlServer.Endpoints.Mouse;
-using HidControlServer.Endpoints.Sys;
 using HidControlServer.Endpoints.Uart;
 using HidControlServer.Endpoints.Video;
 using HidControlServer.Endpoints.Ws;
@@ -169,7 +168,7 @@ builder.Services.AddRazorPages();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi(openApiOptions =>
 {
-    openApiOptions.AddDocumentTransformer((document, context, cancellationToken) =>
+    openApiOptions.AddDocumentTransformer((document, _, _) =>
     {
         document.Info.Version = "0.9.9";
         document.Info.Title = "HidBridge Server API";
@@ -213,15 +212,27 @@ app.Lifetime.ApplicationStopping.Register(() =>
     {
         app.Services.GetRequiredService<WebRtcControlPeerSupervisor>().Stop();
     }
-    catch { }
+    catch
+    {
+        // ignored
+    }
+
     try
     {
         app.Services.GetRequiredService<WebRtcVideoPeerSupervisor>().Stop();
     }
-    catch { }
+    catch
+    {
+        // ignored
+    }
+
     foreach (var kvp in appState.FfmpegProcesses)
     {
-        try { kvp.Value.Kill(true); } catch { }
+        try { kvp.Value.Kill(true); }
+        catch
+        {
+            // ignored
+        }
     }
     appState.FfmpegProcesses.Clear();
 });

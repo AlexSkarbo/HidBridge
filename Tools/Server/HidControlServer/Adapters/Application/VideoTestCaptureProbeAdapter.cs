@@ -1,12 +1,8 @@
 using HidControl.Application.Abstractions;
 using HidControl.Application.Models;
-using HidControl.Contracts;
-using HidControl.UseCases;
 using HidControl.UseCases.Video;
-using HidControlServer;
 using HidControlServer.Services;
 using System.Diagnostics;
-using System.Linq;
 
 namespace HidControlServer.Adapters.Application;
 

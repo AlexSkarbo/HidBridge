@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using HidControl.UseCases;
-using HidControl.UseCases.Video;
 using HidControlServer.Services;
 
 namespace HidControlServer;

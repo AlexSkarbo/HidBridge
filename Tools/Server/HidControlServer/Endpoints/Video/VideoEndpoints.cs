@@ -1,17 +1,10 @@
-using System.Diagnostics;
-using System.Linq;
 using System.Management;
 using System.Net.WebSockets;
 using System.Threading.Channels;
-using HidControl.Contracts;
 using HidControl.Application.UseCases;
 using HidControl.UseCases.Video;
 using ServerVideoMode = HidControlServer.Services.VideoModeService;
-using HidControlServer;
 using HidControlServer.Services;
-using VideoConfigHelpers = HidControlServer.Services.VideoConfigService;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Encoding = global::System.Text.Encoding;
 
 namespace HidControlServer.Endpoints.Video;

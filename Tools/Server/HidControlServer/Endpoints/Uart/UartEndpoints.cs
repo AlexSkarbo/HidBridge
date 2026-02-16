@@ -1,11 +1,7 @@
 using System.Diagnostics;
-using System.Linq;
 using System.Net.WebSockets;
 using System.Text.Json;
-using HidControlServer;
 using HidControlServer.Services;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Encoding = global::System.Text.Encoding;
 
 namespace HidControlServer.Endpoints.Uart;

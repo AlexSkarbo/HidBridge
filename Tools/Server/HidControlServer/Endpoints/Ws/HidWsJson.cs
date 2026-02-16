@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Collections.Generic;
 
 namespace HidControlServer.Endpoints.Ws;
 

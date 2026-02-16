@@ -1,5 +1,4 @@
 using HidControl.Application.Abstractions;
-using HidControl.Contracts;
 using HidControl.UseCases.Video;
 
 namespace HidControlServer.Adapters.Application;

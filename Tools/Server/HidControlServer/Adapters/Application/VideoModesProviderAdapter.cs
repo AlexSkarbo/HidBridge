@@ -1,8 +1,6 @@
 using HidControl.Application.Abstractions;
 using HidControl.Application.Models;
-using HidControl.Contracts;
 using HidControlServer.Services;
-using HidControl.UseCases;
 
 namespace HidControlServer.Adapters.Application;
 

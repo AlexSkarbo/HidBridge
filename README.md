@@ -2,7 +2,7 @@
 
 Hidden Bridge for HID (remote KVM-style control).
 
-HidBridge is a **dual-MCU HID proxy/bridge** (Pico/RP2040-class) with tooling for **remote HID injection** and **low-latency video**.
+HidBridge is a **dual-MCU HID proxy/bridge** (Raspberry Pi Pico/RP2040-class) with tooling for **remote HID injection** and **low-latency video**.
 
 Key idea: the controlled device can remain "agentless" (no software installed) because input is injected over USB HID.
 
@@ -16,9 +16,9 @@ At a high level:
 ## Repository Layout
 
 - `Firmware/`
-  - `Firmware/A_device` — USB device endpoint firmware (TinyUSB device)
-  - `Firmware/B_host` — USB host endpoint firmware (TinyUSB host)
-  - `Firmware/common` — shared transport/protocol/config
+  - `Firmware/src/A_device` — USB device endpoint firmware (TinyUSB device)
+  - `Firmware/src/B_host` — USB host endpoint firmware (TinyUSB host)
+  - `Firmware/src/common` — shared transport/protocol/config
 - `Tools/`
   - `Tools/HidControlServer` — ASP.NET Core server (REST + WebSocket) for HID injection + video
   - `Tools/Shared/*` — contracts + client SDK
@@ -43,12 +43,12 @@ cmake --build build -j
 Outputs typically include `build/A_device.uf2` and `build/B_host.uf2`.
 
 Config:
-- Edit `Firmware/common/proxy_config.h` (UART pins/baud and `PROXY_CTRL_HMAC_KEY`).
+- Edit `Firmware/src/common/proxy_config.h` (UART pins/baud and `PROXY_CTRL_HMAC_KEY`).
 
 ### 2) Tools (HidControlServer)
 
 Prereqs:
-- .NET SDK 9.0+
+- .NET SDK 10.0+
 - FFmpeg (either in `PATH` or configured via `ffmpegPath` in server config)
 
 Run:
@@ -84,13 +84,18 @@ Useful options:
 - `-SkipGo`
 - `-StopOnFailure`
 
-## Commercial Licensing
-
-If you want to legally use HidBridge in a product/service, you need a commercial license. See `COMMERCIAL_LICENSE.md`.
-Contact: `alexandr.skarbo@gmail.com`
-
 ## License
 
 Copyright (c) 2026 Skarbo Oleksandr / Alexander Skarbo.
 
-This project is **proprietary**. No license is granted for use/distribution without a separate written agreement. See `LICENSE`.
+HidBridge is licensed for non‑commercial use under the PolyForm Noncommercial License 1.0.0.  
+You can read the full license text at https://polyformproject.org/licenses/noncommercial/1.0.0/ or in the `LICENSE` file.
+
+Any commercial use (including embedding in products, distribution for profit, or offering as a service) requires a separate commercial license. See `COMMERCIAL_LICENSE.md`.
+
+## Commercial Licensing
+
+If you want to use HidBridge in a commercial product or service, you need a separate commercial license.
+See `COMMERCIAL_LICENSE.md` for available commercial license packages (Indie, Team, Enterprise) and contact details.
+
+Contact: `alexandr.skarbo@gmail.com`

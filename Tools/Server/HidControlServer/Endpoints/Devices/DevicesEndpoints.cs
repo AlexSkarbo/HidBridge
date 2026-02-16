@@ -1,7 +1,4 @@
-using HidControlServer;
 using HidControlServer.Services;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 
 namespace HidControlServer.Endpoints.Devices;
 

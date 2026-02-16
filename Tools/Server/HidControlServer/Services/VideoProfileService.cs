@@ -1,5 +1,3 @@
-using HidControl.Contracts;
-using HidControl.UseCases;
 using InfraVideoProfileService = HidControl.Infrastructure.Services.VideoProfileService;
 
 namespace HidControlServer.Services;
