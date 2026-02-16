@@ -2,9 +2,11 @@
 
 Hidden Bridge for HID (remote KVM-style control).
 
-HidBridge is a **dual-MCU HID proxy/bridge** (Raspberry Pi Pico/RP2040-class) with tooling for **remote HID injection** and **low-latency video**.
+HidBridge is a **dual‑MCU USB HID bridge** built on RP2040 microcontrollers. It acts as a **transparent proxy** for USB HID devices, enabling remote keyboard/mouse injection while streaming low‑latency video over **WebRTC**, **HLS**, **FLV**, or **MJPEG passthrough**.
 
-Key idea: the controlled device can remain "agentless" (no software installed) because input is injected over USB HID.
+The controlled device remains **agentless**—no software is installed on the host—because all input is delivered via USB HID and video is served from HidControlServer using standard streaming protocols.
+
+
 
 Repository: `https://github.com/AlexSkarbo/HidBridge.git`
 
