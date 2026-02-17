@@ -27,6 +27,7 @@ Tools/WebRtcVideoPeer/pids/
 
 # Local machine config / caches
 Tools/HidControlServer/hidcontrol.config.json
+Tools/Server/HidControlServer/hidcontrol.config.json
 Tools/HidControlServer/devices_cache.json
 Tools/HidControlServer/tmp_source.json
 
