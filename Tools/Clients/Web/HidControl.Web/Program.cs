@@ -466,13 +466,24 @@ app.MapGet("/",
                                         </div>
                               	      </div>
                               	    </div>
-                              	    <div class="row">
-                              	      <label class="muted"><input id="rtcAutoRefresh" type="checkbox" checked /> Auto-refresh rooms</label>
-                              	      <span class="muted">every <span id="rtcAutoRefreshMs">2000</span>ms</span>
-                              	      <span id="rtcRoomsStateSource" class="muted">state: snapshot</span>
-                              	    </div>
-                              	    <div class="row" style="width: 100%">
-                              	      <table style="width: 100%; border-collapse: collapse">
+                                    <div class="row">
+                                      <label class="muted"><input id="rtcAutoRefresh" type="checkbox" checked /> Auto-refresh rooms</label>
+                                      <span class="muted">every <span id="rtcAutoRefreshMs">2000</span>ms</span>
+                                      <span id="rtcRoomsStateSource" class="muted">state: snapshot</span>
+                                    </div>
+                                    <div class="row">
+                                      <span class="muted">Stream profile</span>
+                                      <select id="rtcStreamProfile" style="min-width: 220px"></select>
+                                      <button id="rtcProfileReload" type="button">Reload</button>
+                                      <button id="rtcProfileApply" type="button" title="Set active profile on server">Apply</button>
+                                      <button id="rtcProfileNew" type="button">New</button>
+                                      <button id="rtcProfileEdit" type="button">Edit</button>
+                                      <button id="rtcProfileClone" type="button">Clone</button>
+                                      <button id="rtcProfileDelete" type="button">Delete</button>
+                                      <span id="rtcActiveStreamProfile" class="muted">active: n/a</span>
+                                    </div>
+                                    <div class="row" style="width: 100%">
+                                      <table style="width: 100%; border-collapse: collapse">
                               		        <thead>
                               		          <tr class="muted">
                               		            <th style="text-align:left; padding: 6px 4px">Room</th>
@@ -725,6 +736,14 @@ app.MapGet("/",
                                     const rtcKpiCodec = document.getElementById("rtcKpiCodec");
                                     const rtcKpiEncoder = document.getElementById("rtcKpiEncoder");
                                     const rtcKpiFallback = document.getElementById("rtcKpiFallback");
+                                    const rtcStreamProfile = document.getElementById("rtcStreamProfile");
+                                    const rtcProfileReload = document.getElementById("rtcProfileReload");
+                                    const rtcProfileApply = document.getElementById("rtcProfileApply");
+                                    const rtcProfileNew = document.getElementById("rtcProfileNew");
+                                    const rtcProfileEdit = document.getElementById("rtcProfileEdit");
+                                    const rtcProfileClone = document.getElementById("rtcProfileClone");
+                                    const rtcProfileDelete = document.getElementById("rtcProfileDelete");
+                                    const rtcActiveStreamProfileEl = document.getElementById("rtcActiveStreamProfile");
                               	    const rtcVideoFullscreen = document.getElementById("rtcVideoFullscreen");
                               	    const rtcVideoFitFill = document.getElementById("rtcVideoFitFill");
                               	    const rtcVideoInputToggle = document.getElementById("rtcVideoInputToggle");
@@ -1310,6 +1329,8 @@ app.MapGet("/",
                                   let rtcRoomsRenderSig = "";
                                   let rtcSelectedRoom = "control";
                                   let rtcRoomsStateSourceSig = "";
+                                  let rtcStreamProfiles = [];
+                                  let rtcActiveStreamProfile = "";
                                   function setRoomsStateSource(source, reason) {
                                     const mode = String(source || "").toLowerCase() === "fallback" ? "fallback" : "snapshot";
                                     const text = `state: ${mode}`;
@@ -1934,7 +1955,7 @@ app.MapGet("/",
                                               <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${r}</td>
                                               <td style="padding: 6px 4px"><code>video</code></td>
                                               <td style="padding: 6px 4px">1</td>
-                                              <td style="padding: 6px 4px" class="muted">video, helper, runtime</td>
+                                              <td style="padding: 6px 4px" class="muted">video, helper, runtime${rtcActiveStreamProfile ? ", profile:" + rtcActiveStreamProfile : ""}</td>
                                               <td style="padding: 6px 4px">idle</td>
                                               <td style="padding: 6px 4px">
                                                 <button data-act="start" data-room="${r}" disabled>Start</button>
@@ -1952,10 +1973,11 @@ app.MapGet("/",
                                         }
                                       }
                               	      resetWebRtcClient();
-                              	      rtcLog({ webrtc: "ui.room_selected", room: r });
-                              	      if (isVideoRoomId(r)) {
-                              	        refreshVideoPeerRuntime(r);
-                              	      }
+                                      rtcLog({ webrtc: "ui.room_selected", room: r });
+                                      refreshStreamProfiles();
+                                      if (isVideoRoomId(r)) {
+                                        refreshVideoPeerRuntime(r);
+                                      }
                               	    }
                               	    function resetWebRtcClient() {
                                       closeInputWs();
@@ -2202,6 +2224,79 @@ app.MapGet("/",
                                       } catch {}
                                     }
 
+                                    function renderStreamProfiles() {
+                                      if (!rtcStreamProfile) return;
+                                      const prev = rtcStreamProfile.value;
+                                      rtcStreamProfile.innerHTML = "";
+                                      for (const p of rtcStreamProfiles) {
+                                        const name = String(p && p.name || "");
+                                        if (!name) continue;
+                                        const opt = document.createElement("option");
+                                        opt.value = name;
+                                        opt.textContent = name;
+                                        rtcStreamProfile.appendChild(opt);
+                                      }
+                                      const wanted = (prev && Array.from(rtcStreamProfile.options).some(o => o.value === prev))
+                                        ? prev
+                                        : (rtcActiveStreamProfile && Array.from(rtcStreamProfile.options).some(o => o.value === rtcActiveStreamProfile) ? rtcActiveStreamProfile : "");
+                                      if (wanted) rtcStreamProfile.value = wanted;
+                                    }
+
+                                    async function refreshStreamProfiles() {
+                                      if (!rtcStreamProfile) return;
+                                      try {
+                                        const res = await fetch("/api/video/profiles");
+                                        const j = await res.json().catch(() => null);
+                                        if (!j || !j.ok || !Array.isArray(j.profiles)) {
+                                          rtcLog({ webrtc: "ui.stream_profiles_error", payload: j });
+                                          return;
+                                        }
+                                        rtcStreamProfiles = j.profiles.map(p => ({
+                                          name: String(p && p.name || ""),
+                                          args: String(p && p.args || ""),
+                                          note: p && p.note != null ? String(p.note) : ""
+                                        })).filter(p => !!p.name);
+                                        rtcActiveStreamProfile = String(j.active || "");
+                                        if (rtcActiveStreamProfileEl) {
+                                          rtcActiveStreamProfileEl.textContent = `active: ${rtcActiveStreamProfile || "n/a"}`;
+                                        }
+                                        renderStreamProfiles();
+                                        rtcLog({ webrtc: "ui.stream_profiles_loaded", count: rtcStreamProfiles.length, active: rtcActiveStreamProfile });
+                                      } catch (e) {
+                                        rtcLog({ webrtc: "ui.stream_profiles_error", error: String(e) });
+                                      }
+                                    }
+
+                                    async function saveStreamProfiles(nextProfiles, activeName) {
+                                      const payload = {
+                                        profiles: (nextProfiles || []).map(p => ({
+                                          name: String(p && p.name || "").trim(),
+                                          args: String(p && p.args || "").trim(),
+                                          note: p && p.note != null ? String(p.note) : null
+                                        })).filter(p => p.name.length > 0),
+                                        active: activeName || null
+                                      };
+                                      const res = await fetch("/api/video/profiles", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify(payload)
+                                      });
+                                      const j = await res.json().catch(() => null);
+                                      if (!j || !j.ok) throw new Error((j && j.error) ? String(j.error) : "profiles_save_failed");
+                                    }
+
+                                    async function setActiveStreamProfile(name) {
+                                      const n = String(name || "").trim();
+                                      if (!n) return;
+                                      const res = await fetch("/api/video/profiles/active", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ name: n })
+                                      });
+                                      const j = await res.json().catch(() => null);
+                                      if (!j || !j.ok) throw new Error((j && j.error) ? String(j.error) : "set_active_failed");
+                                    }
+
                                     async function refreshRooms(force) {
                                       const now = Date.now();
                                       const intervalMs = getRoomsRefreshIntervalMs();
@@ -2235,7 +2330,7 @@ app.MapGet("/",
                                             <td style="padding: 6px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${roomNow}</td>
                                             <td style="padding: 6px 4px"><code>video</code></td>
                                             <td style="padding: 6px 4px">${effectivePeers}</td>
-                                            <td style="padding: 6px 4px" class="muted">video, helper, runtime</td>
+                                            <td style="padding: 6px 4px" class="muted">video, helper, runtime${rtcActiveStreamProfile ? ", profile:" + rtcActiveStreamProfile : ""}</td>
                                             <td style="padding: 6px 4px">${status}</td>
                                             <td style="padding: 6px 4px">
                                               <button data-act="start" data-room="${roomNow}" disabled>Start</button>
@@ -2297,6 +2392,7 @@ app.MapGet("/",
                                           if (isVideo) tags.push("video");
                                           if (hasHelper) tags.push("helper");
                                           if (synthetic) tags.push("runtime");
+                                          if (isVideo && rtcActiveStreamProfile) tags.push(`profile:${rtcActiveStreamProfile}`);
 
                                           const status = (effectivePeers >= 2) ? "busy" : (hasHelper ? "idle" : "empty");
                                           const canDelete = !isControl && room.toLowerCase() !== "video";
@@ -2675,9 +2771,135 @@ app.MapGet("/",
                               	        }
                               	      } catch {}
                               	    })();
-                              	    refreshWebRtcConfig();
-                              	    refreshVideoCaptureDevices();
-                              	    refreshRooms(true);
+                                    refreshWebRtcConfig();
+                                    refreshVideoCaptureDevices();
+                                    refreshRooms(true);
+                                    refreshStreamProfiles();
+                                    rtcProfileReload?.addEventListener("click", async () => { await refreshStreamProfiles(); await refreshRooms(true); });
+                                    rtcProfileApply?.addEventListener("click", async () => {
+                                      try {
+                                        const selected = String(rtcStreamProfile && rtcStreamProfile.value || "").trim();
+                                        if (!selected) {
+                                          show({ ok: false, error: "profile_required" });
+                                          return;
+                                        }
+                                        await setActiveStreamProfile(selected);
+                                        await refreshStreamProfiles();
+                                        await refreshRooms(true);
+                                        rtcLog({ webrtc: "ui.stream_profile_apply", name: selected });
+                                        show({ ok: true, activeProfile: selected });
+                                      } catch (e) {
+                                        rtcLog({ webrtc: "ui.stream_profile_apply_error", error: String(e) });
+                                        show({ ok: false, error: String(e) });
+                                      }
+                                    });
+                                    rtcProfileNew?.addEventListener("click", async () => {
+                                      try {
+                                        const name = (prompt("New profile name:", "") || "").trim();
+                                        if (!name) return;
+                                        if (rtcStreamProfiles.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+                                          show({ ok: false, error: "profile_exists", name });
+                                          return;
+                                        }
+                                        const args = (prompt("FFmpeg args:", "-c:v libx264 -preset veryfast -tune zerolatency -g 30 -bf 0 -b:v 3500k -maxrate 3500k -bufsize 1750k -vf scale=1920:1080 -r 30") || "").trim();
+                                        if (!args) {
+                                          show({ ok: false, error: "args_required" });
+                                          return;
+                                        }
+                                        const note = (prompt("Note (optional):", "") || "").trim();
+                                        const next = rtcStreamProfiles.concat([{ name, args, note }]);
+                                        await saveStreamProfiles(next, rtcActiveStreamProfile || name);
+                                        await refreshStreamProfiles();
+                                        await refreshRooms(true);
+                                        rtcStreamProfile.value = name;
+                                        rtcLog({ webrtc: "ui.stream_profile_created", name });
+                                      } catch (e) {
+                                        rtcLog({ webrtc: "ui.stream_profile_create_error", error: String(e) });
+                                        show({ ok: false, error: String(e) });
+                                      }
+                                    });
+                                    rtcProfileEdit?.addEventListener("click", async () => {
+                                      try {
+                                        const selected = String(rtcStreamProfile && rtcStreamProfile.value || "").trim();
+                                        if (!selected) {
+                                          show({ ok: false, error: "profile_required" });
+                                          return;
+                                        }
+                                        const current = rtcStreamProfiles.find(p => p.name.toLowerCase() === selected.toLowerCase());
+                                        if (!current) return;
+                                        const nextName = (prompt("Profile name:", current.name) || "").trim();
+                                        if (!nextName) return;
+                                        if (rtcStreamProfiles.some(p => p.name.toLowerCase() === nextName.toLowerCase() && p.name.toLowerCase() !== selected.toLowerCase())) {
+                                          show({ ok: false, error: "profile_exists", name: nextName });
+                                          return;
+                                        }
+                                        const nextArgs = (prompt("FFmpeg args:", current.args) || "").trim();
+                                        if (!nextArgs) {
+                                          show({ ok: false, error: "args_required" });
+                                          return;
+                                        }
+                                        const nextNote = (prompt("Note (optional):", current.note || "") || "").trim();
+                                        const next = rtcStreamProfiles.map(p => p.name.toLowerCase() === selected.toLowerCase()
+                                          ? { name: nextName, args: nextArgs, note: nextNote }
+                                          : p);
+                                        const activeNext = (rtcActiveStreamProfile.toLowerCase() === selected.toLowerCase()) ? nextName : rtcActiveStreamProfile;
+                                        await saveStreamProfiles(next, activeNext);
+                                        await refreshStreamProfiles();
+                                        await refreshRooms(true);
+                                        rtcStreamProfile.value = nextName;
+                                        rtcLog({ webrtc: "ui.stream_profile_updated", from: selected, to: nextName });
+                                      } catch (e) {
+                                        rtcLog({ webrtc: "ui.stream_profile_update_error", error: String(e) });
+                                        show({ ok: false, error: String(e) });
+                                      }
+                                    });
+                                    rtcProfileClone?.addEventListener("click", async () => {
+                                      try {
+                                        const selected = String(rtcStreamProfile && rtcStreamProfile.value || "").trim();
+                                        if (!selected) {
+                                          show({ ok: false, error: "profile_required" });
+                                          return;
+                                        }
+                                        const current = rtcStreamProfiles.find(p => p.name.toLowerCase() === selected.toLowerCase());
+                                        if (!current) return;
+                                        const cloneName = (prompt("Clone profile name:", `${current.name}-copy`) || "").trim();
+                                        if (!cloneName) return;
+                                        if (rtcStreamProfiles.some(p => p.name.toLowerCase() === cloneName.toLowerCase())) {
+                                          show({ ok: false, error: "profile_exists", name: cloneName });
+                                          return;
+                                        }
+                                        const next = rtcStreamProfiles.concat([{ name: cloneName, args: current.args, note: current.note || "" }]);
+                                        await saveStreamProfiles(next, rtcActiveStreamProfile || cloneName);
+                                        await refreshStreamProfiles();
+                                        await refreshRooms(true);
+                                        rtcStreamProfile.value = cloneName;
+                                        rtcLog({ webrtc: "ui.stream_profile_cloned", from: selected, to: cloneName });
+                                      } catch (e) {
+                                        rtcLog({ webrtc: "ui.stream_profile_clone_error", error: String(e) });
+                                        show({ ok: false, error: String(e) });
+                                      }
+                                    });
+                                    rtcProfileDelete?.addEventListener("click", async () => {
+                                      try {
+                                        const selected = String(rtcStreamProfile && rtcStreamProfile.value || "").trim();
+                                        if (!selected) {
+                                          show({ ok: false, error: "profile_required" });
+                                          return;
+                                        }
+                                        if (!confirm(`Delete stream profile '${selected}'?`)) return;
+                                        const next = rtcStreamProfiles.filter(p => p.name.toLowerCase() !== selected.toLowerCase());
+                                        const activeNext = (rtcActiveStreamProfile.toLowerCase() === selected.toLowerCase())
+                                          ? (next[0] ? next[0].name : null)
+                                          : rtcActiveStreamProfile;
+                                        await saveStreamProfiles(next, activeNext);
+                                        await refreshStreamProfiles();
+                                        await refreshRooms(true);
+                                        rtcLog({ webrtc: "ui.stream_profile_deleted", name: selected });
+                                      } catch (e) {
+                                        rtcLog({ webrtc: "ui.stream_profile_delete_error", error: String(e) });
+                                        show({ ok: false, error: String(e) });
+                                      }
+                                    });
                                     document.getElementById("rtcVideoQuality")?.addEventListener("change", saveRtcVideoPrefs);
                                     document.getElementById("rtcVideoImageQuality")?.addEventListener("input", saveRtcVideoPrefs);
                                     document.getElementById("rtcVideoBitrateKbps")?.addEventListener("input", saveRtcVideoPrefs);
@@ -2697,13 +2919,14 @@ app.MapGet("/",
                                     document.getElementById("rtcVideoRelayOnly")?.addEventListener("change", () => {
                                       saveRtcVideoPrefs();
                                     });
-                              	    document.getElementById("rtcMode").addEventListener("change", () => {
-                              	      updateRtcModeUi();
-                              	      resetWebRtcClient();
-                              	      if (getMode() === "video") {
-                              	        refreshVideoCaptureDevices();
-                              	        refreshVideoEncoders();
-                              	      }
+                                    document.getElementById("rtcMode").addEventListener("change", () => {
+                                      updateRtcModeUi();
+                                      resetWebRtcClient();
+                                      refreshStreamProfiles();
+                                      if (getMode() === "video") {
+                                        refreshVideoCaptureDevices();
+                                        refreshVideoEncoders();
+                                      }
                               	      refreshRooms(true);
                               	    });
 
@@ -3501,6 +3724,104 @@ app.MapGet("/api/webrtc/video/peers/{room}",
                 room,
                 error = ex.Message
             });
+        }
+    });
+
+app.MapGet("/api/video/profiles",
+    async (CancellationToken ct) =>
+    {
+        try
+        {
+            using var http = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(8)
+            };
+            if (!string.IsNullOrWhiteSpace(token))
+                http.DefaultRequestHeaders.Add("X-HID-Token", token);
+            string url = $"{serverUrl.TrimEnd('/')}/video/profiles";
+            using var resp = await http.GetAsync(url, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                body = "{\"ok\":false,\"profiles\":[]}";
+            }
+
+            return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException)
+        {
+            return Results.Json(new { ok = false, profiles = Array.Empty<object>(), error = "timeout" });
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(new { ok = false, profiles = Array.Empty<object>(), error = ex.Message });
+        }
+    });
+
+app.MapPost("/api/video/profiles",
+    async (HttpRequest req, CancellationToken ct) =>
+    {
+        try
+        {
+            using var http = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(10)
+            };
+            if (!string.IsNullOrWhiteSpace(token))
+                http.DefaultRequestHeaders.Add("X-HID-Token", token);
+            var bodyObj = await req.ReadFromJsonAsync<HidControl.Contracts.VideoProfilesRequest>(cancellationToken: ct)
+                ?? new HidControl.Contracts.VideoProfilesRequest(new List<HidControl.Contracts.VideoProfileConfig>(), null);
+            string url = $"{serverUrl.TrimEnd('/')}/video/profiles";
+            using var resp = await http.PostAsJsonAsync(url, bodyObj, cancellationToken: ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                body = "{\"ok\":false,\"error\":\"empty_response\"}";
+            }
+            return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException)
+        {
+            return Results.Json(new { ok = false, error = "timeout" });
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(new { ok = false, error = ex.Message });
+        }
+    });
+
+app.MapPost("/api/video/profiles/active",
+    async (HttpRequest req, CancellationToken ct) =>
+    {
+        try
+        {
+            using var http = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(8)
+            };
+            if (!string.IsNullOrWhiteSpace(token))
+                http.DefaultRequestHeaders.Add("X-HID-Token", token);
+            var bodyObj = await req.ReadFromJsonAsync<HidControl.Contracts.VideoProfileActiveRequest>(cancellationToken: ct);
+            if (bodyObj is null || string.IsNullOrWhiteSpace(bodyObj.Name))
+            {
+                return Results.Json(new { ok = false, error = "name_required" });
+            }
+            string url = $"{serverUrl.TrimEnd('/')}/video/profiles/active";
+            using var resp = await http.PostAsJsonAsync(url, bodyObj, cancellationToken: ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                body = "{\"ok\":false,\"error\":\"empty_response\"}";
+            }
+            return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException)
+        {
+            return Results.Json(new { ok = false, error = "timeout" });
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(new { ok = false, error = ex.Message });
         }
     });
 

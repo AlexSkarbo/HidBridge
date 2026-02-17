@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.IO;
 using System.Text.Json;
 using HidControl.Application.UseCases;
 using Encoding = global::System.Text.Encoding;
@@ -10,6 +11,14 @@ namespace HidControlServer.Endpoints.Ws;
 /// </summary>
 public static class HidWsEndpoints
 {
+    private static bool IsExpectedDisconnect(Exception ex)
+    {
+        if (ex is OperationCanceledException) return true;
+        if (ex is WebSocketException) return true;
+        if (ex is IOException) return true;
+        return ex.InnerException is not null && IsExpectedDisconnect(ex.InnerException);
+    }
+
     /// <summary>
     /// Maps hid ws endpoints.
     /// </summary>
@@ -46,51 +55,53 @@ public static class HidWsEndpoints
                 await socket.SendAsync(data, WebSocketMessageType.Text, true, ct);
             }
 
-            while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
+            try
             {
-                ms.SetLength(0);
-                WebSocketReceiveResult? result = null;
-                do
+                while (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
                 {
-                    result = await socket.ReceiveAsync(buffer, ctx.RequestAborted);
-                    if (result.MessageType == WebSocketMessageType.Close)
+                    ms.SetLength(0);
+                    WebSocketReceiveResult? result = null;
+                    do
                     {
-                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", ctx.RequestAborted);
-                        return;
+                        result = await socket.ReceiveAsync(buffer, ctx.RequestAborted);
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", CancellationToken.None);
+                            return;
+                        }
+                        ms.Write(buffer, 0, result.Count);
+                    } while (!result.EndOfMessage);
+
+                    if (result.MessageType != WebSocketMessageType.Text)
+                    {
+                        await SendAsync(new { ok = false, error = "binary_not_supported" }, ctx.RequestAborted);
+                        continue;
                     }
-                    ms.Write(buffer, 0, result.Count);
-                } while (!result.EndOfMessage);
 
-                if (result.MessageType != WebSocketMessageType.Text)
-                {
-                    await SendAsync(new { ok = false, error = "binary_not_supported" }, ctx.RequestAborted);
-                    continue;
-                }
-
-                string json = Encoding.UTF8.GetString(ms.ToArray());
-                JsonDocument doc;
-                try
-                {
-                    doc = JsonDocument.Parse(json);
-                }
-                catch
-                {
-                    await SendAsync(new { ok = false, error = "invalid_json" }, ctx.RequestAborted);
-                    continue;
-                }
-
-                using (doc)
-                {
-                    JsonElement root = doc.RootElement;
-                    string type = root.TryGetProperty("type", out var t) ? (t.GetString() ?? "") : "";
-                    string? msgId = root.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                    string json = Encoding.UTF8.GetString(ms.ToArray());
+                    JsonDocument doc;
                     try
                     {
-                        switch (type)
+                        doc = JsonDocument.Parse(json);
+                    }
+                    catch
+                    {
+                        await SendAsync(new { ok = false, error = "invalid_json" }, ctx.RequestAborted);
+                        continue;
+                    }
+
+                    using (doc)
+                    {
+                        JsonElement root = doc.RootElement;
+                        string type = root.TryGetProperty("type", out var t) ? (t.GetString() ?? "") : "";
+                        string? msgId = root.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                        try
                         {
-                            case "ping":
-                                await SendAsync(new { ok = true, type = "pong", id = msgId }, ctx.RequestAborted);
-                                break;
+                            switch (type)
+                            {
+                                case "ping":
+                                    await SendAsync(new { ok = true, type = "pong", id = msgId }, ctx.RequestAborted);
+                                    break;
                             case "mouse.move":
                             {
                                 int dx = HidWsJson.GetInt(root, "dx");
@@ -290,16 +301,31 @@ public static class HidWsEndpoints
                                 await SendAsync(new { ok = true, type, id = msgId }, ctx.RequestAborted);
                                 break;
                             }
-                            default:
-                                await SendAsync(new { ok = false, error = "unknown_type", type, id = msgId }, ctx.RequestAborted);
-                                break;
+                                default:
+                                    await SendAsync(new { ok = false, error = "unknown_type", type, id = msgId }, ctx.RequestAborted);
+                                    break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (!ctx.RequestAborted.IsCancellationRequested && socket.State == WebSocketState.Open)
+                            {
+                                try
+                                {
+                                    await SendAsync(new { ok = false, error = ex.Message, type, id = msgId }, CancellationToken.None);
+                                }
+                                catch
+                                {
+                                    // Socket may be already closed by peer; ignore.
+                                }
+                            }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        await SendAsync(new { ok = false, error = ex.Message, type, id = msgId }, ctx.RequestAborted);
-                    }
                 }
+            }
+            catch (Exception ex) when (IsExpectedDisconnect(ex) || ctx.RequestAborted.IsCancellationRequested)
+            {
+                // Normal disconnect path (browser tab close / network reset / request abort).
             }
         }));
     }
