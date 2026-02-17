@@ -469,6 +469,7 @@ app.MapGet("/",
                               	    <div class="row">
                               	      <label class="muted"><input id="rtcAutoRefresh" type="checkbox" checked /> Auto-refresh rooms</label>
                               	      <span class="muted">every <span id="rtcAutoRefreshMs">2000</span>ms</span>
+                              	      <span id="rtcRoomsStateSource" class="muted">state: snapshot</span>
                               	    </div>
                               	    <div class="row" style="width: 100%">
                               	      <table style="width: 100%; border-collapse: collapse">
@@ -1308,6 +1309,17 @@ app.MapGet("/",
                                   let rtcRoomsSnapshotSig = "";
                                   let rtcRoomsRenderSig = "";
                                   let rtcSelectedRoom = "control";
+                                  let rtcRoomsStateSourceSig = "";
+                                  function setRoomsStateSource(source, reason) {
+                                    const mode = String(source || "").toLowerCase() === "fallback" ? "fallback" : "snapshot";
+                                    const text = `state: ${mode}`;
+                                    const el = document.getElementById("rtcRoomsStateSource");
+                                    if (el && el.textContent !== text) el.textContent = text;
+                                    const sig = `${mode}:${String(reason || "")}`;
+                                    if (rtcRoomsStateSourceSig === sig) return;
+                                    rtcRoomsStateSourceSig = sig;
+                                    rtcLog({ webrtc: "ui.rooms_state_source", source: mode, reason: String(reason || "") });
+                                  }
 
                                   function isRtcSessionActive() {
                                     const s = String((rtcStatus && rtcStatus.textContent) || "").toLowerCase();
@@ -1935,6 +1947,7 @@ app.MapGet("/",
                                             </tr>`;
                                           rtcRoomsRenderSig = `setRoom:${roomLc}`;
                                           rtcRoomsSnapshotSig = `video:1:${roomLc}`;
+                                          setRoomsStateSource("fallback", "selected_room_optimistic");
                                           rtcLog({ webrtc: "ui.rooms_snapshot", mode: "video", count: 1, reason: "selected_room_optimistic" });
                                         }
                                       }
@@ -2175,21 +2188,21 @@ app.MapGet("/",
                                       await syncKeyboardReport();
                                     }, { capture: true });
 
-                              	    async function refreshWebRtcConfig() {
-                              	      try {
-                              	        const res = await fetch("/api/webrtc/config");
-                              	        if (!res.ok) return;
-                              	        const j = await res.json().catch(() => null);
-                              	        if (!j || !j.ok) return;
-                              	        if (typeof j.joinTimeoutMs === "number") rtcCfg.joinTimeoutMs = j.joinTimeoutMs;
-                              	        if (typeof j.connectTimeoutMs === "number") rtcCfg.connectTimeoutMs = j.connectTimeoutMs;
-                              	        rtcLog({ webrtc: "ui.cfg_loaded", rtcCfg });
-                              	        // Recreate client so join timeout changes apply immediately.
-                              	        resetWebRtcClient();
-                              	      } catch {}
-                              	    }
+                                    async function refreshWebRtcConfig() {
+                                      try {
+                                        const res = await fetch("/api/webrtc/config");
+                                        if (!res.ok) return;
+                                        const j = await res.json().catch(() => null);
+                                        if (!j || !j.ok) return;
+                                        if (typeof j.joinTimeoutMs === "number") rtcCfg.joinTimeoutMs = j.joinTimeoutMs;
+                                        if (typeof j.connectTimeoutMs === "number") rtcCfg.connectTimeoutMs = j.connectTimeoutMs;
+                                        rtcLog({ webrtc: "ui.cfg_loaded", rtcCfg });
+                                        // Recreate client so join timeout changes apply immediately.
+                                        resetWebRtcClient();
+                                      } catch {}
+                                    }
 
-                              	    async function refreshRooms(force) {
+                                    async function refreshRooms(force) {
                                       const now = Date.now();
                                       const intervalMs = getRoomsRefreshIntervalMs();
                                       if (rtcAutoRefreshMsEl) rtcAutoRefreshMsEl.textContent = String(intervalMs);
@@ -2200,7 +2213,7 @@ app.MapGet("/",
                                       }
                                       rtcRoomsRefreshInFlight = true;
                                       rtcLastRoomsRefreshAt = now;
-                              	      try {
+                                      try {
                                         const roomNow = rtcSelectedRoom || getRoom();
                                         const mode = isVideoRoomId(roomNow) ? "video" : getMode();
                                         const activeRoomNow = String(getRoom() || "").toLowerCase();
@@ -2210,7 +2223,7 @@ app.MapGet("/",
                                         const modeEl = document.getElementById("rtcMode");
                                         if (modeEl && modeEl.value !== mode) modeEl.value = mode;
                                         const listUrl = mode === "video" ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
-                              	        const res = await fetch(listUrl);
+                                        const res = await fetch(listUrl);
                                         const body = document.getElementById("rtcRoomsBody");
                                         const renderVideoFallback = (reason) => {
                                           if (mode !== "video" || !isVideoRoomId(roomNow)) return;
@@ -2234,26 +2247,28 @@ app.MapGet("/",
                                             </td>
                                           `;
                                           const fallbackSig = `${reason}:${mode}:${roomNow}:${canHangup ? 1 : 0}:${effectivePeers}`;
-                                          if (body && rtcRoomsRenderSig !== fallbackSig) {
-                                            body.innerHTML = `<tr>${fallbackRow}</tr>`;
-                                            rtcRoomsRenderSig = fallbackSig;
-                                          }
-                                        };
-                              	        if (!res.ok) {
+                                        if (body && rtcRoomsRenderSig !== fallbackSig) {
+                                          body.innerHTML = `<tr>${fallbackRow}</tr>`;
+                                          rtcRoomsRenderSig = fallbackSig;
+                                        }
+                                      };
+                                        if (!res.ok) {
                                           renderVideoFallback("http_" + res.status);
+                                          setRoomsStateSource("fallback", "http_" + res.status);
                                           rtcLog({ webrtc: "ui.rooms_snapshot", mode, count: body ? body.children.length : 0, reason: "http_" + res.status });
                                           return;
                                         }
-                              	        const j = await res.json();
+                                        const j = await res.json();
                                         const ok = !!(j && (j.ok === true || j.Ok === true));
                                         const roomsRaw = Array.isArray(j?.rooms) ? j.rooms : (Array.isArray(j?.Rooms) ? j.Rooms : []);
-                              	        if (!ok && roomsRaw.length === 0) {
+                                        if (!ok && roomsRaw.length === 0) {
                                           if (mode === "video" && isVideoRoomId(roomNow)) {
                                             renderVideoFallback("payload_not_ok");
                                           } else if (body && rtcRoomsRenderSig !== "payload_not_ok:empty") {
                                             body.innerHTML = "";
                                             rtcRoomsRenderSig = "payload_not_ok:empty";
                                           }
+                                          setRoomsStateSource("fallback", "payload_not_ok");
                                           rtcLog({
                                             webrtc: "ui.rooms_snapshot",
                                             mode,
@@ -2263,7 +2278,7 @@ app.MapGet("/",
                                           });
                                           return;
                                         }
-                              	        
+                                        
                                         const activeRoom = getRoom().toLowerCase();
                                         const statusNow = (rtcStatus && rtcStatus.textContent ? rtcStatus.textContent : "").trim().toLowerCase();
                                         const activeSession = !!statusNow && !statusNow.startsWith("disconnected") && !statusNow.startsWith("error:");
@@ -2312,13 +2327,13 @@ app.MapGet("/",
                                           renderedRooms.add(String(room || "").toLowerCase());
                                         };
 
-                              	        for (const r of roomsRaw) {
-                              	          const room = String(r?.room ?? r?.Room ?? "");
+                                        for (const r of roomsRaw) {
+                                          const room = String(r?.room ?? r?.Room ?? "");
                                           const peers = Number(r?.peers ?? r?.Peers ?? 0);
                                           const hasHelper = !!(r?.hasHelper ?? r?.HasHelper);
                                           const isControl = !!(r?.isControl ?? r?.IsControl);
                                           appendRoomRow(room, peers, hasHelper, isControl, false);
-                              	        }
+                                        }
 
                                         // If a freshly created video room isn't visible in the rooms list yet
                                         // (helper/list snapshot lag), render a temporary row so user can act.
@@ -2337,11 +2352,13 @@ app.MapGet("/",
                                           rtcRoomsSnapshotSig = roomsSnapshotSig;
                                           rtcLog({ webrtc: "ui.rooms_snapshot", mode, count: renderedRooms.size });
                                         }
-                              	      } catch (e) {
-                                        rtcLog({ webrtc: "ui.rooms_refresh_error", error: String(e) });
-                                      }
-                              	      try {
-                              	        if (getMode() === "video") {
+                                        setRoomsStateSource("snapshot", "rooms_ok");
+                                      } catch (e) {
+                                        setRoomsStateSource("fallback", "refresh_exception");
+                                          rtcLog({ webrtc: "ui.rooms_refresh_error", error: String(e) });
+                                        }
+                                      try {
+                                        if (getMode() === "video") {
                                           const now = Date.now();
                                           const runtimePollMs = canHandleRemoteInput() ? 15000 : (isRtcSessionActive() ? 10000 : 6000);
                                           if ((now - rtcLastRuntimePollAt) >= runtimePollMs) {
