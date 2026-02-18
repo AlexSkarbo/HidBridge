@@ -1,4 +1,6 @@
 using HidControl.Application.UseCases.WebRtc;
+using HidControl.Application.Abstractions;
+using HidControl.Contracts;
 using HidControlServer.Services;
 
 namespace HidControlServer.Endpoints.Sys;
@@ -14,7 +16,7 @@ public static class WebRtcStatusEndpoints
     /// <param name="app">The application builder.</param>
     public static void MapWebRtcStatusEndpoints(this WebApplication app)
     {
-        app.MapGet("/status/webrtc/ice", async (GetWebRtcIceConfigUseCase uc, CancellationToken ct) =>
+        app.MapGet("/status/webrtc/ice", async ([Microsoft.AspNetCore.Mvc.FromServices] GetWebRtcIceConfigUseCase uc, CancellationToken ct) =>
         {
             var cfg = await uc.Execute(ct);
             var iceServers = cfg.IceServers
@@ -30,7 +32,7 @@ public static class WebRtcStatusEndpoints
             return Results.Ok(new { ok = true, ttlSeconds = cfg.TtlSeconds, iceServers });
         });
 
-        app.MapGet("/status/webrtc/config", async (GetWebRtcClientConfigUseCase uc, CancellationToken ct) =>
+        app.MapGet("/status/webrtc/config", async ([Microsoft.AspNetCore.Mvc.FromServices] GetWebRtcClientConfigUseCase uc, CancellationToken ct) =>
         {
             var cfg = await uc.Execute(ct);
             return Results.Ok(new
@@ -44,7 +46,7 @@ public static class WebRtcStatusEndpoints
             });
         });
 
-        app.MapGet("/status/webrtc/rooms", async (ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        app.MapGet("/status/webrtc/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
         {
             var snap = await uc.Execute(ct);
             var rooms = snap.Rooms
@@ -53,20 +55,20 @@ public static class WebRtcStatusEndpoints
             return Results.Ok(new { ok = true, rooms });
         });
 
-        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, CreateWebRtcRoomUseCase uc, CancellationToken ct) =>
+        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcRoomUseCase uc, CancellationToken ct) =>
         {
             string? roomId = await ReadRequestedRoomIdAsync(req, ct);
             var res = await uc.Execute(roomId, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
         });
 
-        app.MapDelete("/status/webrtc/rooms/{room}", async (string room, DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
+        app.MapDelete("/status/webrtc/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
         {
             var res = await uc.Execute(room, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
         });
 
-        app.MapGet("/status/webrtc/video/rooms", async (ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        app.MapGet("/status/webrtc/video/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
         {
             var snap = await uc.Execute(ct);
             var rooms = snap.Rooms
@@ -79,27 +81,49 @@ public static class WebRtcStatusEndpoints
             return Results.Ok(new { ok = true, rooms });
         });
 
-        app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
-            (string? roomId, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec) = await ReadRequestedVideoRoomAsync(req, ct);
-            var res = await uc.Execute(roomId, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, ct);
+            (string? roomId, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
+            var res = await uc.Execute(roomId, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
         });
 
         app.MapPost("/status/webrtc/video/rooms/{room}/restart", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] RestartWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
-            (_, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec) = await ReadRequestedVideoRoomAsync(req, ct);
-            var res = await uc.Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, ct);
+            (_, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
+            var res = await uc.Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, started = res.Started, pid = res.Pid, error = res.Error });
         });
 
-        app.MapDelete("/status/webrtc/video/rooms/{room}", async (string room, DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        app.MapGet("/status/webrtc/video/rooms/{room}/profile", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
+        {
+            var res = await svc.GetVideoRoomProfileAsync(room, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, streamProfile = res.StreamProfile, error = res.Error });
+        });
+
+        app.MapPost("/status/webrtc/video/rooms/{room}/profile", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
+        {
+            WebRtcCreateVideoRoomRequest? body = null;
+            try
+            {
+                body = await req.ReadFromJsonAsync<WebRtcCreateVideoRoomRequest>(cancellationToken: ct);
+            }
+            catch
+            {
+                body = null;
+            }
+
+            var res = await svc.SetVideoRoomProfileAsync(room, body?.StreamProfile, ct);
+            return Results.Ok(new { ok = res.Ok, room = res.Room, streamProfile = res.StreamProfile, error = res.Error });
+        });
+
+        app.MapDelete("/status/webrtc/video/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
             var res = await uc.Execute(room, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
         });
 
-        app.MapGet("/status/webrtc/video/peers/{room}", (string room, WebRtcVideoPeerSupervisor sup) =>
+        app.MapGet("/status/webrtc/video/peers/{room}", (string room, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
         {
             var st = sup.GetRoomRuntimeStatus(room);
             if (st is null)
@@ -129,7 +153,41 @@ public static class WebRtcStatusEndpoints
                 measuredKbps = st.MeasuredKbps,
                 frames = st.Frames,
                 packets = st.Packets,
-                startupMs = st.StartupMs
+                startupMs = st.StartupMs,
+                audioEnabled = st.AudioEnabled,
+                audioInput = st.AudioInput,
+                audioBitrateKbps = st.AudioBitrateKbps,
+                audioMeasuredKbps = st.AudioMeasuredKbps,
+                audioRunning = st.AudioRunning
+            });
+        });
+
+        app.MapPost("/status/webrtc/video/rooms/{room}/audio-probe", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup, CancellationToken ct) =>
+        {
+            WebRtcAudioProbeRequest? body = null;
+            try
+            {
+                body = await req.ReadFromJsonAsync<WebRtcAudioProbeRequest>(cancellationToken: ct);
+            }
+            catch
+            {
+                body = null;
+            }
+
+            int durationSec = body?.DurationSec ?? 3;
+            string? audioInput = body?.AudioInput;
+            var result = await sup.RunAudioProbeAsync(room, audioInput, durationSec, ct);
+            return Results.Ok(new
+            {
+                ok = result.Ok,
+                room = result.Room,
+                signal = result.Signal,
+                selector = result.Selector,
+                durationSec = result.DurationSec,
+                bytes = result.Bytes,
+                rms = result.Rms,
+                levelPct = result.LevelPct,
+                error = result.Error
             });
         });
     }
@@ -159,16 +217,18 @@ public static class WebRtcStatusEndpoints
     /// <param name="req">Incoming request.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Tuple of room id and quality preset.</returns>
-    private static async Task<(string? Room, string? QualityPreset, int? BitrateKbps, int? Fps, int? ImageQuality, string? CaptureInput, string? Encoder, string? Codec)> ReadRequestedVideoRoomAsync(HttpRequest req, CancellationToken ct)
+    private static async Task<(string? Room, string? QualityPreset, int? BitrateKbps, int? Fps, int? ImageQuality, string? CaptureInput, string? Encoder, string? Codec, bool? AudioEnabled, string? AudioInput, int? AudioBitrateKbps, string? StreamProfile)> ReadRequestedVideoRoomAsync(HttpRequest req, CancellationToken ct)
     {
         try
         {
             var body = await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct);
-            return (body?.Room, body?.QualityPreset, body?.BitrateKbps, body?.Fps, body?.ImageQuality, body?.CaptureInput, body?.Encoder, body?.Codec);
+            return (body?.Room, body?.QualityPreset, body?.BitrateKbps, body?.Fps, body?.ImageQuality, body?.CaptureInput, body?.Encoder, body?.Codec, body?.AudioEnabled, body?.AudioInput, body?.AudioBitrateKbps, body?.StreamProfile);
         }
         catch
         {
-            return (null, null, null, null, null, null, null, null);
+            return (null, null, null, null, null, null, null, null, null, null, null, null);
         }
     }
+
+    private sealed record WebRtcAudioProbeRequest(string? AudioInput, int? DurationSec);
 }

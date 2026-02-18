@@ -28,30 +28,30 @@ public static class VideoEndpoints
         var ffmpegService = app.Services.GetRequiredService<VideoFfmpegService>();
         var configService = app.Services.GetRequiredService<HidControl.UseCases.Video.VideoConfigService>();
 
-        group.MapGet("/sources", (GetVideoSourcesUseCase useCase) =>
+        group.MapGet("/sources", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoSourcesUseCase useCase) =>
         {
             return Results.Ok(new { ok = true, sources = useCase.Execute() });
         });
 
-        group.MapPost("/sources", (VideoSourcesRequest req, SetVideoSourcesUseCase useCase) =>
+        group.MapPost("/sources", (VideoSourcesRequest req, [Microsoft.AspNetCore.Mvc.FromServices] SetVideoSourcesUseCase useCase) =>
         {
             var result = useCase.Execute(req);
             return Results.Ok(new { ok = result.Ok, configSaved = result.ConfigSaved, configPath = result.ConfigPath, configError = result.ConfigError });
         });
 
-        group.MapPost("/sources/upsert", (VideoSourceConfig req, UpsertVideoSourceUseCase useCase) =>
+        group.MapPost("/sources/upsert", (VideoSourceConfig req, [Microsoft.AspNetCore.Mvc.FromServices] UpsertVideoSourceUseCase useCase) =>
         {
             var result = useCase.Execute(req);
             return Results.Ok(new { ok = result.Ok, configSaved = result.ConfigSaved, configPath = result.ConfigPath, configError = result.ConfigError });
         });
 
-        group.MapGet("/profiles", (GetVideoProfilesUseCase useCase) =>
+        group.MapGet("/profiles", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoProfilesUseCase useCase) =>
         {
             var snapshot = useCase.Execute();
             return Results.Ok(new { ok = true, active = snapshot.ActiveProfile, profiles = snapshot.Profiles });
         });
 
-        group.MapGet("/modes", async (string? id, bool? refresh, GetVideoModesUseCase useCase, HttpContext ctx) =>
+        group.MapGet("/modes", async (string? id, bool? refresh, [Microsoft.AspNetCore.Mvc.FromServices] GetVideoModesUseCase useCase, HttpContext ctx) =>
         {
             var result = await useCase.ExecuteAsync(id, refresh == true, ctx.RequestAborted);
             if (!result.Ok)
@@ -69,12 +69,12 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapGet("/diag", (GetVideoDiagUseCase useCase) =>
+        group.MapGet("/diag", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoDiagUseCase useCase) =>
         {
             return Results.Ok(useCase.Execute());
         });
 
-        group.MapPost("/capture/stop", async (string? id, StopVideoCaptureUseCase useCase, HttpContext ctx) =>
+        group.MapPost("/capture/stop", async (string? id, [Microsoft.AspNetCore.Mvc.FromServices] StopVideoCaptureUseCase useCase, HttpContext ctx) =>
         {
             var result = await useCase.ExecuteAsync(id, ctx.RequestAborted);
             if (!result.Ok)
@@ -85,13 +85,37 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, stopped = result.Stopped, count = result.Stopped.Count });
         });
 
-        group.MapPost("/profiles", (VideoProfilesRequest req, SetVideoProfilesUseCase useCase) =>
+        group.MapPost("/profiles", (VideoProfilesRequest req, [Microsoft.AspNetCore.Mvc.FromServices] SetVideoProfilesUseCase useCase) =>
         {
             var snapshot = useCase.Execute(req.Profiles, req.Active);
             return Results.Ok(new { ok = true, active = snapshot.ActiveProfile });
         });
 
-        group.MapPost("/profiles/active", (string? name, VideoProfileActiveRequest? req, SetActiveVideoProfileUseCase useCase, AppState appState) =>
+        group.MapPost("/profiles/upsert", (VideoProfileConfig req, [Microsoft.AspNetCore.Mvc.FromServices] UpsertVideoProfileUseCase useCase) =>
+        {
+            var result = useCase.Execute(req);
+            return Results.Ok(new
+            {
+                ok = result.Ok,
+                error = result.Error,
+                active = result.Active,
+                profiles = result.Profiles
+            });
+        });
+
+        group.MapDelete("/profiles/{name}", (string name, [Microsoft.AspNetCore.Mvc.FromServices] DeleteVideoProfileUseCase useCase) =>
+        {
+            var result = useCase.Execute(name);
+            return Results.Ok(new
+            {
+                ok = result.Ok,
+                error = result.Error,
+                active = result.Active,
+                profiles = result.Profiles
+            });
+        });
+
+        group.MapPost("/profiles/active", (string? name, VideoProfileActiveRequest? req, [Microsoft.AspNetCore.Mvc.FromServices] SetActiveVideoProfileUseCase useCase, [Microsoft.AspNetCore.Mvc.FromServices] AppState appState) =>
         {
             string? target = name ?? req?.Name;
             if (string.IsNullOrWhiteSpace(target))
@@ -110,13 +134,13 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapGet("/streams", (GetVideoStreamsUseCase useCase) =>
+        group.MapGet("/streams", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoStreamsUseCase useCase) =>
         {
             var list = useCase.Execute();
             return Results.Ok(new { ok = true, streams = list });
         });
 
-        group.MapGet("/output", (GetVideoOutputStatusUseCase useCase) =>
+        group.MapGet("/output", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoOutputStatusUseCase useCase) =>
         {
             var result = useCase.Execute();
             var state = result.State;
@@ -133,7 +157,7 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapPost("/output", async (VideoOutputRequest req, ApplyVideoOutputUseCase useCase, HttpContext ctx) =>
+        group.MapPost("/output", async (VideoOutputRequest req, [Microsoft.AspNetCore.Mvc.FromServices] ApplyVideoOutputUseCase useCase, HttpContext ctx) =>
         {
             var result = await useCase.ExecuteAsync(req, ctx.RequestAborted);
             if (!result.Ok)
@@ -159,7 +183,7 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapGet("/mjpeg/{id}", async (string id, int? fps, int? w, int? h, int? q, string? passthrough, Options opt, VideoSourceStore store, VideoProfileStore profiles, AppState appState, HttpContext ctx) =>
+        group.MapGet("/mjpeg/{id}", async (string id, int? fps, int? w, int? h, int? q, string? passthrough, [Microsoft.AspNetCore.Mvc.FromServices] Options opt, [Microsoft.AspNetCore.Mvc.FromServices] VideoSourceStore store, [Microsoft.AspNetCore.Mvc.FromServices] VideoProfileStore profiles, [Microsoft.AspNetCore.Mvc.FromServices] AppState appState, HttpContext ctx) =>
         {
             var source = store.GetAll().FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase));
             if (source is null)
@@ -203,24 +227,31 @@ public static class VideoEndpoints
 
                 ChannelReader<byte[]> hubReaderLocal = hub.Subscribe(ctx.RequestAborted);
                 bool hubSentFirstLocal = false;
-                await foreach (byte[] hubJpegFrame in hubReaderLocal.ReadAllAsync(ctx.RequestAborted))
+                try
                 {
-                    byte[] frameBytes = hubJpegFrame;
-                    if (!hubSentFirstLocal)
+                    await foreach (byte[] hubJpegFrame in hubReaderLocal.ReadAllAsync(ctx.RequestAborted))
                     {
-                        frameBytes = hubFirstFrameLocal;
-                        hubSentFirstLocal = true;
+                        byte[] frameBytes = hubJpegFrame;
+                        if (!hubSentFirstLocal)
+                        {
+                            frameBytes = hubFirstFrameLocal;
+                            hubSentFirstLocal = true;
+                        }
+                        else if (ReferenceEquals(frameBytes, hubFirstFrameLocal))
+                        {
+                            continue;
+                        }
+                        string header = $"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {frameBytes.Length}\r\n\r\n";
+                        byte[] headerBytes = Encoding.ASCII.GetBytes(header);
+                        await ctx.Response.Body.WriteAsync(headerBytes, ctx.RequestAborted);
+                        await ctx.Response.Body.WriteAsync(frameBytes, ctx.RequestAborted);
+                        await ctx.Response.Body.WriteAsync(Encoding.ASCII.GetBytes("\r\n"), ctx.RequestAborted);
+                        await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                     }
-                    else if (ReferenceEquals(frameBytes, hubFirstFrameLocal))
-                    {
-                        continue;
-                    }
-                    string header = $"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {frameBytes.Length}\r\n\r\n";
-                    byte[] headerBytes = Encoding.ASCII.GetBytes(header);
-                    await ctx.Response.Body.WriteAsync(headerBytes, ctx.RequestAborted);
-                    await ctx.Response.Body.WriteAsync(frameBytes, ctx.RequestAborted);
-                    await ctx.Response.Body.WriteAsync(Encoding.ASCII.GetBytes("\r\n"), ctx.RequestAborted);
-                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }
+                catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested)
+                {
+                    // Client disconnected/cancelled request while MJPEG stream was active.
                 }
                 return;
             }
@@ -331,7 +362,7 @@ public static class VideoEndpoints
             }
         });
 
-        group.MapGet("/snapshot/{id}", async (string id, Options opt, VideoSourceStore store, VideoProfileStore profiles, AppState appState, HttpContext ctx) =>
+        group.MapGet("/snapshot/{id}", async (string id, [Microsoft.AspNetCore.Mvc.FromServices] Options opt, [Microsoft.AspNetCore.Mvc.FromServices] VideoSourceStore store, [Microsoft.AspNetCore.Mvc.FromServices] VideoProfileStore profiles, [Microsoft.AspNetCore.Mvc.FromServices] AppState appState, HttpContext ctx) =>
         {
             var source = store.GetAll().FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase));
             if (source is null)
@@ -413,7 +444,7 @@ public static class VideoEndpoints
             await ctx.Response.Body.WriteAsync(workerFrame, ctx.RequestAborted);
         });
 
-        group.MapMethods("/flv/{id}", new[] { "GET", "HEAD" }, async (string id, Options opt, VideoSourceStore store, VideoProfileStore profiles, AppState appState, HttpContext ctx) =>
+        group.MapMethods("/flv/{id}", new[] { "GET", "HEAD" }, async (string id, [Microsoft.AspNetCore.Mvc.FromServices] Options opt, [Microsoft.AspNetCore.Mvc.FromServices] VideoSourceStore store, [Microsoft.AspNetCore.Mvc.FromServices] VideoProfileStore profiles, [Microsoft.AspNetCore.Mvc.FromServices] AppState appState, HttpContext ctx) =>
         {
             var outputState = outputService.Get();
             if (!outputState.Flv)
@@ -513,7 +544,7 @@ public static class VideoEndpoints
             }
         });
 
-        group.MapGet("/ws/flv/{id}", async (string id, Options opt, VideoSourceStore store, VideoProfileStore profiles, AppState appState, HttpContext ctx) =>
+        group.MapGet("/ws/flv/{id}", async (string id, [Microsoft.AspNetCore.Mvc.FromServices] Options opt, [Microsoft.AspNetCore.Mvc.FromServices] VideoSourceStore store, [Microsoft.AspNetCore.Mvc.FromServices] VideoProfileStore profiles, [Microsoft.AspNetCore.Mvc.FromServices] AppState appState, HttpContext ctx) =>
         {
             if (!ctx.WebSockets.IsWebSocketRequest)
             {
@@ -655,7 +686,7 @@ public static class VideoEndpoints
             }
         });
 
-        group.MapGet("/hls/{id}/{**path}", async (string id, string? path, Options opt, HttpContext ctx) =>
+        group.MapGet("/hls/{id}/{**path}", async (string id, string? path, [Microsoft.AspNetCore.Mvc.FromServices] Options opt, HttpContext ctx) =>
         {
             var outputState = outputService.Get();
             if (!outputState.Hls)
@@ -691,13 +722,13 @@ public static class VideoEndpoints
             await fs.CopyToAsync(ctx.Response.Body, ctx.RequestAborted);
         });
 
-        group.MapGet("/streams/config", (GetVideoStreamsConfigUseCase useCase) =>
+        group.MapGet("/streams/config", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoStreamsConfigUseCase useCase) =>
         {
             var list = useCase.Execute();
             return Results.Ok(new { ok = true, streams = list });
         });
 
-        group.MapPost("/streams/config/write", (Options opt, GetVideoStreamsConfigUseCase useCase) =>
+        group.MapPost("/streams/config/write", (Options opt, [Microsoft.AspNetCore.Mvc.FromServices] GetVideoStreamsConfigUseCase useCase) =>
         {
             var list = useCase.Execute();
             Directory.CreateDirectory(opt.VideoLogDir);
@@ -706,7 +737,7 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, path });
         });
 
-        group.MapPost("/ffmpeg/start", async (FfmpegStartRequest? req, StartFfmpegUseCase useCase, HttpContext ctx) =>
+        group.MapPost("/ffmpeg/start", async (FfmpegStartRequest? req, [Microsoft.AspNetCore.Mvc.FromServices] StartFfmpegUseCase useCase, HttpContext ctx) =>
         {
             var result = await useCase.ExecuteAsync(req, ctx.RequestAborted);
             if (!string.IsNullOrWhiteSpace(result.Error))
@@ -732,7 +763,7 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapPost("/ffmpeg/stop", (string? id, StopFfmpegUseCase useCase, HttpContext ctx) =>
+        group.MapPost("/ffmpeg/stop", (string? id, [Microsoft.AspNetCore.Mvc.FromServices] StopFfmpegUseCase useCase, HttpContext ctx) =>
         {
             ServerEventLog.Log("ffmpeg", "stop_request:manual", new { id });
             var result = useCase.Execute(id);
@@ -750,13 +781,13 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, status = result.Status, id = result.Id });
         });
 
-        group.MapGet("/ffmpeg/status", (GetFfmpegStatusUseCase useCase) =>
+        group.MapGet("/ffmpeg/status", ([Microsoft.AspNetCore.Mvc.FromServices] GetFfmpegStatusUseCase useCase) =>
         {
             var result = useCase.Execute();
             return Results.Ok(new { ok = result.Ok, processes = result.Processes, states = result.States });
         });
 
-        group.MapPost("/test-capture", async (string? id, int? timeoutSec, TestVideoCaptureUseCase useCase, HttpContext ctx) =>
+        group.MapPost("/test-capture", async (string? id, int? timeoutSec, [Microsoft.AspNetCore.Mvc.FromServices] TestVideoCaptureUseCase useCase, HttpContext ctx) =>
         {
             var result = await useCase.ExecuteAsync(id, timeoutSec, ctx.RequestAborted);
             return Results.Ok(new
@@ -773,7 +804,7 @@ public static class VideoEndpoints
             });
         });
 
-        group.MapPost("/sources/scan", (bool? apply, VideoSourceStore store) =>
+        group.MapPost("/sources/scan", (bool? apply, [Microsoft.AspNetCore.Mvc.FromServices] VideoSourceStore store) =>
         {
             var sources = new List<VideoSourceConfig>();
             var warnings = new List<string>();
@@ -872,7 +903,7 @@ public static class VideoEndpoints
             return Results.Ok(new { ok = true, devices = list });
         });
 
-        group.MapGet("/dshow/devices", (Options opt) =>
+        group.MapGet("/dshow/devices", ([Microsoft.AspNetCore.Mvc.FromServices] Options opt) =>
         {
             if (!OperatingSystem.IsWindows())
             {
@@ -889,7 +920,24 @@ public static class VideoEndpoints
             }
         });
 
-        group.MapGet("/dshow/modes", (string? device, Options opt) =>
+        group.MapGet("/dshow/audio-devices", ([Microsoft.AspNetCore.Mvc.FromServices] Options opt) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Ok(new { ok = false, error = "windows_only" });
+            }
+            try
+            {
+                var devices = ServerVideoMode.ListDshowAudioDevices(opt.FfmpegPath);
+                return Results.Ok(new { ok = true, devices });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { ok = false, error = ex.Message });
+            }
+        });
+
+        group.MapGet("/dshow/modes", (string? device, [Microsoft.AspNetCore.Mvc.FromServices] Options opt) =>
         {
             if (!OperatingSystem.IsWindows())
             {
@@ -917,7 +965,7 @@ public static class VideoEndpoints
             }
         });
 
-        group.MapGet("/webrtc/encoders", (Options opt) =>
+        group.MapGet("/webrtc/encoders", ([Microsoft.AspNetCore.Mvc.FromServices] Options opt) =>
         {
             try
             {
