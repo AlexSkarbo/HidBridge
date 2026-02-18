@@ -75,6 +75,10 @@ public static class WebRtcClientExtensions
     /// <param name="captureInput">Optional capture input string (for example: video=USB3.0 Video).</param>
     /// <param name="encoder">Optional encoder selection (for example: auto, cpu, hw).</param>
     /// <param name="codec">Optional codec selection (for example: auto, vp8, h264).</param>
+    /// <param name="audioEnabled">Optional audio enable flag.</param>
+    /// <param name="audioInput">Optional audio input string (for example: audio=Microphone (USB Audio Device)).</param>
+    /// <param name="audioBitrateKbps">Optional audio bitrate (kbps).</param>
+    /// <param name="streamProfile">Optional stream profile name used as base before explicit overrides.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create response.</returns>
     public static Task<WebRtcCreateRoomResponse?> CreateWebRtcVideoRoomAsync(
@@ -87,10 +91,14 @@ public static class WebRtcClientExtensions
         string? captureInput = null,
         string? encoder = null,
         string? codec = null,
+        bool? audioEnabled = null,
+        string? audioInput = null,
+        int? audioBitrateKbps = null,
+        string? streamProfile = null,
         CancellationToken ct = default)
         => client.PostAsync<WebRtcCreateVideoRoomRequest, WebRtcCreateRoomResponse>(
             "/status/webrtc/video/rooms",
-            new WebRtcCreateVideoRoomRequest(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec),
+            new WebRtcCreateVideoRoomRequest(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile),
             ct);
 
     /// <summary>

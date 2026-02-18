@@ -54,9 +54,29 @@ public sealed class VideoProfileStore
     {
         lock (_lock)
         {
+            List<VideoProfileConfig> incoming = (profiles ?? Array.Empty<VideoProfileConfig>())
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => new VideoProfileConfig(
+                    p.Name.Trim(),
+                    p.Args ?? string.Empty,
+                    p.Note,
+                    p.AudioEnabled,
+                    p.AudioInput,
+                    p.AudioBitrateKbps,
+                    IsReadonly: false))
+                .ToList();
+            bool activeInIncoming = incoming.Any(p => string.Equals(p.Name, ActiveProfile, StringComparison.OrdinalIgnoreCase));
             _profiles.Clear();
-            _profiles.AddRange(profiles);
-            if (_profiles.Count > 0 && !_profiles.Any(p => string.Equals(p.Name, ActiveProfile, StringComparison.OrdinalIgnoreCase)))
+            // Client can only persist user profiles. Built-in presets are re-added below as readonly.
+            _profiles.AddRange(incoming);
+            EnsureDefaultProfiles(_profiles);
+            if (incoming.Count > 0 && !activeInIncoming)
+            {
+                // If caller replaced user profiles and previous active is not among them,
+                // switch to the first incoming profile instead of silently sticking to a base preset.
+                ActiveProfile = incoming[0].Name;
+            }
+            else if (_profiles.Count > 0 && !_profiles.Any(p => string.Equals(p.Name, ActiveProfile, StringComparison.OrdinalIgnoreCase)))
             {
                 ActiveProfile = PickAutoProfile(_profiles);
             }
@@ -88,6 +108,95 @@ public sealed class VideoProfileStore
                 return true;
             }
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates or updates a user profile. Built-in readonly profiles cannot be modified.
+    /// </summary>
+    /// <param name="profile">Profile payload.</param>
+    /// <param name="error">Validation error.</param>
+    /// <returns>True on success.</returns>
+    public bool Upsert(VideoProfileConfig profile, out string? error)
+    {
+        lock (_lock)
+        {
+            error = null;
+            string name = profile.Name?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                error = "name_required";
+                return false;
+            }
+
+            int index = _profiles.FindIndex(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0 && _profiles[index].IsReadonly)
+            {
+                error = "readonly_profile";
+                return false;
+            }
+
+            var next = new VideoProfileConfig(
+                name,
+                profile.Args ?? string.Empty,
+                profile.Note,
+                profile.AudioEnabled,
+                string.IsNullOrWhiteSpace(profile.AudioInput) ? null : profile.AudioInput.Trim(),
+                profile.AudioBitrateKbps,
+                IsReadonly: false);
+
+            if (index >= 0)
+            {
+                _profiles[index] = next;
+            }
+            else
+            {
+                _profiles.Add(next);
+            }
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Deletes a user profile. Built-in readonly profiles cannot be removed.
+    /// </summary>
+    /// <param name="name">Profile name.</param>
+    /// <param name="error">Validation error.</param>
+    /// <returns>True on success.</returns>
+    public bool Delete(string name, out string? error)
+    {
+        lock (_lock)
+        {
+            error = null;
+            string wanted = name?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(wanted))
+            {
+                error = "name_required";
+                return false;
+            }
+
+            int index = _profiles.FindIndex(p => string.Equals(p.Name, wanted, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+            {
+                error = "profile_not_found";
+                return false;
+            }
+
+            if (_profiles[index].IsReadonly)
+            {
+                error = "readonly_profile";
+                return false;
+            }
+
+            string removedName = _profiles[index].Name;
+            _profiles.RemoveAt(index);
+
+            if (string.Equals(ActiveProfile, removedName, StringComparison.OrdinalIgnoreCase))
+            {
+                ActiveProfile = PickAutoProfile(_profiles);
+            }
+
+            return true;
         }
     }
 
@@ -173,6 +282,32 @@ public sealed class VideoProfileStore
             "-c:v libx264 -preset veryfast -tune zerolatency -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -pix_fmt yuv420p -b:v 3500k -maxrate 3500k -bufsize 1750k -vf scale=1920:1080 -r 30",
             "default");
 
+        // WebRTC-oriented base presets for source-specific audio behavior.
+        EnsureProfile(
+            profiles,
+            "pc-hdmi-pcm48",
+            "-f dshow -pixel_format yuyv422 -video_size 1920x1080 -framerate 30 -rtbufsize 64M -i video=USB3.0 Video -an",
+            "PC HDMI (PCM 48kHz)",
+            audioEnabled: true,
+            audioInput: null,
+            audioBitrateKbps: 64);
+        EnsureProfile(
+            profiles,
+            "android-tvbox",
+            "-f dshow -vcodec mjpeg -video_size 1920x1080 -framerate 30 -rtbufsize 64M -i video=USB3.0 Video -an",
+            "Android/TV Box",
+            audioEnabled: true,
+            audioInput: null,
+            audioBitrateKbps: 64);
+        EnsureProfile(
+            profiles,
+            "low-bandwidth",
+            "-f dshow -framerate 30 -rtbufsize 64M -i video=USB3.0 Video -an -c:v libvpx -deadline realtime -cpu-used 12 -lag-in-frames 0 -error-resilient 1 -auto-alt-ref 0 -vf format=yuv420p -g 30 -b:v 900k -maxrate 990k -bufsize 1800k",
+            "Low bandwidth",
+            audioEnabled: true,
+            audioInput: null,
+            audioBitrateKbps: 48);
+
         // Legacy defaults (kept for compatibility with existing configs/UI labels).
         EnsureProfile(
             profiles,
@@ -235,18 +370,30 @@ public sealed class VideoProfileStore
     /// <param name="name">The name.</param>
     /// <param name="args">The args.</param>
     /// <param name="note">The note.</param>
-    private static void EnsureProfile(List<VideoProfileConfig> profiles, string name, string args, string note)
+    private static void EnsureProfile(
+        List<VideoProfileConfig> profiles,
+        string name,
+        string args,
+        string note,
+        bool? audioEnabled = null,
+        string? audioInput = null,
+        int? audioBitrateKbps = null)
     {
         var existingIndex = profiles.FindIndex(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
         if (existingIndex >= 0)
         {
             var existing = profiles[existingIndex];
-            if (existing.Args != args || existing.Note != note)
+            if (existing.Args != args ||
+                existing.Note != note ||
+                existing.AudioEnabled != audioEnabled ||
+                !string.Equals(existing.AudioInput ?? string.Empty, audioInput ?? string.Empty, StringComparison.Ordinal) ||
+                existing.AudioBitrateKbps != audioBitrateKbps ||
+                !existing.IsReadonly)
             {
-                profiles[existingIndex] = new VideoProfileConfig(name, args, note);
+                profiles[existingIndex] = new VideoProfileConfig(name, args, note, audioEnabled, audioInput, audioBitrateKbps, IsReadonly: true);
             }
             return;
         }
-        profiles.Add(new VideoProfileConfig(name, args, note));
+        profiles.Add(new VideoProfileConfig(name, args, note, audioEnabled, audioInput, audioBitrateKbps, IsReadonly: true));
     }
 }

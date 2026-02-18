@@ -1,4 +1,5 @@
 using HidControl.Application.Abstractions;
+using HidControl.Contracts;
 
 namespace HidControlServer.Adapters.Application;
 
@@ -44,4 +45,10 @@ public sealed class VideoProfileStoreAdapter : IVideoProfileStore
     /// <param name="name">Profile name.</param>
     /// <returns>True when activated.</returns>
     public bool SetActive(string name) => _store.SetActive(name);
+
+    /// <inheritdoc />
+    public bool Upsert(VideoProfileConfig profile, out string? error) => _store.Upsert(profile, out error);
+
+    /// <inheritdoc />
+    public bool Delete(string name, out string? error) => _store.Delete(name, out error);
 }

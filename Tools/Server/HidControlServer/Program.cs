@@ -109,6 +109,8 @@ builder.Services.AddSingleton<TestVideoCaptureUseCase>();
 builder.Services.AddSingleton<GetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetVideoProfilesUseCase>();
 builder.Services.AddSingleton<SetActiveVideoProfileUseCase>();
+builder.Services.AddSingleton<UpsertVideoProfileUseCase>();
+builder.Services.AddSingleton<DeleteVideoProfileUseCase>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoSourceStore, VideoSourceStoreAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoRuntimeControl, VideoRuntimeControlAdapter>();
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IVideoOutputStateProvider, VideoOutputStateProviderAdapter>();

@@ -87,7 +87,10 @@ public sealed class WebRtcIntegrationTests
             int? imageQuality = null,
             string? captureInput = null,
             string? encoder = null,
-            string? codec = null)
+            string? codec = null,
+            bool? audioEnabled = null,
+            string? audioInput = null,
+            int? audioBitrateKbps = null)
         {
             EnsureHelperStartedCalls++;
             LastQualityPreset = qualityPreset;

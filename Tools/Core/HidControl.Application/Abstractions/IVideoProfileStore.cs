@@ -30,4 +30,20 @@ public interface IVideoProfileStore
     /// <param name="name">Profile name.</param>
     /// <returns>True if the profile exists and was activated.</returns>
     bool SetActive(string name);
+
+    /// <summary>
+    /// Creates or updates a user profile.
+    /// </summary>
+    /// <param name="profile">Profile payload.</param>
+    /// <param name="error">Validation error when failed.</param>
+    /// <returns>True when saved.</returns>
+    bool Upsert(VideoProfileConfig profile, out string? error);
+
+    /// <summary>
+    /// Deletes a user profile.
+    /// </summary>
+    /// <param name="name">Profile name.</param>
+    /// <param name="error">Validation error when failed.</param>
+    /// <returns>True when deleted.</returns>
+    bool Delete(string name, out string? error);
 }

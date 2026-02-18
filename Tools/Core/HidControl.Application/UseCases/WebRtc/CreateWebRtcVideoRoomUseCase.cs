@@ -32,9 +32,56 @@ public sealed class CreateWebRtcVideoRoomUseCase
     /// <param name="captureInput">Optional capture input string for helper.</param>
     /// <param name="encoder">Optional encoder selection for helper.</param>
     /// <param name="codec">Optional codec selection for helper.</param>
+    /// <param name="audioEnabled">Optional audio enable flag.</param>
+    /// <param name="audioInput">Optional audio input string for helper.</param>
+    /// <param name="audioBitrateKbps">Optional audio bitrate (kbps).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create result.</returns>
-    public Task<WebRtcRoomCreateResult> Execute(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
+    public Task<WebRtcRoomCreateResult> Execute(
+        string? room,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        CancellationToken ct)
+    {
+        return Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, null, null, null, ct);
+    }
+
+    public Task<WebRtcRoomCreateResult> Execute(
+        string? room,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        bool? audioEnabled,
+        string? audioInput,
+        int? audioBitrateKbps,
+        CancellationToken ct)
+    {
+        return Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile: null, ct);
+    }
+
+    public Task<WebRtcRoomCreateResult> Execute(
+        string? room,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        bool? audioEnabled,
+        string? audioInput,
+        int? audioBitrateKbps,
+        string? streamProfile,
+        CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(qualityPreset))
         {
@@ -79,8 +126,12 @@ public sealed class CreateWebRtcVideoRoomUseCase
                 return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_codec"));
             }
         }
+        if (audioBitrateKbps is int ab && (ab < 16 || ab > 512))
+        {
+            return Task.FromResult(new WebRtcRoomCreateResult(false, room, false, null, "bad_audio_bitrate_kbps"));
+        }
 
         string? r = string.IsNullOrWhiteSpace(room) ? _roomIds.GenerateVideoRoomId() : room;
-        return _rooms.CreateVideoAsync(r, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, ct);
+        return _rooms.CreateVideoAsync(r, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
     }
 }

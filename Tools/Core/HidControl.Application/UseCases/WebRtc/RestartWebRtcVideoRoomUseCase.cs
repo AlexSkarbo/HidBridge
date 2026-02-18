@@ -29,10 +29,57 @@ public sealed class RestartWebRtcVideoRoomUseCase
     /// <param name="captureInput">Optional capture input.</param>
     /// <param name="encoder">Optional encoder mode.</param>
     /// <param name="codec">Optional codec mode.</param>
+    /// <param name="audioEnabled">Optional audio enable flag.</param>
+    /// <param name="audioInput">Optional audio input string.</param>
+    /// <param name="audioBitrateKbps">Optional audio bitrate (kbps).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Restart result.</returns>
-    public Task<WebRtcRoomRestartResult> Execute(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
+    public Task<WebRtcRoomRestartResult> Execute(
+        string room,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        CancellationToken ct)
     {
-        return _rooms.RestartVideoAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, ct);
+        return Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, null, null, null, ct);
+    }
+
+    public Task<WebRtcRoomRestartResult> Execute(
+        string room,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        bool? audioEnabled,
+        string? audioInput,
+        int? audioBitrateKbps,
+        CancellationToken ct)
+    {
+        return Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile: null, ct);
+    }
+
+    public Task<WebRtcRoomRestartResult> Execute(
+        string room,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        bool? audioEnabled,
+        string? audioInput,
+        int? audioBitrateKbps,
+        string? streamProfile,
+        CancellationToken ct)
+    {
+        return _rooms.RestartVideoAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
     }
 }

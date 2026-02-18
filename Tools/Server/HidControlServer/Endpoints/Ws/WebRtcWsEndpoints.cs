@@ -101,6 +101,11 @@ public static class WebRtcWsEndpoints
                         long? frames = TryGetLongProperty(mData, "frames");
                         long? packets = TryGetLongProperty(mData, "packets");
                         bool? fallbackUsed = TryGetBoolProperty(mData, "fallbackUsed");
+                        bool? audioEnabled = TryGetBoolProperty(mData, "audioEnabled");
+                        string? audioInput = TryGetStringProperty(mData, "audioInput");
+                        int? audioBitrateKbps = TryGetIntProperty(mData, "audioBitrateKbps");
+                        int? audioMeasuredKbps = TryGetIntProperty(mData, "audioMeasuredKbps");
+                        bool? audioRunning = TryGetBoolProperty(mData, "audioRunning");
                         videoPeerSupervisor.ReportRuntimeStatus(
                             runtimeRoom,
                             eventName,
@@ -115,7 +120,12 @@ public static class WebRtcWsEndpoints
                             measuredKbps,
                             frames,
                             packets,
-                            fallbackUsed);
+                            fallbackUsed,
+                            audioEnabled,
+                            audioInput,
+                            audioBitrateKbps,
+                            audioMeasuredKbps,
+                            audioRunning);
 
                         await BroadcastAsync(signaling, runtimeRoom, clientId, new
                         {

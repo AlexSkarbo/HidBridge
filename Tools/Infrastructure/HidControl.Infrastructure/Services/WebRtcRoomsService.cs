@@ -1,5 +1,7 @@
 using HidControl.Application.Abstractions;
+using HidControl.Contracts;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace HidControl.Infrastructure.Services;
 
@@ -13,6 +15,9 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
     private readonly IWebRtcBackend _backend;
     private readonly IWebRtcRoomIdService _roomIds;
+    private readonly IVideoProfileStore _videoProfiles;
+    private readonly object _videoProfilesLock = new();
+    private readonly Dictionary<string, string?> _videoRoomProfiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _videoRoomOpLock = new(1, 1);
     private readonly object _persistLock = new();
     private readonly Dictionary<string, PersistedRoomState> _persistedRooms = new(StringComparer.OrdinalIgnoreCase);
@@ -22,11 +27,32 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     /// Creates an instance.
     /// </summary>
     /// <param name="backend">Backend.</param>
-    public WebRtcRoomsService(IWebRtcBackend backend, IWebRtcRoomIdService roomIds)
+    public WebRtcRoomsService(IWebRtcBackend backend, IWebRtcRoomIdService roomIds, IVideoProfileStore? videoProfiles = null)
     {
         _backend = backend;
         _roomIds = roomIds;
+        _videoProfiles = videoProfiles ?? EmptyVideoProfileStore.Instance;
         LoadPersistedRooms();
+    }
+
+    private sealed class EmptyVideoProfileStore : IVideoProfileStore
+    {
+        public static readonly EmptyVideoProfileStore Instance = new();
+        public string ActiveProfile => string.Empty;
+        public IReadOnlyList<VideoProfileConfig> GetAll() => Array.Empty<VideoProfileConfig>();
+        public void ReplaceAll(IReadOnlyList<VideoProfileConfig> profiles) { }
+        public bool SetActive(string name) => false;
+        public bool Upsert(VideoProfileConfig profile, out string? error)
+        {
+            error = "store_unavailable";
+            return false;
+        }
+
+        public bool Delete(string name, out string? error)
+        {
+            error = "store_unavailable";
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -59,16 +85,16 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     /// <inheritdoc />
     public Task<WebRtcRoomCreateResult> CreateAsync(string? room, CancellationToken ct)
     {
-        return CreateInternalAsync(room, qualityPreset: null, bitrateKbps: null, fps: null, imageQuality: null, captureInput: null, encoder: null, codec: null, persist: true, ct);
+        return CreateInternalAsync(room, qualityPreset: null, bitrateKbps: null, fps: null, imageQuality: null, captureInput: null, encoder: null, codec: null, audioEnabled: null, audioInput: null, audioBitrateKbps: null, streamProfile: null, persist: true, ct);
     }
 
     /// <inheritdoc />
-    public async Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
+    public async Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, CancellationToken ct)
     {
         await _videoRoomOpLock.WaitAsync(ct);
         try
         {
-            return await CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, persist: false, ct);
+            return await CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, persist: false, ct);
         }
         finally
         {
@@ -107,6 +133,10 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         // Explicit delete should always remove persisted room metadata,
         // even if backend stop returns a transient/process-race error.
         RemovePersistedRoom(room);
+        lock (_videoProfilesLock)
+        {
+            _videoRoomProfiles.Remove(room);
+        }
 
         if (!stop.ok)
         {
@@ -131,7 +161,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     }
 
     /// <inheritdoc />
-    public async Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct)
+    public async Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, CancellationToken ct)
     {
         await _videoRoomOpLock.WaitAsync(ct);
         try
@@ -168,11 +198,35 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         {
             return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_image_quality");
         }
+        if (audioBitrateKbps is int ab && (ab < 16 || ab > 512))
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_audio_bitrate_kbps");
+        }
 
-        string? normalizedPreset = NormalizeQualityPreset(qualityPreset);
-        string? normalizedEncoder = NormalizeEncoder(encoder);
-        string? normalizedCodec = NormalizeCodec(codec);
-        int? normalizedImageQuality = NormalizeImageQuality(imageQuality);
+        string? effectiveStreamProfile = ResolveRoomStreamProfileForStart(normalizedRoom, streamProfile);
+
+        ResolveEffectiveVideoSettings(
+            effectiveStreamProfile,
+            qualityPreset,
+            bitrateKbps,
+            fps,
+            imageQuality,
+            captureInput,
+            encoder,
+            codec,
+            audioEnabled,
+            audioInput,
+            audioBitrateKbps,
+            out string? normalizedPreset,
+            out int? normalizedBitrate,
+            out int? normalizedFps,
+            out int? normalizedImageQuality,
+            out string? normalizedCaptureInput,
+            out string? normalizedEncoder,
+            out string? normalizedCodec,
+            out bool? normalizedAudioEnabled,
+            out string? normalizedAudioInput,
+            out int? normalizedAudioBitrate);
 
         (bool ok, bool stopped, string? error) stop = (false, false, "restart_stop_failed");
         for (int i = 0; i < 3; i++)
@@ -199,11 +253,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             }
         }
 
-        var start = _backend.EnsureHelperStarted(normalizedRoom, normalizedPreset, bitrateKbps, fps, normalizedImageQuality, captureInput, normalizedEncoder, normalizedCodec);
+        var start = _backend.EnsureHelperStarted(normalizedRoom, normalizedPreset, normalizedBitrate, normalizedFps, normalizedImageQuality, normalizedCaptureInput, normalizedEncoder, normalizedCodec, normalizedAudioEnabled, normalizedAudioInput, normalizedAudioBitrate);
         if (!start.ok)
         {
             return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, start.started, start.pid, start.error);
         }
+
+        RememberRoomStreamProfile(normalizedRoom, streamProfile);
 
         return new WebRtcRoomRestartResult(true, normalizedRoom, stop.stopped, start.started, start.pid, null);
         }
@@ -213,7 +269,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
     }
 
-    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool persist, CancellationToken ct)
+    private Task<WebRtcRoomCreateResult> CreateInternalAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, bool persist, CancellationToken ct)
     {
         _ = ct;
         RestorePersistedRoomsIfNeeded();
@@ -224,16 +280,93 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             return Task.FromResult(new WebRtcRoomCreateResult(false, roomId, false, null, err ?? "bad_room"));
         }
 
-        string? normalizedPreset = NormalizeQualityPreset(qualityPreset);
-        string? normalizedEncoder = NormalizeEncoder(encoder);
-        string? normalizedCodec = NormalizeCodec(codec);
-        int? normalizedImageQuality = NormalizeImageQuality(imageQuality);
-        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset, bitrateKbps, fps, normalizedImageQuality, captureInput, normalizedEncoder, normalizedCodec);
+        string? effectiveStreamProfile = ResolveRoomStreamProfileForStart(normalized, streamProfile);
+
+        ResolveEffectiveVideoSettings(
+            effectiveStreamProfile,
+            qualityPreset,
+            bitrateKbps,
+            fps,
+            imageQuality,
+            captureInput,
+            encoder,
+            codec,
+            audioEnabled,
+            audioInput,
+            audioBitrateKbps,
+            out string? normalizedPreset,
+            out int? normalizedBitrate,
+            out int? normalizedFps,
+            out int? normalizedImageQuality,
+            out string? normalizedCaptureInput,
+            out string? normalizedEncoder,
+            out string? normalizedCodec,
+            out bool? normalizedAudioEnabled,
+            out string? normalizedAudioInput,
+            out int? normalizedAudioBitrate);
+        var (ok, started, pid, error) = _backend.EnsureHelperStarted(normalized, normalizedPreset, normalizedBitrate, normalizedFps, normalizedImageQuality, normalizedCaptureInput, normalizedEncoder, normalizedCodec, normalizedAudioEnabled, normalizedAudioInput, normalizedAudioBitrate);
         if (ok && persist)
         {
             TouchPersistedRoom(normalized);
         }
+        if (ok)
+        {
+            RememberRoomStreamProfile(normalized, streamProfile);
+        }
         return Task.FromResult(new WebRtcRoomCreateResult(ok, normalized, started, pid, error));
+    }
+
+    /// <inheritdoc />
+    public Task<WebRtcRoomProfileResult> SetVideoRoomProfileAsync(string room, string? streamProfile, CancellationToken ct)
+    {
+        _ = ct;
+        if (!TryNormalizeRoomId(room, out string normalizedRoom, out string? err))
+        {
+            return Task.FromResult(new WebRtcRoomProfileResult(false, room ?? string.Empty, null, err ?? "bad_room"));
+        }
+        if (!IsVideoRoom(normalizedRoom))
+        {
+            return Task.FromResult(new WebRtcRoomProfileResult(false, normalizedRoom, null, "video_room_required"));
+        }
+
+        string? normalizedProfile = NormalizeRoomStreamProfileName(streamProfile);
+        if (!string.IsNullOrWhiteSpace(normalizedProfile) &&
+            !_videoProfiles.GetAll().Any(p => string.Equals(p.Name, normalizedProfile, StringComparison.OrdinalIgnoreCase)))
+        {
+            return Task.FromResult(new WebRtcRoomProfileResult(false, normalizedRoom, null, "profile_not_found"));
+        }
+
+        lock (_videoProfilesLock)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedProfile))
+            {
+                _videoRoomProfiles.Remove(normalizedRoom);
+                return Task.FromResult(new WebRtcRoomProfileResult(true, normalizedRoom, null, null));
+            }
+
+            _videoRoomProfiles[normalizedRoom] = normalizedProfile;
+            return Task.FromResult(new WebRtcRoomProfileResult(true, normalizedRoom, normalizedProfile, null));
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<WebRtcRoomProfileResult> GetVideoRoomProfileAsync(string room, CancellationToken ct)
+    {
+        _ = ct;
+        if (!TryNormalizeRoomId(room, out string normalizedRoom, out string? err))
+        {
+            return Task.FromResult(new WebRtcRoomProfileResult(false, room ?? string.Empty, null, err ?? "bad_room"));
+        }
+        if (!IsVideoRoom(normalizedRoom))
+        {
+            return Task.FromResult(new WebRtcRoomProfileResult(false, normalizedRoom, null, "video_room_required"));
+        }
+
+        lock (_videoProfilesLock)
+        {
+            _videoRoomProfiles.TryGetValue(normalizedRoom, out string? profile);
+            return Task.FromResult(new WebRtcRoomProfileResult(true, normalizedRoom, profile, null));
+        }
     }
 
     private void LoadPersistedRooms()
@@ -588,6 +721,270 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             "auto" or "cpu" or "hw" or "nvenc" or "amf" or "qsv" or "v4l2m2m" or "vaapi" => e,
             _ => null
         };
+    }
+
+    private static string? NormalizeAudioInput(string? audioInput)
+    {
+        if (string.IsNullOrWhiteSpace(audioInput))
+        {
+            return null;
+        }
+
+        return audioInput.Trim();
+    }
+
+    private static int? NormalizeAudioBitrateKbps(int? audioBitrateKbps)
+    {
+        if (audioBitrateKbps is null)
+        {
+            return null;
+        }
+
+        if (audioBitrateKbps < 16 || audioBitrateKbps > 512)
+        {
+            return null;
+        }
+
+        return audioBitrateKbps.Value;
+    }
+
+    private static int? NormalizeBitrateKbps(int? bitrateKbps)
+    {
+        if (bitrateKbps is null)
+        {
+            return null;
+        }
+        if (bitrateKbps < 200 || bitrateKbps > 12000)
+        {
+            return null;
+        }
+        return bitrateKbps.Value;
+    }
+
+    private static int? NormalizeFps(int? fps)
+    {
+        if (fps is null)
+        {
+            return null;
+        }
+        if (fps < 5 || fps > 60)
+        {
+            return null;
+        }
+        return fps.Value;
+    }
+
+    private static string? NormalizeRoomStreamProfileName(string? streamProfile)
+    {
+        if (streamProfile is null)
+        {
+            return null;
+        }
+
+        string normalized = streamProfile.Trim();
+        return normalized.Length == 0 ? null : normalized;
+    }
+
+    private string? ResolveRoomStreamProfileForStart(string room, string? streamProfile)
+    {
+        string? requested = NormalizeRoomStreamProfileName(streamProfile);
+        if (!IsVideoRoom(room))
+        {
+            return requested;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            return requested;
+        }
+
+        lock (_videoProfilesLock)
+        {
+            return _videoRoomProfiles.TryGetValue(room, out string? stored) ? stored : null;
+        }
+    }
+
+    private void RememberRoomStreamProfile(string room, string? streamProfile)
+    {
+        if (!IsVideoRoom(room))
+        {
+            return;
+        }
+
+        // Null means no explicit change requested by caller.
+        if (streamProfile is null)
+        {
+            return;
+        }
+
+        string? normalized = NormalizeRoomStreamProfileName(streamProfile);
+        lock (_videoProfilesLock)
+        {
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                _videoRoomProfiles.Remove(room);
+            }
+            else
+            {
+                _videoRoomProfiles[room] = normalized;
+            }
+        }
+    }
+
+    private void ResolveEffectiveVideoSettings(
+        string? streamProfile,
+        string? qualityPreset,
+        int? bitrateKbps,
+        int? fps,
+        int? imageQuality,
+        string? captureInput,
+        string? encoder,
+        string? codec,
+        bool? audioEnabled,
+        string? audioInput,
+        int? audioBitrateKbps,
+        out string? normalizedPreset,
+        out int? normalizedBitrate,
+        out int? normalizedFps,
+        out int? normalizedImageQuality,
+        out string? normalizedCaptureInput,
+        out string? normalizedEncoder,
+        out string? normalizedCodec,
+        out bool? normalizedAudioEnabled,
+        out string? normalizedAudioInput,
+        out int? normalizedAudioBitrate)
+    {
+        // Start with base profile values (if requested), then apply explicit request overrides.
+        string? basePreset = null;
+        int? baseBitrate = null;
+        int? baseFps = null;
+        string? baseCaptureInput = null;
+        string? baseEncoder = null;
+        string? baseCodec = null;
+        bool? baseAudioEnabled = null;
+        string? baseAudioInput = null;
+        int? baseAudioBitrate = null;
+
+        if (!string.IsNullOrWhiteSpace(streamProfile))
+        {
+            string wanted = streamProfile.Trim();
+            VideoProfileConfig? profile = _videoProfiles.GetAll()
+                .FirstOrDefault(p => string.Equals(p.Name, wanted, StringComparison.OrdinalIgnoreCase));
+            if (profile is not null)
+            {
+                ParseProfileArgs(profile.Args, out baseCodec, out baseEncoder, out baseBitrate, out baseFps, out baseCaptureInput);
+                basePreset = InferQualityPreset(baseCodec, baseBitrate);
+                baseAudioEnabled = profile.AudioEnabled;
+                baseAudioInput = profile.AudioInput;
+                baseAudioBitrate = profile.AudioBitrateKbps;
+            }
+        }
+
+        normalizedPreset = NormalizeQualityPreset(qualityPreset) ?? basePreset;
+        normalizedBitrate = NormalizeBitrateKbps(bitrateKbps) ?? NormalizeBitrateKbps(baseBitrate);
+        normalizedFps = NormalizeFps(fps) ?? NormalizeFps(baseFps);
+        normalizedImageQuality = NormalizeImageQuality(imageQuality);
+        normalizedCaptureInput = string.IsNullOrWhiteSpace(captureInput) ? baseCaptureInput : captureInput.Trim();
+        normalizedEncoder = NormalizeEncoder(encoder) ?? NormalizeEncoder(baseEncoder);
+        normalizedCodec = NormalizeCodec(codec) ?? NormalizeCodec(baseCodec);
+        normalizedAudioEnabled = audioEnabled ?? baseAudioEnabled;
+        normalizedAudioInput = NormalizeAudioInput(audioInput) ?? NormalizeAudioInput(baseAudioInput);
+        normalizedAudioBitrate = NormalizeAudioBitrateKbps(audioBitrateKbps) ?? NormalizeAudioBitrateKbps(baseAudioBitrate);
+    }
+
+    private static void ParseProfileArgs(
+        string? args,
+        out string? codec,
+        out string? encoder,
+        out int? bitrateKbps,
+        out int? fps,
+        out string? captureInput)
+    {
+        codec = null;
+        encoder = null;
+        bitrateKbps = null;
+        fps = null;
+        captureInput = null;
+        string text = args ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        Match cMatch = Regex.Match(text, @"-c:v\s+([^\s]+)", RegexOptions.IgnoreCase);
+        if (cMatch.Success)
+        {
+            string c = cMatch.Groups[1].Value.Trim().ToLowerInvariant();
+            if (c == "libvpx")
+            {
+                codec = "vp8";
+                encoder = "cpu";
+            }
+            else if (c == "libx264")
+            {
+                codec = "h264";
+                encoder = "cpu";
+            }
+            else if (c.Contains("nvenc", StringComparison.Ordinal))
+            {
+                codec = "h264";
+                encoder = "nvenc";
+            }
+            else if (c.Contains("amf", StringComparison.Ordinal))
+            {
+                codec = "h264";
+                encoder = "amf";
+            }
+            else if (c.Contains("qsv", StringComparison.Ordinal))
+            {
+                codec = "h264";
+                encoder = "qsv";
+            }
+            else if (c.Contains("v4l2m2m", StringComparison.Ordinal))
+            {
+                codec = "h264";
+                encoder = "v4l2m2m";
+            }
+        }
+
+        Match bMatch = Regex.Match(text, @"-b:v\s+(\d+)k\b", RegexOptions.IgnoreCase);
+        if (bMatch.Success && int.TryParse(bMatch.Groups[1].Value, out int kb))
+        {
+            bitrateKbps = kb;
+        }
+
+        Match fpsMatch = Regex.Match(text, @"-r\s+(\d+(?:\.\d+)?)", RegexOptions.IgnoreCase);
+        if (fpsMatch.Success && double.TryParse(fpsMatch.Groups[1].Value, out double f))
+        {
+            fps = (int)Math.Round(f);
+        }
+
+        Match quotedInput = Regex.Match(text, "-i\\s+\"video=([^\"]+)\"", RegexOptions.IgnoreCase);
+        if (quotedInput.Success)
+        {
+            captureInput = $"video={quotedInput.Groups[1].Value}";
+        }
+        else
+        {
+            Match plainInput = Regex.Match(text, @"-i\s+video=([^\s]+)", RegexOptions.IgnoreCase);
+            if (plainInput.Success)
+            {
+                captureInput = $"video={plainInput.Groups[1].Value}";
+            }
+        }
+    }
+
+    private static string? InferQualityPreset(string? codec, int? bitrateKbps)
+    {
+        if (bitrateKbps is null || bitrateKbps <= 0)
+        {
+            return null;
+        }
+        if (bitrateKbps <= 1000) return "low-latency";
+        if (bitrateKbps <= 1800) return "balanced";
+        if (bitrateKbps <= 2600) return "high";
+        if (string.Equals(codec, "h264", StringComparison.OrdinalIgnoreCase)) return "optimal";
+        return "high";
     }
 
     private static bool IsVideoRoom(string room)

@@ -29,6 +29,9 @@ public interface IWebRtcBackend
     /// <param name="captureInput">Optional capture input string used for video rooms only.</param>
     /// <param name="encoder">Optional encoder selection used for video rooms only.</param>
     /// <param name="codec">Optional codec selection used for video rooms only.</param>
+    /// <param name="audioEnabled">Optional audio enable flag used for video rooms only.</param>
+    /// <param name="audioInput">Optional audio input used for video rooms only.</param>
+    /// <param name="audioBitrateKbps">Optional audio bitrate (kbps) used for video rooms only.</param>
     /// <returns>Start result.</returns>
     (bool ok, bool started, int? pid, string? error) EnsureHelperStarted(
         string room,
@@ -38,7 +41,10 @@ public interface IWebRtcBackend
         int? imageQuality = null,
         string? captureInput = null,
         string? encoder = null,
-        string? codec = null);
+        string? codec = null,
+        bool? audioEnabled = null,
+        string? audioInput = null,
+        int? audioBitrateKbps = null);
 
     /// <summary>
     /// Stops a helper peer for a room.

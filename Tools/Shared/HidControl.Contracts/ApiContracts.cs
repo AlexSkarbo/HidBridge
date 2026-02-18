@@ -150,10 +150,18 @@ public sealed record VideoSourcesRequest(List<VideoSourceConfig> Sources);
 /// <param name="Name">Name.</param>
 /// <param name="Args">Args.</param>
 /// <param name="Note">Note.</param>
+/// <param name="AudioEnabled">Optional audio enable flag for WebRTC room profile usage.</param>
+/// <param name="AudioInput">Optional audio input device label for WebRTC room profile usage.</param>
+/// <param name="AudioBitrateKbps">Optional audio bitrate (kbps) for WebRTC room profile usage.</param>
+/// <param name="IsReadonly">True for built-in base presets that cannot be edited/deleted.</param>
 public sealed record VideoProfileConfig(
     string Name,
     string Args,
-    string? Note);
+    string? Note,
+    bool? AudioEnabled = null,
+    string? AudioInput = null,
+    int? AudioBitrateKbps = null,
+    bool IsReadonly = false);
 
 /// <summary>
 /// Video capture mode (resolution and maximum frame rate).

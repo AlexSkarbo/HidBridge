@@ -31,9 +31,12 @@ public interface IWebRtcRoomsService
     /// <param name="captureInput">Optional capture input string passed to helper.</param>
     /// <param name="encoder">Optional encoder selection passed to helper.</param>
     /// <param name="codec">Optional codec selection passed to helper.</param>
+    /// <param name="audioEnabled">Optional audio enable flag passed to helper.</param>
+    /// <param name="audioInput">Optional audio input string passed to helper.</param>
+    /// <param name="audioBitrateKbps">Optional audio bitrate (kbps) passed to helper.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Create result.</returns>
-    Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct);
+    Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, CancellationToken ct);
 
     /// <summary>
     /// Stops a room helper and removes the room (where applicable).
@@ -54,9 +57,29 @@ public interface IWebRtcRoomsService
     /// <param name="captureInput">Optional capture input string passed to helper.</param>
     /// <param name="encoder">Optional encoder selection passed to helper.</param>
     /// <param name="codec">Optional codec selection passed to helper.</param>
+    /// <param name="audioEnabled">Optional audio enable flag passed to helper.</param>
+    /// <param name="audioInput">Optional audio input string passed to helper.</param>
+    /// <param name="audioBitrateKbps">Optional audio bitrate (kbps) passed to helper.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Restart result.</returns>
-    Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, CancellationToken ct);
+    Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, CancellationToken ct);
+
+    /// <summary>
+    /// Sets preferred stream profile for a video room without restarting the helper.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="streamProfile">Profile name or null to clear binding.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Profile binding result.</returns>
+    Task<WebRtcRoomProfileResult> SetVideoRoomProfileAsync(string room, string? streamProfile, CancellationToken ct);
+
+    /// <summary>
+    /// Gets preferred stream profile for a video room.
+    /// </summary>
+    /// <param name="room">Room id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Profile binding result.</returns>
+    Task<WebRtcRoomProfileResult> GetVideoRoomProfileAsync(string room, CancellationToken ct);
 }
 
 /// <summary>
@@ -205,6 +228,15 @@ public sealed record WebRtcRoomDeleteResult(bool Ok, string Room, bool Stopped, 
 /// <param name="Pid">Helper pid if started/known.</param>
 /// <param name="Error">Error code if failed.</param>
 public sealed record WebRtcRoomRestartResult(bool Ok, string Room, bool Stopped, bool Started, int? Pid, string? Error);
+
+/// <summary>
+/// Result of getting/setting a room stream profile binding.
+/// </summary>
+/// <param name="Ok">Ok.</param>
+/// <param name="Room">Room id.</param>
+/// <param name="StreamProfile">Bound profile name or null.</param>
+/// <param name="Error">Error code when failed.</param>
+public sealed record WebRtcRoomProfileResult(bool Ok, string Room, string? StreamProfile, string? Error);
 
 /// <summary>
 /// WebRTC ICE servers payload (STUN/TURN).

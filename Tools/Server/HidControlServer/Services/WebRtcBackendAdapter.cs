@@ -74,9 +74,12 @@ public sealed class WebRtcBackendAdapter : IWebRtcBackend
         int? imageQuality = null,
         string? captureInput = null,
         string? encoder = null,
-        string? codec = null)
+        string? codec = null,
+        bool? audioEnabled = null,
+        string? audioInput = null,
+        int? audioBitrateKbps = null)
         => IsVideoRoom(room)
-            ? _videoSup.EnsureStarted(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec)
+            ? _videoSup.EnsureStarted(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps)
             : _controlSup.EnsureStarted(room);
 
     /// <inheritdoc />

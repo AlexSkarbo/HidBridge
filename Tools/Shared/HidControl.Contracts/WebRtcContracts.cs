@@ -67,7 +67,23 @@ public sealed record WebRtcCreateRoomRequest(string? Room);
 /// <param name="CaptureInput">Optional capture input string (for example: video=USB3.0 Video).</param>
 /// <param name="Encoder">Optional encoder selection (for example: auto, cpu, hw).</param>
 /// <param name="Codec">Optional codec selection (for example: auto, vp8, h264).</param>
-public sealed record WebRtcCreateVideoRoomRequest(string? Room, string? QualityPreset, int? BitrateKbps, int? Fps, int? ImageQuality, string? CaptureInput, string? Encoder, string? Codec);
+/// <param name="AudioEnabled">Optional audio enable flag.</param>
+/// <param name="AudioInput">Optional audio input string (for example: audio=Microphone (USB Audio Device)).</param>
+/// <param name="AudioBitrateKbps">Optional audio bitrate (kbps).</param>
+/// <param name="StreamProfile">Optional stream profile name used as base before overrides.</param>
+public sealed record WebRtcCreateVideoRoomRequest(
+    string? Room,
+    string? QualityPreset,
+    int? BitrateKbps,
+    int? Fps,
+    int? ImageQuality,
+    string? CaptureInput,
+    string? Encoder,
+    string? Codec,
+    bool? AudioEnabled,
+    string? AudioInput,
+    int? AudioBitrateKbps,
+    string? StreamProfile = null);
 
 /// <summary>
 /// Create room response.
