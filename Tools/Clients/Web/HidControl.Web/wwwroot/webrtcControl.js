@@ -56,6 +56,7 @@
     const iceServers = normalizeIceServers(opts.iceServers);
     const iceTransportPolicy = (opts.iceTransportPolicy === "relay") ? "relay" : "all";
     const receiveVideo = opts.receiveVideo === true;
+    const receiveAudio = opts.receiveAudio === true;
     const joinTimeoutMs = (typeof opts.joinTimeoutMs === "number" && Number.isFinite(opts.joinTimeoutMs)) ? opts.joinTimeoutMs : 250;
     const onLog = typeof opts.onLog === "function" ? opts.onLog : defaultLogger;
     const onStatus = typeof opts.onStatus === "function" ? opts.onStatus : defaultLogger;
@@ -268,6 +269,13 @@
           log("pc.addTransceiver_error", String(e));
         }
       }
+      if (receiveAudio) {
+        try {
+          pc.addTransceiver("audio", { direction: "recvonly" });
+        } catch (e) {
+          log("pc.addTransceiver_error", String(e));
+        }
+      }
       return pc;
     }
 
@@ -388,12 +396,21 @@
 
       // Compatibility fallback: some browsers behave better with explicit offerToReceiveVideo
       // even when we already added a recvonly transceiver.
-      const offerOptions = receiveVideo ? { offerToReceiveVideo: true } : undefined;
+      const offerOptions = (receiveVideo || receiveAudio)
+        ? {
+            offerToReceiveVideo: !!receiveVideo,
+            offerToReceiveAudio: !!receiveAudio
+          }
+        : undefined;
       const offer = offerOptions ? await p.createOffer(offerOptions) : await p.createOffer();
       await p.setLocalDescription(offer);
       if (receiveVideo && p.localDescription && typeof p.localDescription.sdp === "string") {
         const hasVideoMline = /\nm=video\s/.test("\n" + p.localDescription.sdp);
         log("pc.offer.video", { hasVideoMline });
+      }
+      if (receiveAudio && p.localDescription && typeof p.localDescription.sdp === "string") {
+        const hasAudioMline = /\nm=audio\s/.test("\n" + p.localDescription.sdp);
+        log("pc.offer.audio", { hasAudioMline });
       }
       await wsSend({ type: "signal", room, data: { kind: "offer", sdp: { type: p.localDescription.type, sdp: p.localDescription.sdp } } });
       setStatus("calling...");
