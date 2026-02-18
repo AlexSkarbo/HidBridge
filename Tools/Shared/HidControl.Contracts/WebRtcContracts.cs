@@ -93,7 +93,8 @@ public sealed record WebRtcCreateVideoRoomRequest(
 /// <param name="Started">True if helper was started by this call.</param>
 /// <param name="Pid">Helper pid if known.</param>
 /// <param name="Error">Error code if failed.</param>
-public sealed record WebRtcCreateRoomResponse(bool Ok, string? Room, bool Started, int? Pid, string? Error);
+/// <param name="StreamProfile">Resolved stream profile name used for start (video rooms only).</param>
+public sealed record WebRtcCreateRoomResponse(bool Ok, string? Room, bool Started, int? Pid, string? Error, string? StreamProfile = null);
 
 /// <summary>
 /// Delete room response.

@@ -59,7 +59,7 @@ public static class WebRtcStatusEndpoints
         {
             string? roomId = await ReadRequestedRoomIdAsync(req, ct);
             var res = await uc.Execute(roomId, ct);
-            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error });
+            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
         });
 
         app.MapDelete("/status/webrtc/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
@@ -92,7 +92,7 @@ public static class WebRtcStatusEndpoints
         {
             (_, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
             var res = await uc.Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
-            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, started = res.Started, pid = res.Pid, error = res.Error });
+            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
         });
 
         app.MapGet("/status/webrtc/video/rooms/{room}/profile", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>

@@ -1,8 +1,11 @@
 using HidControl.Application.Abstractions;
 using HidControl.Application.UseCases.WebRtc;
+using HidControl.Contracts;
 using HidControl.UseCases.Video;
 using HidControl.Infrastructure.Services;
+using HidControl.UseCases;
 using HidControlServer;
+using HidControlServer.Adapters.Application;
 using HidControlServer.Services;
 using Xunit;
 
@@ -315,6 +318,38 @@ public sealed class WebRtcIntegrationTests
 
         Assert.True(res.Ok);
         Assert.Equal("high", backend.LastQualityPreset);
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_WithExistingStreamProfile_ReturnsResolvedStreamProfile()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var profileStore = new VideoProfileStore(
+            new[]
+            {
+                new VideoProfileConfig("custom-prof", "-c:v libx264 -preset veryfast -b:v 2200k", "custom")
+            },
+            "custom-prof");
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds, new VideoProfileStoreAdapter(profileStore));
+
+        var res = await roomsSvc.CreateVideoAsync("hb-v-50443405-demo", null, null, null, null, null, null, null, null, null, null, "custom-prof", CancellationToken.None);
+
+        Assert.True(res.Ok);
+        Assert.Equal("custom-prof", res.StreamProfile);
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_WithMissingStreamProfile_FailsValidation()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds, new VideoProfileStoreAdapter(new VideoProfileStore(Array.Empty<VideoProfileConfig>(), "auto")));
+
+        var res = await roomsSvc.CreateVideoAsync("hb-v-50443405-demo", null, null, null, null, null, null, null, null, null, null, "missing-profile", CancellationToken.None);
+
+        Assert.False(res.Ok);
+        Assert.Equal("profile_not_found", res.Error);
     }
 
     [Fact]

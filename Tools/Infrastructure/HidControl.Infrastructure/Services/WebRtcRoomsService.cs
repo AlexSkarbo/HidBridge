@@ -203,7 +203,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "bad_audio_bitrate_kbps");
         }
 
-        string? effectiveStreamProfile = ResolveRoomStreamProfileForStart(normalizedRoom, streamProfile);
+        string? explicitStreamProfile = NormalizeRoomStreamProfileName(streamProfile);
+        if (!string.IsNullOrWhiteSpace(explicitStreamProfile) && ResolveExistingStreamProfileName(explicitStreamProfile) is null)
+        {
+            return new WebRtcRoomRestartResult(false, normalizedRoom, false, false, null, "profile_not_found");
+        }
+
+        string? effectiveStreamProfile = ResolveExistingStreamProfileName(ResolveRoomStreamProfileForStart(normalizedRoom, streamProfile));
 
         ResolveEffectiveVideoSettings(
             effectiveStreamProfile,
@@ -249,19 +255,19 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             bool hasPeers = peers.TryGetValue(normalizedRoom, out int peerCount) && peerCount > 0;
             if (hasHelper || hasPeers)
             {
-                return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, false, null, stop.error);
+                return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, false, null, stop.error, effectiveStreamProfile);
             }
         }
 
         var start = _backend.EnsureHelperStarted(normalizedRoom, normalizedPreset, normalizedBitrate, normalizedFps, normalizedImageQuality, normalizedCaptureInput, normalizedEncoder, normalizedCodec, normalizedAudioEnabled, normalizedAudioInput, normalizedAudioBitrate);
         if (!start.ok)
         {
-            return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, start.started, start.pid, start.error);
+            return new WebRtcRoomRestartResult(false, normalizedRoom, stop.stopped, start.started, start.pid, start.error, effectiveStreamProfile);
         }
 
-        RememberRoomStreamProfile(normalizedRoom, streamProfile);
+        RememberRoomStreamProfile(normalizedRoom, effectiveStreamProfile);
 
-        return new WebRtcRoomRestartResult(true, normalizedRoom, stop.stopped, start.started, start.pid, null);
+        return new WebRtcRoomRestartResult(true, normalizedRoom, stop.stopped, start.started, start.pid, null, effectiveStreamProfile);
         }
         finally
         {
@@ -280,7 +286,13 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             return Task.FromResult(new WebRtcRoomCreateResult(false, roomId, false, null, err ?? "bad_room"));
         }
 
-        string? effectiveStreamProfile = ResolveRoomStreamProfileForStart(normalized, streamProfile);
+        string? explicitStreamProfile = NormalizeRoomStreamProfileName(streamProfile);
+        if (!string.IsNullOrWhiteSpace(explicitStreamProfile) && ResolveExistingStreamProfileName(explicitStreamProfile) is null)
+        {
+            return Task.FromResult(new WebRtcRoomCreateResult(false, normalized, false, null, "profile_not_found"));
+        }
+
+        string? effectiveStreamProfile = ResolveExistingStreamProfileName(ResolveRoomStreamProfileForStart(normalized, streamProfile));
 
         ResolveEffectiveVideoSettings(
             effectiveStreamProfile,
@@ -311,9 +323,9 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
         if (ok)
         {
-            RememberRoomStreamProfile(normalized, streamProfile);
+            RememberRoomStreamProfile(normalized, effectiveStreamProfile);
         }
-        return Task.FromResult(new WebRtcRoomCreateResult(ok, normalized, started, pid, error));
+        return Task.FromResult(new WebRtcRoomCreateResult(ok, normalized, started, pid, error, effectiveStreamProfile));
     }
 
     /// <inheritdoc />
@@ -783,6 +795,19 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
         string normalized = streamProfile.Trim();
         return normalized.Length == 0 ? null : normalized;
+    }
+
+    private string? ResolveExistingStreamProfileName(string? streamProfile)
+    {
+        string? normalized = NormalizeRoomStreamProfileName(streamProfile);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        VideoProfileConfig? profile = _videoProfiles.GetAll()
+            .FirstOrDefault(p => string.Equals(p.Name, normalized, StringComparison.OrdinalIgnoreCase));
+        return profile?.Name;
     }
 
     private string? ResolveRoomStreamProfileForStart(string room, string? streamProfile)

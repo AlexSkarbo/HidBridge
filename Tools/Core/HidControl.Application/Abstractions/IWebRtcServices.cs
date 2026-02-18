@@ -207,7 +207,8 @@ public sealed record WebRtcRoomInfo(string Room, int Peers, bool HasHelper, bool
 /// <param name="Started">True if a helper was started by this call.</param>
 /// <param name="Pid">Helper pid if started/known.</param>
 /// <param name="Error">Error code if failed.</param>
-public sealed record WebRtcRoomCreateResult(bool Ok, string? Room, bool Started, int? Pid, string? Error);
+/// <param name="StreamProfile">Resolved stream profile name used for start (video rooms only).</param>
+public sealed record WebRtcRoomCreateResult(bool Ok, string? Room, bool Started, int? Pid, string? Error, string? StreamProfile = null);
 
 /// <summary>
 /// Result of deleting a room.
@@ -227,7 +228,8 @@ public sealed record WebRtcRoomDeleteResult(bool Ok, string Room, bool Stopped, 
 /// <param name="Started">True if helper was started by this call.</param>
 /// <param name="Pid">Helper pid if started/known.</param>
 /// <param name="Error">Error code if failed.</param>
-public sealed record WebRtcRoomRestartResult(bool Ok, string Room, bool Stopped, bool Started, int? Pid, string? Error);
+/// <param name="StreamProfile">Resolved stream profile name used for restart (video rooms only).</param>
+public sealed record WebRtcRoomRestartResult(bool Ok, string Room, bool Stopped, bool Started, int? Pid, string? Error, string? StreamProfile = null);
 
 /// <summary>
 /// Result of getting/setting a room stream profile binding.
