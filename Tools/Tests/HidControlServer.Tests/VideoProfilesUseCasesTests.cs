@@ -123,4 +123,18 @@ public sealed class VideoProfilesUseCasesTests
         Assert.True(res.Ok);
         Assert.DoesNotContain(res.Profiles, p => string.Equals(p.Name, "custom-z", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void CloneVideoProfileUseCase_ClonesReadonlyBasePresetIntoUserProfile()
+    {
+        var store = CreateStore(out _);
+        var clone = new CloneVideoProfileUseCase(store);
+
+        var res = clone.Execute("low-latency", "custom-from-base");
+
+        Assert.True(res.Ok);
+        var profile = Assert.Single(res.Profiles, p => string.Equals(p.Name, "custom-from-base", StringComparison.OrdinalIgnoreCase));
+        Assert.False(profile.IsReadonly);
+        Assert.False(string.IsNullOrWhiteSpace(profile.Args));
+    }
 }

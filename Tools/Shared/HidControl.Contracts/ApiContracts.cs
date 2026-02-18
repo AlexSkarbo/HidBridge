@@ -201,6 +201,13 @@ public sealed record FfmpegStartRequest(string? SourceId, bool? Restart, bool? M
 public sealed record VideoProfileActiveRequest(string Name);
 
 /// <summary>
+/// API contract for cloning a stream profile.
+/// </summary>
+/// <param name="Source">Source profile name.</param>
+/// <param name="Target">Target profile name.</param>
+public sealed record VideoProfileCloneRequest(string Source, string Target);
+
+/// <summary>
 /// API contract model for VideoOutputRequest.
 /// </summary>
 /// <param name="Mode">Mode.</param>

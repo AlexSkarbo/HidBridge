@@ -110,6 +110,7 @@ public sealed class RestApiIntegrationTests
         builder.Services.AddSingleton<SetActiveVideoProfileUseCase>();
         builder.Services.AddSingleton<UpsertVideoProfileUseCase>();
         builder.Services.AddSingleton<DeleteVideoProfileUseCase>();
+        builder.Services.AddSingleton<CloneVideoProfileUseCase>();
 
         builder.Services.AddSingleton<IWebRtcBackend, FakeBackend>();
         builder.Services.AddSingleton<IWebRtcRoomIdService, FakeRoomIdService>();
@@ -164,5 +165,19 @@ public sealed class RestApiIntegrationTests
         var getJson = await getResp.Content.ReadFromJsonAsync<JsonElement>(ct);
         Assert.True(getJson.GetProperty("ok").GetBoolean());
         Assert.Equal("low-bandwidth", getJson.GetProperty("streamProfile").GetString());
+    }
+
+    [Fact]
+    public async Task VideoProfileClone_RestApi_Works()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (app, client) = await CreateAppAsync();
+        await using var _ = app;
+
+        var cloneResp = await client.PostAsJsonAsync("/video/profiles/clone", new VideoProfileCloneRequest("low-latency", "copy-rest"), ct);
+        cloneResp.EnsureSuccessStatusCode();
+        var cloneJson = await cloneResp.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.True(cloneJson.GetProperty("ok").GetBoolean());
+        Assert.Contains(cloneJson.GetProperty("profiles").EnumerateArray(), p => string.Equals(p.GetProperty("name").GetString(), "copy-rest", StringComparison.OrdinalIgnoreCase));
     }
 }

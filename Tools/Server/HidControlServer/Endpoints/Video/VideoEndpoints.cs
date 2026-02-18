@@ -115,6 +115,18 @@ public static class VideoEndpoints
             });
         });
 
+        group.MapPost("/profiles/clone", (VideoProfileCloneRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CloneVideoProfileUseCase useCase) =>
+        {
+            var result = useCase.Execute(req.Source, req.Target);
+            return Results.Ok(new
+            {
+                ok = result.Ok,
+                error = result.Error,
+                active = result.Active,
+                profiles = result.Profiles
+            });
+        });
+
         group.MapPost("/profiles/active", (string? name, VideoProfileActiveRequest? req, [Microsoft.AspNetCore.Mvc.FromServices] SetActiveVideoProfileUseCase useCase, [Microsoft.AspNetCore.Mvc.FromServices] AppState appState) =>
         {
             string? target = name ?? req?.Name;
