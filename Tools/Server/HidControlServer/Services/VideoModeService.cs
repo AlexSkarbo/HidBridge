@@ -18,6 +18,16 @@ internal static class VideoModeService
     }
 
     /// <summary>
+    /// Lists DirectShow audio devices.
+    /// </summary>
+    /// <param name="ffmpegPath">FFmpeg path.</param>
+    /// <returns>Device list.</returns>
+    public static IReadOnlyList<VideoDshowDevice> ListDshowAudioDevices(string ffmpegPath)
+    {
+        return InfraVideoModeService.ListDshowAudioDevices(ffmpegPath);
+    }
+
+    /// <summary>
     /// Lists DirectShow capture modes for a device.
     /// </summary>
     /// <param name="ffmpegPath">FFmpeg path.</param>

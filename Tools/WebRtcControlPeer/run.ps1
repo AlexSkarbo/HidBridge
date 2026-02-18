@@ -7,6 +7,13 @@ param(
 if ([string]::IsNullOrWhiteSpace($ServerUrl)) { $ServerUrl = "http://127.0.0.1:8080" }
 if ([string]::IsNullOrWhiteSpace($Room)) { $Room = "control" }
 
+# Keep helper console/log output in UTF-8.
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+$OutputEncoding = $utf8NoBom
+try { chcp 65001 > $null } catch {}
+
 $env:HIDBRIDGE_SERVER_URL = $ServerUrl
 $env:HIDBRIDGE_TOKEN = $Token
 $env:HIDBRIDGE_WEBRTC_ROOM = $Room

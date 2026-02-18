@@ -37,7 +37,14 @@ public sealed class VideoInputTests
     {
         var src = new VideoSourceConfig("cam", "uvc", "win:USB\\VID_1234", "USB3.0 Video", true);
         string? input = BuildFfmpegInput(src);
-        Assert.Equal("-f dshow -i video=\"USB3.0 Video\"", input);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("-f dshow -i video=\"USB3.0 Video\"", input);
+        }
+        else
+        {
+            Assert.Null(input);
+        }
     }
 
     [Fact]
@@ -48,7 +55,14 @@ public sealed class VideoInputTests
     {
         var src = new VideoSourceConfig("cam", "uvc", "win:USB\\VID_1234", null, true);
         string? input = BuildFfmpegInput(src);
-        Assert.Equal("-f dshow -i video=\"USB\\VID_1234\"", input);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("-f dshow -i video=\"USB\\VID_1234\"", input);
+        }
+        else
+        {
+            Assert.Null(input);
+        }
     }
 
     [Fact]

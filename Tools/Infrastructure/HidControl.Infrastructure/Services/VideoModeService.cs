@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using HidControl.Contracts;
 
@@ -27,6 +28,8 @@ public static class VideoModeService
             Arguments = "-list_devices true -f dshow -i dummy",
             RedirectStandardError = true,
             RedirectStandardOutput = true,
+            StandardErrorEncoding = Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -44,18 +47,22 @@ public static class VideoModeService
         foreach (string rawLine in stderr.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
         {
             string line = rawLine.Trim();
-            if (line.Contains("DirectShow video devices", StringComparison.OrdinalIgnoreCase))
+            if (line.Contains("DirectShow video devices", StringComparison.OrdinalIgnoreCase) || line.Contains(" video devices", StringComparison.OrdinalIgnoreCase))
             {
                 inVideo = true;
                 continue;
             }
-            if (line.Contains("DirectShow audio devices", StringComparison.OrdinalIgnoreCase))
+            if (line.Contains("DirectShow audio devices", StringComparison.OrdinalIgnoreCase) || line.Contains(" audio devices", StringComparison.OrdinalIgnoreCase))
             {
                 inVideo = false;
                 continue;
             }
-            if (line.Contains("Alternative name", StringComparison.OrdinalIgnoreCase))
+            if (line.Contains("Alternative name", StringComparison.OrdinalIgnoreCase) || line.Contains("@device_pnp_", StringComparison.OrdinalIgnoreCase))
             {
+                if (!inVideo)
+                {
+                    continue;
+                }
                 int altFirstQuote = line.IndexOf('"');
                 int altLastQuote = line.LastIndexOf('"');
                 if (altFirstQuote < 0 || altLastQuote <= altFirstQuote)
@@ -94,6 +101,98 @@ public static class VideoModeService
     }
 
     /// <summary>
+    /// Lists DirectShow audio devices.
+    /// </summary>
+    /// <param name="ffmpegPath">FFmpeg path.</param>
+    /// <returns>Device list.</returns>
+    public static IReadOnlyList<VideoDshowDevice> ListDshowAudioDevices(string ffmpegPath)
+    {
+        var devices = new List<VideoDshowDevice>();
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            Arguments = "-list_devices true -f dshow -i dummy",
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            StandardErrorEncoding = Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = Process.Start(psi);
+        if (proc is null)
+        {
+            throw new InvalidOperationException("ffmpeg_start_failed");
+        }
+
+        string stderr = proc.StandardError.ReadToEnd();
+        proc.WaitForExit(5000);
+
+        bool inAudio = false;
+        int lastIndex = -1;
+        foreach (string rawLine in stderr.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string line = rawLine.Trim();
+            if (line.Contains("DirectShow audio devices", StringComparison.OrdinalIgnoreCase) || line.Contains(" audio devices", StringComparison.OrdinalIgnoreCase))
+            {
+                inAudio = true;
+                continue;
+            }
+            if (line.Contains("DirectShow video devices", StringComparison.OrdinalIgnoreCase) || line.Contains(" video devices", StringComparison.OrdinalIgnoreCase))
+            {
+                inAudio = false;
+                continue;
+            }
+            if (line.Contains("Alternative name", StringComparison.OrdinalIgnoreCase) || line.Contains("@device_cm_", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!inAudio)
+                {
+                    continue;
+                }
+                int altFirstQuote = line.IndexOf('"');
+                int altLastQuote = line.LastIndexOf('"');
+                if (altFirstQuote < 0 || altLastQuote <= altFirstQuote)
+                {
+                    Match altMatch = Regex.Match(line, @"@device_cm_[^""\r\n]+", RegexOptions.IgnoreCase);
+                    if (altMatch.Success && lastIndex >= 0)
+                    {
+                        VideoDshowDevice current = devices[lastIndex];
+                        devices[lastIndex] = current with { AlternativeName = altMatch.Value };
+                    }
+                    continue;
+                }
+                string value = line.Substring(altFirstQuote + 1, altLastQuote - altFirstQuote - 1);
+                if (lastIndex >= 0)
+                {
+                    VideoDshowDevice current = devices[lastIndex];
+                    devices[lastIndex] = current with { AlternativeName = value };
+                }
+                continue;
+            }
+            bool isAudioLine = line.Contains("(audio)", StringComparison.OrdinalIgnoreCase) || inAudio;
+            if (!isAudioLine)
+            {
+                continue;
+            }
+            int firstQuote = line.IndexOf('"');
+            int lastQuote = line.LastIndexOf('"');
+            if (firstQuote < 0 || lastQuote <= firstQuote)
+            {
+                continue;
+            }
+            string name = line.Substring(firstQuote + 1, lastQuote - firstQuote - 1);
+            if (!line.Contains("(audio)", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            devices.Add(new VideoDshowDevice(name, null));
+            lastIndex = devices.Count - 1;
+        }
+
+        return devices;
+    }
+
+    /// <summary>
     /// Lists DirectShow capture modes for a device.
     /// </summary>
     /// <param name="ffmpegPath">FFmpeg path.</param>
@@ -108,6 +207,8 @@ public static class VideoModeService
             Arguments = $"-list_options true -f dshow -i video=\"{deviceName}\"",
             RedirectStandardError = true,
             RedirectStandardOutput = true,
+            StandardErrorEncoding = Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };

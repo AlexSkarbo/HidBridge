@@ -237,3 +237,37 @@ func argValue(args []string, key string) string {
 	}
 	return ""
 }
+
+func TestBuildAudioPipelineArgs_CaptureRequiresInput(t *testing.T) {
+	_, err := buildAudioPipelineArgs("capture", "", 64, "")
+	if err == nil {
+		t.Fatalf("expected error when capture audio input is empty")
+	}
+}
+
+func TestBuildAudioPipelineArgs_CapturePrefixesAudioSelector(t *testing.T) {
+	t.Setenv("HIDBRIDGE_VIDEO_AUDIO_COMBINED_DSHOW", "false")
+	args, err := buildAudioPipelineArgs("capture", "@device_cm_{TEST}\\wave_{TEST}", 64, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := argValue(args, "-i"); got != "audio=@device_cm_{TEST}\\wave_{TEST}" {
+		t.Fatalf("expected audio selector, got=%q", got)
+	}
+	if got := argValue(args, "-c:a"); got != "libopus" {
+		t.Fatalf("expected libopus, got=%q", got)
+	}
+}
+
+func TestBuildAudioPipelineArgs_TestsrcUsesSine(t *testing.T) {
+	args, err := buildAudioPipelineArgs("testsrc", "", 64, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := argValue(args, "-f"); got != "lavfi" {
+		t.Fatalf("expected lavfi input, got=%q", got)
+	}
+	if got := argValue(args, "-c:a"); got != "libopus" {
+		t.Fatalf("expected libopus, got=%q", got)
+	}
+}

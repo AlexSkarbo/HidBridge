@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,6 +78,10 @@ func main() {
 		fps          = flag.Int("fps", envIntInRange("HIDBRIDGE_VIDEO_FPS", 30, 5, 60), "Target frame rate")
 		ffmpegArgs   = flag.String("ffmpeg-args", envOr("HIDBRIDGE_VIDEO_FFMPEG_ARGS", ""), "Optional FFmpeg pipeline args (overrides built-in mode pipeline)")
 		captureInput = flag.String("capture-input", envOr("HIDBRIDGE_VIDEO_CAPTURE_INPUT", ""), "Optional capture input args (used in capture mode)")
+		audioEnabled = flag.Bool("audio-enabled", envBool("HIDBRIDGE_VIDEO_AUDIO_ENABLED", false), "Enable audio track publishing")
+		audioInput   = flag.String("audio-input", envOr("HIDBRIDGE_VIDEO_AUDIO_INPUT", ""), "Optional audio capture input (e.g. audio=Microphone)")
+		audioBitrate = flag.Int("audio-bitrate-kbps", envIntInRange("HIDBRIDGE_VIDEO_AUDIO_BITRATE_KBPS", 64, 16, 256), "Audio target bitrate in kbps (Opus)")
+		audioArgs    = flag.String("audio-ffmpeg-args", envOr("HIDBRIDGE_VIDEO_AUDIO_FFMPEG_ARGS", ""), "Optional audio FFmpeg args (overrides built-in audio pipeline)")
 	)
 	flag.Parse()
 
@@ -93,14 +99,14 @@ func main() {
 	if *imageQuality >= 1 && *imageQuality <= 100 {
 		imageQualityText = strconv.Itoa(*imageQuality)
 	}
-	log.Printf("server=%s room=%s stun=%s sourceMode=%s qualityPreset=%s imageQuality=%s encoder=%s codec=%s bitrateKbps=%d fps=%d", base.String(), *room, *stun, mode, preset, imageQualityText, encoder, codec, *bitrateKbps, *fps)
+	log.Printf("server=%s room=%s stun=%s sourceMode=%s qualityPreset=%s imageQuality=%s encoder=%s codec=%s bitrateKbps=%d fps=%d audioEnabled=%v audioBitrateKbps=%d", base.String(), *room, *stun, mode, preset, imageQualityText, encoder, codec, *bitrateKbps, *fps, *audioEnabled, *audioBitrate)
 	cleanupPidFile := registerHelperPidFile()
 	defer cleanupPidFile()
 
 	// Long-running loop: reconnect on transport failures instead of exiting.
 	backoff := 1 * time.Second
 	for {
-		err := runSession(base, *token, *room, *stun, mode, preset, normalizeImageQuality(*imageQuality), encoder, codec, *bitrateKbps, *fps, *ffmpegArgs, *captureInput)
+		err := runSession(base, *token, *room, *stun, mode, preset, normalizeImageQuality(*imageQuality), encoder, codec, *bitrateKbps, *fps, *ffmpegArgs, *captureInput, *audioEnabled, *audioInput, *audioBitrate, *audioArgs)
 		if err != nil {
 			log.Printf("session ended: %v", err)
 		} else {
@@ -113,7 +119,7 @@ func main() {
 	}
 }
 
-func runSession(base *url.URL, token string, room string, stun string, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, ffmpegArgs string, captureInput string) error {
+func runSession(base *url.URL, token string, room string, stun string, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, ffmpegArgs string, captureInput string, audioEnabled bool, audioInput string, audioBitrateKbps int, audioFFmpegArgs string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -127,7 +133,7 @@ func runSession(base *url.URL, token string, room string, stun string, sourceMod
 		return fmt.Errorf("join room: %w", err)
 	}
 
-	peer := newPeerState(stun, room, sourceMode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, ffmpegArgs, captureInput, sigWS)
+	peer := newPeerState(stun, room, sourceMode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, ffmpegArgs, captureInput, audioEnabled, audioInput, audioBitrateKbps, audioFFmpegArgs, sigWS)
 	for {
 		_, b, err := sigWS.ReadMessage()
 		if err != nil {
@@ -168,6 +174,10 @@ type peerState struct {
 	fps          int
 	ffmpegArgs   string
 	captureInput string
+	audioEnabled bool
+	audioInput   string
+	audioBitrateKbps int
+	audioFFmpegArgs  string
 
 	pcMu         sync.Mutex
 	pc           *webrtc.PeerConnection
@@ -181,7 +191,7 @@ type peerState struct {
 	pendingNotice string
 }
 
-func newPeerState(stun, room, sourceMode, qualityPreset string, imageQuality int, encoderMode, codecMode string, bitrateKbps int, fps int, ffmpegArgs, captureInput string, sigWS *websocket.Conn) *peerState {
+func newPeerState(stun, room, sourceMode, qualityPreset string, imageQuality int, encoderMode, codecMode string, bitrateKbps int, fps int, ffmpegArgs, captureInput string, audioEnabled bool, audioInput string, audioBitrateKbps int, audioFFmpegArgs string, sigWS *websocket.Conn) *peerState {
 	return &peerState{
 		room:         room,
 		sigWS:        sigWS,
@@ -195,6 +205,10 @@ func newPeerState(stun, room, sourceMode, qualityPreset string, imageQuality int
 		fps:          clamp(fps, 5, 60),
 		ffmpegArgs:   ffmpegArgs,
 		captureInput: captureInput,
+		audioEnabled: audioEnabled,
+		audioInput: strings.TrimSpace(audioInput),
+		audioBitrateKbps: clamp(audioBitrateKbps, 16, 256),
+		audioFFmpegArgs: strings.TrimSpace(audioFFmpegArgs),
 		pc:           nil,
 		activePeerId: "",
 	}
@@ -242,11 +256,71 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	p.streamCancel = streamCancel
-	go func() {
-		if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.imageQuality, p.encoderMode, p.codecMode, p.bitrateKbps, p.fps, p.ffmpegArgs, p.captureInput, p.notifyVideoStatus); err != nil && streamCtx.Err() == nil {
-			log.Printf("video stream ended: %v", err)
+
+	var audioTrackRef *webrtc.TrackLocalStaticRTP
+	if p.audioEnabled {
+		audioTrack, audioErr := webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2},
+			"audio",
+			"hidbridge",
+		)
+		if audioErr != nil {
+			log.Printf("audio track init failed: %v", audioErr)
+		} else {
+			audioSender, addErr := pc.AddTrack(audioTrack)
+			if addErr != nil {
+				log.Printf("audio track add failed: %v", addErr)
+			} else {
+				go func() {
+					rtcpBuf := make([]byte, 1500)
+					for {
+						if _, _, readErr := audioSender.Read(rtcpBuf); readErr != nil {
+							return
+						}
+					}
+				}()
+				audioTrackRef = audioTrack
+			}
 		}
-	}()
+	}
+
+	useCombinedAV := audioTrackRef != nil && runtime.GOOS == "windows" && normalizeSourceMode(p.sourceMode) == "capture" &&
+		strings.EqualFold(strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_COMBINED_DSHOW", "true")), "true")
+
+	if useCombinedAV {
+		go func() {
+			if err := runCombinedCaptureAVStream(
+				streamCtx,
+				videoTrack,
+				audioTrackRef,
+				p.qualityPreset,
+				p.imageQuality,
+				p.encoderMode,
+				p.codecMode,
+				p.bitrateKbps,
+				p.fps,
+				p.captureInput,
+				p.audioInput,
+				p.audioBitrateKbps,
+				p.notifyVideoStatus,
+			); err != nil && streamCtx.Err() == nil {
+				log.Printf("combined av stream ended: %v", err)
+			}
+		}()
+	} else {
+		if audioTrackRef != nil {
+			go func() {
+				if err := runAudioStream(streamCtx, audioTrackRef, p.sourceMode, p.audioInput, p.audioBitrateKbps, p.audioFFmpegArgs, p.notifyVideoStatus); err != nil && streamCtx.Err() == nil {
+					log.Printf("audio stream ended: %v", err)
+				}
+			}()
+		}
+		go func() {
+			if err := runVideoStream(streamCtx, videoTrack, p.sourceMode, p.qualityPreset, p.imageQuality, p.encoderMode, p.codecMode, p.bitrateKbps, p.fps, p.ffmpegArgs, p.captureInput, p.notifyVideoStatus); err != nil && streamCtx.Err() == nil {
+				log.Printf("video stream ended: %v", err)
+			}
+		}()
+	}
 
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
@@ -391,6 +465,9 @@ func (p *peerState) notifyVideoStatus(event string, mode string, detail string, 
 		"qualityPreset": p.qualityPreset,
 		"bitrateKbps":   p.bitrateKbps,
 		"targetFps":     p.fps,
+		"audioEnabled":  p.audioEnabled,
+		"audioInput":    p.audioInput,
+		"audioBitrateKbps": p.audioBitrateKbps,
 	}
 	if strings.TrimSpace(detail) != "" {
 		payload["detail"] = detail
@@ -843,6 +920,673 @@ func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sour
 	}
 }
 
+func runAudioStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, rawAudioInput string, audioBitrateKbps int, rawAudioFFmpegArgs string, onStatus func(event string, mode string, detail string, extra map[string]any)) error {
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		return fmt.Errorf("audio listen udp: %w", err)
+	}
+	defer conn.Close()
+
+	ffmpegPath := envOr("HIDBRIDGE_FFMPEG", "ffmpeg")
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	outURL := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=1200", port)
+	mode := normalizeSourceMode(sourceMode)
+	args := []string{"-hide_banner", "-loglevel", "warning"}
+	if mode == "testsrc" {
+		args = append(args, "-re")
+	}
+	inputArgs, buildErr := buildAudioPipelineArgs(mode, rawAudioInput, clamp(audioBitrateKbps, 16, 256), rawAudioFFmpegArgs)
+	if buildErr != nil {
+		return buildErr
+	}
+	args = append(args, inputArgs...)
+	args = append(args, "-f", "rtp", "-payload_type", "111", outURL)
+
+	log.Printf("audio pipeline mode=%s ffmpeg=%s", mode, ffmpegPath)
+	log.Printf("audio ffmpeg args: %s", strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start audio ffmpeg (%s): %w", ffmpegPath, err)
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	if onStatus != nil {
+		onStatus("audio_pipeline_started", mode, "", map[string]any{
+			"audioBitrateKbps": audioBitrateKbps,
+		})
+	}
+
+	buf := make([]byte, 2048)
+	lastStatsAt := time.Now()
+	var bytesSinceStats int64
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ffErr := <-waitCh:
+			if ctx.Err() != nil {
+				return nil
+			}
+			if ffErr != nil {
+				return fmt.Errorf("audio ffmpeg exited: %w", ffErr)
+			}
+			return fmt.Errorf("audio ffmpeg exited")
+		default:
+		}
+
+		_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, _, readErr := conn.ReadFromUDP(buf)
+		if readErr != nil {
+			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("audio udp read: %w", readErr)
+		}
+
+		var pkt rtp.Packet
+		if err := pkt.Unmarshal(buf[:n]); err != nil {
+			continue
+		}
+		if err := track.WriteRTP(&pkt); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("audio track write: %w", err)
+		}
+		bytesSinceStats += int64(n)
+		now := time.Now()
+		if onStatus != nil && now.Sub(lastStatsAt) >= 2*time.Second {
+			elapsedSec := now.Sub(lastStatsAt).Seconds()
+			if elapsedSec <= 0 {
+				elapsedSec = 1
+			}
+			measuredKbps := int(float64(bytesSinceStats*8) / 1000.0 / elapsedSec)
+			onStatus("audio_stats", mode, "", map[string]any{
+				"audioMeasuredKbps": measuredKbps,
+				"audioBitrateKbps": audioBitrateKbps,
+			})
+			lastStatsAt = now
+			bytesSinceStats = 0
+		}
+	}
+}
+
+func runCombinedCaptureAVStream(
+	ctx context.Context,
+	videoTrack *webrtc.TrackLocalStaticRTP,
+	audioTrack *webrtc.TrackLocalStaticRTP,
+	qualityPreset string,
+	imageQuality int,
+	encoderMode string,
+	codecMode string,
+	bitrateKbps int,
+	fps int,
+	rawCaptureInput string,
+	rawAudioInput string,
+	audioBitrateKbps int,
+	onStatus func(event string, mode string, detail string, extra map[string]any),
+) error {
+	videoConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		return fmt.Errorf("combined video listen udp: %w", err)
+	}
+	defer videoConn.Close()
+	audioConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		return fmt.Errorf("combined audio listen udp: %w", err)
+	}
+	defer audioConn.Close()
+
+	ffmpegPath := envOr("HIDBRIDGE_FFMPEG", "ffmpeg")
+	videoPort := videoConn.LocalAddr().(*net.UDPAddr).Port
+	audioPort := audioConn.LocalAddr().(*net.UDPAddr).Port
+	videoOutURL := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=1200", videoPort)
+	audioOutURL := fmt.Sprintf("rtp://127.0.0.1:%d?pkt_size=1200", audioPort)
+
+	videoInput, videoErr := resolveDshowVideoSelector(rawCaptureInput)
+	if videoErr != nil {
+		return fmt.Errorf("resolve dshow video input: %w", videoErr)
+	}
+	audioSelector := strings.TrimSpace(rawAudioInput)
+	if audioSelector == "" {
+		return fmt.Errorf("audio capture input is empty")
+	}
+	if !strings.Contains(strings.ToLower(audioSelector), "audio=") {
+		audioSelector = "audio=" + audioSelector
+	}
+	audioSelector = normalizeDshowMediaSelector(audioSelector, "audio=")
+	audioResolved, audioErr := resolveDshowAudioInput(ffmpegPath, audioSelector)
+	if audioErr != nil {
+		return fmt.Errorf("resolve dshow audio input: %w", audioErr)
+	}
+	log.Printf("audio input selector resolved: raw=%q resolved=%q", audioSelector, audioResolved)
+	runAudioProbeCaptureWav(ffmpegPath, audioResolved)
+	combinedSelector := buildCombinedDshowSelector(videoInput, strings.TrimSpace(rawAudioInput), audioResolved)
+	log.Printf("combined av dshow selector: %q", combinedSelector)
+
+	pipelineFps := effectiveCaptureFps(fps, normalizeEncoderMode(encoderMode))
+	videoArgs := defaultEncoderArgs(qualityPreset, normalizeImageQuality(imageQuality), normalizeEncoderMode(encoderMode), normalizeCodecMode(codecMode), bitrateKbps, pipelineFps)
+	debugTone := audioDebugToneEnabled()
+	toneFreq := clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_DEBUG_TONE_HZ", 1000, 100, 5000), 100, 5000)
+	audioMap := "0:a"
+	args := []string{
+		"-hide_banner", "-loglevel", "warning",
+		"-f", "dshow",
+		"-audio_pin_name", audioPinNameArg(),
+		"-sample_rate", strconv.Itoa(audioInputRateArg()),
+		"-channels", strconv.Itoa(audioInputChannelsArg()),
+		"-framerate", strconv.Itoa(clamp(pipelineFps, 5, 60)),
+		"-rtbufsize", captureRtbufsizeForPreset(qualityPreset),
+		"-i", combinedSelector,
+	}
+	if debugTone {
+		args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:sample_rate=48000", toneFreq))
+		audioMap = "1:a"
+	}
+	args = append(args, "-map", "0:v")
+	args = append(args, videoArgs...)
+	args = append(args,
+		"-f", "rtp", "-payload_type", "96", videoOutURL,
+		"-map", audioMap,
+		"-vn",
+		"-ac", "2",
+		"-ar", "48000",
+		"-af", audioFilterArg(),
+		"-c:a", "libopus",
+		"-application", "lowdelay",
+		"-frame_duration", "20",
+		"-b:a", fmt.Sprintf("%dk", clamp(audioBitrateKbps, 16, 256)),
+		"-f", "rtp", "-payload_type", "111", audioOutURL,
+	)
+	if debugTone {
+		log.Printf("audio debug tone enabled: hz=%d", toneFreq)
+	}
+
+	log.Printf("combined av pipeline ffmpeg=%s", ffmpegPath)
+	log.Printf("combined av ffmpeg args: %s", strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start combined av ffmpeg (%s): %w", ffmpegPath, err)
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	if onStatus != nil {
+		onStatus("pipeline_started", "capture", "", map[string]any{"bitrateKbps": bitrateKbps})
+		onStatus("audio_pipeline_started", "capture", "", map[string]any{"audioBitrateKbps": audioBitrateKbps})
+	}
+
+	errCh := make(chan error, 2)
+	go readRtpToTrack(ctx, videoConn, videoTrack, "video", errCh)
+	go readRtpToTrack(ctx, audioConn, audioTrack, "audio", errCh)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ffErr := <-waitCh:
+			if ctx.Err() != nil {
+				return nil
+			}
+			if ffErr != nil {
+				return fmt.Errorf("combined av ffmpeg exited: %w", ffErr)
+			}
+			return fmt.Errorf("combined av ffmpeg exited")
+		case rtpErr := <-errCh:
+			if rtpErr != nil && ctx.Err() == nil {
+				return rtpErr
+			}
+		}
+	}
+}
+
+func readRtpToTrack(ctx context.Context, conn *net.UDPConn, track *webrtc.TrackLocalStaticRTP, kind string, errCh chan<- error) {
+	buf := make([]byte, 65535)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			errCh <- fmt.Errorf("%s udp read: %w", kind, err)
+			return
+		}
+		var pkt rtp.Packet
+		if err := pkt.Unmarshal(buf[:n]); err != nil {
+			continue
+		}
+		if err := track.WriteRTP(&pkt); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			errCh <- fmt.Errorf("%s track write: %w", kind, err)
+			return
+		}
+	}
+}
+
+func buildAudioPipelineArgs(sourceMode string, rawAudioInput string, bitrateKbps int, rawAudioFFmpegArgs string) ([]string, error) {
+	customArgs := strings.TrimSpace(rawAudioFFmpegArgs)
+	if customArgs != "" {
+		parsed, err := splitCommandLine(customArgs)
+		if err != nil {
+			return nil, fmt.Errorf("parse HIDBRIDGE_VIDEO_AUDIO_FFMPEG_ARGS: %w", err)
+		}
+		return parsed, nil
+	}
+
+	mode := normalizeSourceMode(sourceMode)
+	if audioDebugToneEnabled() {
+		toneFreq := clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_DEBUG_TONE_HZ", 1000, 100, 5000), 100, 5000)
+		return []string{
+			"-f", "lavfi",
+			"-i", fmt.Sprintf("sine=frequency=%d:sample_rate=48000:duration=36000", toneFreq),
+			"-vn",
+			"-ac", "2",
+			"-ar", "48000",
+			"-af", audioFilterArg(),
+			"-c:a", "libopus",
+			"-application", "lowdelay",
+			"-frame_duration", "20",
+			"-b:a", fmt.Sprintf("%dk", clamp(bitrateKbps, 16, 256)),
+		}, nil
+	}
+	if mode == "capture" {
+		audioInput := strings.TrimSpace(rawAudioInput)
+		if audioInput == "" {
+			return nil, fmt.Errorf("audio capture input is empty (set HIDBRIDGE_VIDEO_AUDIO_INPUT, e.g. audio=Microphone)")
+		}
+		if !strings.Contains(strings.ToLower(audioInput), "audio=") {
+			audioInput = "audio=" + audioInput
+		}
+		if runtime.GOOS == "windows" {
+			audioInput = normalizeDshowMediaSelector(audioInput, "audio=")
+			ffmpegPath := envOr("HIDBRIDGE_FFMPEG", "ffmpeg")
+			resolved, resolveErr := resolveDshowAudioInput(ffmpegPath, audioInput)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("resolve dshow audio input: %w", resolveErr)
+			}
+			log.Printf("audio input selector resolved: raw=%q resolved=%q", audioInput, resolved)
+			audioInput = resolved
+
+			// Optional single DirectShow input for A/V keeps device clocks aligned.
+			// Example: -i "video=...:audio=..."
+			useCombined := strings.EqualFold(strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_COMBINED_DSHOW", "false")), "true")
+			rawVideoInput := strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_CAPTURE_INPUT", ""))
+			if useCombined {
+				videoInput, videoErr := resolveDshowVideoSelector(rawVideoInput)
+				if videoErr != nil {
+					log.Printf("audio combined dshow disabled: %v", videoErr)
+				} else {
+				combinedSelector := buildCombinedDshowSelector(videoInput, strings.TrimSpace(rawAudioInput), audioInput)
+				log.Printf("audio pipeline using combined dshow selector: %q", combinedSelector)
+				return []string{
+					"-f", "dshow",
+					"-i", combinedSelector,
+					"-map", "0:a",
+					"-vn",
+					"-ac", "2",
+					"-ar", "48000",
+					"-af", "volume=6dB",
+					"-c:a", "libopus",
+					"-application", "lowdelay",
+					"-frame_duration", "20",
+					"-b:a", fmt.Sprintf("%dk", clamp(bitrateKbps, 16, 256)),
+				}, nil
+				}
+			}
+		}
+		audioInput = normalizeDshowMediaSelector(audioInput, "audio=")
+		return []string{
+			"-f", "dshow",
+			"-audio_pin_name", audioPinNameArg(),
+			"-sample_rate", strconv.Itoa(audioInputRateArg()),
+			"-channels", strconv.Itoa(audioInputChannelsArg()),
+			"-i", audioInput,
+			"-vn",
+			"-ac", "2",
+			"-ar", "48000",
+			"-af", audioFilterArg(),
+			"-c:a", "libopus",
+			"-application", "lowdelay",
+			"-frame_duration", "20",
+			"-b:a", fmt.Sprintf("%dk", clamp(bitrateKbps, 16, 256)),
+		}, nil
+	}
+
+	// Synthetic source for test mode.
+	return []string{
+		"-f", "lavfi",
+		"-i", "sine=frequency=1000:sample_rate=48000:duration=36000",
+		"-vn",
+		"-ac", "2",
+		"-ar", "48000",
+		"-af", audioFilterArg(),
+		"-c:a", "libopus",
+		"-application", "lowdelay",
+		"-frame_duration", "20",
+		"-b:a", fmt.Sprintf("%dk", clamp(bitrateKbps, 16, 256)),
+	}, nil
+}
+
+func audioFilterArg() string {
+	gainDb := clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_GAIN_DB", 20, 0, 40), 0, 40)
+	// Raise low HDMI/capture-card levels and smooth quiet program material.
+	return fmt.Sprintf("volume=%ddB,dynaudnorm=f=150:g=12", gainDb)
+}
+
+func audioDebugToneEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_DEBUG_TONE", "0")), "1")
+}
+
+func audioPinNameArg() string {
+	v := strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_PIN_NAME", "Capture"))
+	if v == "" {
+		return "Capture"
+	}
+	return v
+}
+
+func audioInputRateArg() int {
+	// MacroSilicon cards commonly expose stable modes at 44.1k/48k; keep 48k default for Opus.
+	return clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_INPUT_RATE", 48000, 8000, 192000), 8000, 192000)
+}
+
+func audioInputChannelsArg() int {
+	return clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_INPUT_CHANNELS", 2, 1, 2), 1, 2)
+}
+
+func resolveDshowVideoSelector(rawVideoInput string) (string, error) {
+	raw := strings.TrimSpace(rawVideoInput)
+	if raw == "" {
+		return "video=USB3.0 Video", nil
+	}
+	parsed, err := splitCommandLine(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse capture input: %w", err)
+	}
+	if len(parsed) == 0 {
+		return "", fmt.Errorf("empty capture input")
+	}
+	parsed = normalizeDshowInputArgs(parsed)
+	for i := 0; i+1 < len(parsed); i++ {
+		if strings.EqualFold(parsed[i], "-i") {
+			sel := strings.TrimSpace(parsed[i+1])
+			if strings.HasPrefix(strings.ToLower(sel), "video=") {
+				return normalizeDshowMediaSelector(sel, "video="), nil
+			}
+		}
+	}
+	// If caller passed plain device name, convert to video selector.
+	if !strings.Contains(raw, "=") {
+		return normalizeDshowMediaSelector("video="+raw, "video="), nil
+	}
+	return "", fmt.Errorf("video selector not found in capture input")
+}
+
+func buildCombinedDshowSelector(videoSelector string, rawAudioInput string, resolvedAudioSelector string) string {
+	// Default to robust selector form.
+	videoPart := strings.TrimSpace(videoSelector)
+	audioPart := strings.TrimSpace(resolvedAudioSelector)
+
+	// Optional friendly-name form (as in ffmpeg docs):
+	// video="Integrated Camera":audio="Microphone name"
+	useFriendly := strings.EqualFold(strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_COMBINED_FRIENDLY", "true")), "true")
+	if !useFriendly {
+		return videoPart + ":" + audioPart
+	}
+
+	videoName := strings.TrimSpace(strings.TrimPrefix(videoPart, "video="))
+	audioRaw := strings.TrimSpace(rawAudioInput)
+	if strings.HasPrefix(strings.ToLower(audioRaw), "audio=") {
+		audioRaw = strings.TrimSpace(audioRaw[len("audio="):])
+	}
+	audioResolved := strings.TrimSpace(strings.TrimPrefix(audioPart, "audio="))
+
+	// Keep moniker path when friendly name is missing/invalid.
+	if videoName == "" {
+		videoName = strings.TrimSpace(strings.TrimPrefix(videoPart, "video="))
+	}
+	if audioRaw == "" || strings.HasPrefix(strings.ToLower(audioRaw), "@device_") {
+		audioRaw = audioResolved
+	}
+
+	// IMPORTANT: this string is passed as a single argv value to ffmpeg via exec.Command.
+	// Shell-style quotes must NOT be embedded here.
+	return fmt.Sprintf("video=%s:audio=%s", strings.TrimSpace(videoName), strings.TrimSpace(audioRaw))
+}
+
+func runAudioProbeCaptureWav(ffmpegPath string, audioSelector string) {
+	if !strings.EqualFold(strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_PROBE_WAV", "1")), "1") {
+		return
+	}
+	secs := clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_PROBE_WAV_SECS", 3, 1, 15), 1, 15)
+	outPath := strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_PROBE_WAV_PATH", ""))
+	if outPath == "" {
+		outPath = filepath.Join(os.TempDir(), fmt.Sprintf("hidbridge_audio_probe_%d.wav", time.Now().Unix()))
+	}
+	args := []string{
+		"-hide_banner", "-loglevel", "warning",
+		"-f", "dshow",
+		"-t", strconv.Itoa(secs),
+		"-i", audioSelector,
+		"-vn",
+		"-ac", "2",
+		"-ar", "48000",
+		"-c:a", "pcm_s16le",
+		"-y", outPath,
+	}
+	log.Printf("audio probe ffmpeg args: %s", strings.Join(args, " "))
+	cmd := exec.Command(ffmpegPath, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("audio probe failed: %v", err)
+	}
+	if len(out) > 0 {
+		log.Printf("audio probe output: %s", strings.TrimSpace(string(out)))
+	}
+	if st, statErr := os.Stat(outPath); statErr == nil {
+		log.Printf("audio probe file: %s bytes=%d", outPath, st.Size())
+	} else {
+		log.Printf("audio probe file missing: %s err=%v", outPath, statErr)
+	}
+}
+
+func resolveDshowAudioInput(ffmpegPath string, inputVal string) (string, error) {
+	lc := strings.ToLower(strings.TrimSpace(inputVal))
+	if !strings.HasPrefix(lc, "audio=") {
+		return inputVal, nil
+	}
+	raw := strings.TrimSpace(inputVal[len("audio="):])
+	if raw == "" || strings.HasPrefix(strings.ToLower(raw), "@device_") {
+		return "audio=" + raw, nil
+	}
+
+	type dshowDev struct {
+		name string
+		alt  string
+	}
+	devs, err := listDshowAudioDevices(ffmpegPath)
+	if err != nil || len(devs) == 0 {
+		// Fallback: parse raw monikers directly, independent of locale strings.
+		monikers := listDshowAudioMonikers(ffmpegPath)
+		if len(monikers) == 1 {
+			return "audio=" + monikers[0], nil
+		}
+		return "", fmt.Errorf("no_resolved_audio_moniker (input=%q devices=%d monikers=%d)", raw, len(devs), len(monikers))
+	}
+
+	matchHint := func(s string) string {
+		open := strings.LastIndex(s, "(")
+		close := strings.LastIndex(s, ")")
+		if open >= 0 && close > open {
+			return strings.TrimSpace(s[open+1 : close])
+		}
+		return ""
+	}
+	for _, d := range devs {
+		if strings.EqualFold(strings.TrimSpace(d.name), raw) && strings.TrimSpace(d.alt) != "" {
+			return "audio=" + strings.TrimSpace(d.alt), nil
+		}
+		if strings.EqualFold(strings.TrimSpace(d.alt), raw) && strings.TrimSpace(d.alt) != "" {
+			return "audio=" + strings.TrimSpace(d.alt), nil
+		}
+	}
+
+	inHint := matchHint(raw)
+	if inHint != "" {
+		hinted := make([]dshowDev, 0, 2)
+		for _, d := range devs {
+			if strings.TrimSpace(d.alt) == "" {
+				continue
+			}
+			dh := matchHint(d.name)
+			if dh == "" {
+				continue
+			}
+			if strings.EqualFold(dh, inHint) ||
+				strings.Contains(strings.ToLower(dh), strings.ToLower(inHint)) ||
+				strings.Contains(strings.ToLower(inHint), strings.ToLower(dh)) {
+				hinted = append(hinted, d)
+			}
+		}
+		if len(hinted) == 1 {
+			return "audio=" + strings.TrimSpace(hinted[0].alt), nil
+		}
+	}
+
+	withAlt := make([]dshowDev, 0, len(devs))
+	for _, d := range devs {
+		if strings.TrimSpace(d.alt) != "" {
+			withAlt = append(withAlt, d)
+		}
+	}
+	if len(withAlt) == 1 {
+		return "audio=" + strings.TrimSpace(withAlt[0].alt), nil
+	}
+	// Final fallback independent of localized labels.
+	monikers := listDshowAudioMonikers(ffmpegPath)
+	if len(monikers) == 1 {
+		return "audio=" + monikers[0], nil
+	}
+	return "", fmt.Errorf("audio_moniker_not_resolved (input=%q devices=%d altCandidates=%d monikers=%d hint=%q)", raw, len(devs), len(withAlt), len(monikers), inHint)
+}
+
+func listDshowAudioDevices(ffmpegPath string) ([]struct{ name, alt string }, error) {
+	out := runDshowListDevices(ffmpegPath)
+	text := string(out)
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+
+	devs := make([]struct{ name, alt string }, 0, 8)
+	lastName := ""
+	monikerRe := regexp.MustCompile(`@device_cm_[^"\r\n]+`)
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		l := strings.ToLower(line)
+		if strings.Contains(l, "@device_cm_") || strings.Contains(l, "alternative name") {
+			moniker := strings.TrimSpace(monikerRe.FindString(line))
+			if moniker != "" {
+				devs = append(devs, struct{ name, alt string }{name: lastName, alt: moniker})
+			}
+			continue
+		}
+		if strings.Contains(l, "alternative name") {
+			continue
+		}
+		q1 := strings.Index(line, "\"")
+		q2 := strings.LastIndex(line, "\"")
+		if q1 < 0 || q2 <= q1 {
+			continue
+		}
+		lastName = strings.TrimSpace(line[q1+1 : q2])
+	}
+	if len(devs) == 0 {
+		return nil, fmt.Errorf("no_dshow_audio_devices")
+	}
+	return devs, nil
+}
+
+func listDshowAudioMonikers(ffmpegPath string) []string {
+	out := runDshowListDevices(ffmpegPath)
+	re := regexp.MustCompile(`@device_cm_[^"\r\n]+`)
+	all := re.FindAllString(string(out), -1)
+	if len(all) == 0 {
+		return nil
+	}
+	uniq := make([]string, 0, len(all))
+	seen := map[string]struct{}{}
+	for _, m := range all {
+		v := strings.TrimSpace(m)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		uniq = append(uniq, v)
+	}
+	return uniq
+}
+
+func runDshowListDevices(ffmpegPath string) []byte {
+	if runtime.GOOS == "windows" {
+		// First try direct process execution (most reliable for capturing stderr).
+		cmdDirect := exec.Command(ffmpegPath, "-list_devices", "true", "-f", "dshow", "-i", "dummy")
+		outDirect, _ := cmdDirect.CombinedOutput()
+		if bytes.Contains(outDirect, []byte("@device_cm_")) || bytes.Contains(outDirect, []byte("@device_pnp_")) {
+			return outDirect
+		}
+
+		// Fallback: force UTF-8 console code page in shell mode.
+		cmdLine := fmt.Sprintf(`chcp 65001>nul && "%s" -list_devices true -f dshow -i dummy`, ffmpegPath)
+		cmdShell := exec.Command("cmd", "/C", cmdLine)
+		outShell, _ := cmdShell.CombinedOutput()
+		if bytes.Contains(outShell, []byte("@device_cm_")) || bytes.Contains(outShell, []byte("@device_pnp_")) {
+			return outShell
+		}
+
+		// Return the richer output for diagnostics.
+		if len(outShell) > len(outDirect) {
+			return outShell
+		}
+		return outDirect
+	}
+	cmd := exec.Command(ffmpegPath, "-list_devices", "true", "-f", "dshow", "-i", "dummy")
+	out, _ := cmd.CombinedOutput()
+	return out
+}
+
 func adaptiveBitrateNext(current int, configured int, measured int, minKbps int, maxKbps int) (next int, reason string, changed bool) {
 	cur := clamp(current, 200, 12000)
 	cfg := clamp(configured, 200, 12000)
@@ -1065,7 +1809,7 @@ func normalizeDshowInputArgs(args []string) []string {
 					inputVal += " " + next
 					j++
 				}
-				inputVal = normalizeDshowDeviceSelector(inputVal)
+				inputVal = normalizeDshowMediaSelector(inputVal, "video=")
 				out = append(out, inputVal)
 				i = j - 1
 				continue
@@ -1082,13 +1826,14 @@ func normalizeDshowInputArgs(args []string) []string {
 	return out
 }
 
-func normalizeDshowDeviceSelector(inputVal string) string {
+func normalizeDshowMediaSelector(inputVal string, prefix string) string {
 	lc := strings.ToLower(inputVal)
-	if !strings.HasPrefix(lc, "video=") {
+	prefixLc := strings.ToLower(prefix)
+	if prefixLc == "" || !strings.HasPrefix(lc, prefixLc) {
 		return inputVal
 	}
 
-	val := strings.TrimSpace(inputVal[len("video="):])
+	val := strings.TrimSpace(inputVal[len(prefix):])
 	if val == "" {
 		return inputVal
 	}
@@ -1109,7 +1854,15 @@ func normalizeDshowDeviceSelector(inputVal string) string {
 		break
 	}
 
-	return "video=" + val
+	// Fix malformed DirectShow moniker prefixes where "\\?\\" became "\?\".
+	// ffmpeg expects "@device_*_\\?\..." when using Alternative name.
+	if strings.HasPrefix(strings.ToLower(val), "@device_") &&
+		strings.Contains(val, `\?`) &&
+		!strings.Contains(val, `\\?\`) {
+		val = strings.Replace(val, `\?`, `\\?\`, 1)
+	}
+
+	return prefix + val
 }
 
 func defaultEncoderArgs(preset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int) []string {

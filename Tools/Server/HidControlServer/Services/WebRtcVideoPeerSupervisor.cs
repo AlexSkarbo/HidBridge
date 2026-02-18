@@ -40,7 +40,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         int? ImageQuality,
         string? CaptureInput,
         string? Encoder,
-        string? Codec);
+        string? Codec,
+        bool? AudioEnabled,
+        string? AudioInput,
+        int? AudioBitrateKbps);
     private sealed record VideoPeerRuntimeState(
         string Room,
         string SourceModeRequested,
@@ -61,7 +64,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         int? MeasuredKbps = null,
         long? Frames = null,
         long? Packets = null,
-        long? StartupMs = null);
+        long? StartupMs = null,
+        bool? AudioEnabled = null,
+        string? AudioInput = null,
+        int? AudioBitrateKbps = null,
+        int? AudioMeasuredKbps = null,
+        bool? AudioRunning = null);
 
     /// <summary>
     /// Snapshot of video peer runtime state for a single room.
@@ -86,7 +94,26 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         int? MeasuredKbps = null,
         long? Frames = null,
         long? Packets = null,
-        long? StartupMs = null);
+        long? StartupMs = null,
+        bool? AudioEnabled = null,
+        string? AudioInput = null,
+        int? AudioBitrateKbps = null,
+        int? AudioMeasuredKbps = null,
+        bool? AudioRunning = null);
+
+    /// <summary>
+    /// Manual audio probe result for a room.
+    /// </summary>
+    public sealed record AudioProbeResult(
+        bool Ok,
+        string Room,
+        string Signal,
+        string Selector,
+        int DurationSec,
+        long Bytes,
+        double Rms,
+        int LevelPct,
+        string? Error = null);
 
     /// <summary>
     /// Creates an instance.
@@ -169,7 +196,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         int? imageQuality = null,
         string? captureInput = null,
         string? encoder = null,
-        string? codec = null)
+        string? codec = null,
+        bool? audioEnabled = null,
+        string? audioInput = null,
+        int? audioBitrateKbps = null)
     {
         if (string.IsNullOrWhiteSpace(room))
         {
@@ -186,7 +216,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 imageQuality,
                 captureInput,
                 encoder,
-                codec);
+                codec,
+                audioEnabled,
+                audioInput,
+                audioBitrateKbps);
 
             int max = _opt.WebRtcRoomsMaxHelpers;
             if (max > 0 && !_procs.ContainsKey(room) && _procs.Count >= max)
@@ -256,7 +289,9 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             int? bitrateNorm = NormalizeBitrateKbpsForEnv(bitrateKbps);
             int? fpsNorm = NormalizeFpsForEnv(fps);
             int? imageQualityNorm = NormalizeImageQualityForEnv(imageQuality);
-            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcVideoPeerStun, qualityPreset, bitrateNorm, fpsNorm, imageQualityNorm, captureInput, encoder, codec);
+            int? audioBitrateNorm = NormalizeAudioBitrateKbpsForEnv(audioBitrateKbps);
+            string? audioInputNorm = ResolveAudioInputForEnv(audioInput);
+            var psi = BuildStartInfo(toolDir, serverUrl, room, token, _opt.WebRtcVideoPeerStun, qualityPreset, bitrateNorm, fpsNorm, imageQualityNorm, captureInput, encoder, codec, audioEnabled, audioInputNorm, audioBitrateNorm);
             if (psi is null)
             {
                 ServerEventLog.Log("webrtc.videopeer", "autostart_skipped", new { reason = "unsupported_os", os = Environment.OSVersion.Platform.ToString() });
@@ -680,7 +715,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         int? imageQuality,
         string? captureInput,
         string? encoder,
-        string? codec)
+        string? codec,
+        bool? audioEnabled,
+        string? audioInput,
+        int? audioBitrateKbps)
     {
         string effectiveQualityPreset = NormalizeQualityPresetForEnv(qualityPreset) ?? _opt.WebRtcVideoPeerQualityPreset;
         if (OperatingSystem.IsWindows())
@@ -749,6 +787,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 psi.Environment["HIDBRIDGE_FFMPEG"] = _opt.FfmpegPath;
             }
+            // Always stamp audio env values to avoid inheriting stale process-level variables.
+            psi.Environment["HIDBRIDGE_VIDEO_AUDIO_ENABLED"] = audioEnabled.HasValue ? (audioEnabled.Value ? "true" : "false") : string.Empty;
+            psi.Environment["HIDBRIDGE_VIDEO_AUDIO_INPUT"] = audioInput ?? string.Empty;
+            psi.Environment["HIDBRIDGE_VIDEO_AUDIO_BITRATE_KBPS"] = audioBitrateKbps is int ab ? ab.ToString() : string.Empty;
             return psi;
         }
 
@@ -813,6 +855,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 psi.Environment["HIDBRIDGE_FFMPEG"] = _opt.FfmpegPath;
             }
+            // Always stamp audio env values to avoid inheriting stale process-level variables.
+            psi.Environment["HIDBRIDGE_VIDEO_AUDIO_ENABLED"] = audioEnabled.HasValue ? (audioEnabled.Value ? "true" : "false") : string.Empty;
+            psi.Environment["HIDBRIDGE_VIDEO_AUDIO_INPUT"] = audioInput ?? string.Empty;
+            psi.Environment["HIDBRIDGE_VIDEO_AUDIO_BITRATE_KBPS"] = audioBitrateKbps is int ab ? ab.ToString() : string.Empty;
             return psi;
         }
 
@@ -866,6 +912,119 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             return null;
         }
         return imageQuality.Value;
+    }
+
+    private string? ResolveAudioInputForEnv(string? audioInput)
+    {
+        if (string.IsNullOrWhiteSpace(audioInput))
+        {
+            return null;
+        }
+        string normalized = audioInput.Trim();
+        if (normalized.StartsWith("audio=", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["audio=".Length..].Trim();
+        }
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+        if (normalized.StartsWith("@device_", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        try
+        {
+            static string? ExtractHint(string s)
+            {
+                int open = s.LastIndexOf('(');
+                int close = s.LastIndexOf(')');
+                if (open >= 0 && close > open)
+                {
+                    string hint = s.Substring(open + 1, close - open - 1).Trim();
+                    return string.IsNullOrWhiteSpace(hint) ? null : hint;
+                }
+                return null;
+            }
+
+            string ffmpegPath = string.IsNullOrWhiteSpace(_opt.FfmpegPath) ? "ffmpeg" : _opt.FfmpegPath;
+            IReadOnlyList<VideoDshowDevice> devices = global::HidControlServer.ServerUtils.ListDshowAudioDevices(ffmpegPath);
+            VideoDshowDevice? match = devices.FirstOrDefault(d =>
+                string.Equals(d.Name, normalized, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(d.AlternativeName, normalized, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+            {
+                // Fallback for codepage-mangled friendly names: match by stable tail token in parentheses,
+                // e.g. "(USB3.0 Audio)".
+                string? inputHint = ExtractHint(normalized);
+                if (!string.IsNullOrWhiteSpace(inputHint))
+                {
+                    List<VideoDshowDevice> hinted = devices
+                        .Where(d => !string.IsNullOrWhiteSpace(d.AlternativeName))
+                        .Where(d =>
+                        {
+                            string? deviceHint = ExtractHint(d.Name);
+                            return !string.IsNullOrWhiteSpace(deviceHint)
+                                && (string.Equals(deviceHint, inputHint, StringComparison.OrdinalIgnoreCase) ||
+                                    deviceHint.Contains(inputHint, StringComparison.OrdinalIgnoreCase) ||
+                                    inputHint.Contains(deviceHint, StringComparison.OrdinalIgnoreCase));
+                        })
+                        .ToList();
+                    if (hinted.Count == 1)
+                    {
+                        match = hinted[0];
+                    }
+                }
+            }
+            if (match is null)
+            {
+                // Another fallback: map by starts-with on friendly name.
+                List<VideoDshowDevice> nameMatches = devices
+                    .Where(d => !string.IsNullOrWhiteSpace(d.AlternativeName))
+                    .Where(d =>
+                        d.Name.StartsWith(normalized, StringComparison.OrdinalIgnoreCase) ||
+                        normalized.StartsWith(d.Name, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (nameMatches.Count == 1)
+                {
+                    match = nameMatches[0];
+                }
+            }
+            if (match is null)
+            {
+                // Final fallback: if exactly one device exists, prefer its moniker.
+                List<VideoDshowDevice> monikerDevices = devices.Where(d => !string.IsNullOrWhiteSpace(d.AlternativeName)).ToList();
+                if (monikerDevices.Count == 1)
+                {
+                    match = monikerDevices[0];
+                }
+            }
+            if (match is not null && !string.IsNullOrWhiteSpace(match.AlternativeName))
+            {
+                return match.AlternativeName!.Trim();
+            }
+        }
+        catch
+        {
+            // Keep explicit value if device discovery fails.
+        }
+        return normalized;
+    }
+
+    private static int? NormalizeAudioBitrateKbpsForEnv(int? audioBitrateKbps)
+    {
+        if (audioBitrateKbps is null)
+        {
+            return null;
+        }
+
+        if (audioBitrateKbps < 16 || audioBitrateKbps > 512)
+        {
+            return null;
+        }
+
+        return audioBitrateKbps.Value;
     }
 
     private static string? NormalizeEncoderForEnv(string? encoder)
@@ -1130,7 +1289,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         int? measuredKbps = null,
         long? frames = null,
         long? packets = null,
-        bool? fallbackUsed = null)
+        bool? fallbackUsed = null,
+        bool? audioEnabled = null,
+        string? audioInput = null,
+        int? audioBitrateKbps = null,
+        int? audioMeasuredKbps = null,
+        bool? audioRunning = null)
     {
         if (string.IsNullOrWhiteSpace(room))
         {
@@ -1162,6 +1326,11 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             long? framesNow = frames ?? prev?.Frames;
             long? packetsNow = packets ?? prev?.Packets;
             long? startupMsNow = prev?.StartupMs;
+            bool? audioEnabledNow = audioEnabled ?? prev?.AudioEnabled;
+            string? audioInputNow = string.IsNullOrWhiteSpace(audioInput) ? prev?.AudioInput : audioInput.Trim();
+            int? audioBitrateNow = audioBitrateKbps ?? prev?.AudioBitrateKbps;
+            int? audioMeasuredNow = audioMeasuredKbps ?? prev?.AudioMeasuredKbps;
+            bool? audioRunningNow = audioRunning ?? prev?.AudioRunning;
 
             if (fallbackUsed.HasValue)
             {
@@ -1195,6 +1364,14 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     startedAt = now;
                 }
                 startupTimeoutReason = null;
+            }
+            else if (eventNorm == "audio_pipeline_started")
+            {
+                audioRunningNow = true;
+            }
+            else if (eventNorm == "audio_error")
+            {
+                audioRunningNow = false;
             }
 
             if (startupMsNow is null && startedAt.HasValue)
@@ -1231,7 +1408,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 measuredKbpsNow,
                 framesNow,
                 packetsNow,
-                startupMsNow);
+                startupMsNow,
+                audioEnabledNow,
+                audioInputNow,
+                audioBitrateNow,
+                audioMeasuredNow,
+                audioRunningNow);
         }
     }
 
@@ -1271,7 +1453,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     st.MeasuredKbps,
                     st.Frames,
                     st.Packets,
-                    st.StartupMs);
+                    st.StartupMs,
+                    st.AudioEnabled,
+                    st.AudioInput,
+                    st.AudioBitrateKbps,
+                    st.AudioMeasuredKbps,
+                    st.AudioRunning);
             }
 
             if (_procs.TryGetValue(room, out var procState))
@@ -1294,6 +1481,168 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// Runs a short WAV probe on the selected audio input and returns a coarse signal health.
+    /// </summary>
+    public async Task<AudioProbeResult> RunAudioProbeAsync(string room, string? audioInput, int durationSec, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return new AudioProbeResult(false, room ?? string.Empty, "unknown", string.Empty, 0, 0, 0, 0, "room_required");
+        }
+        if (durationSec < 1 || durationSec > 10)
+        {
+            durationSec = 3;
+        }
+
+        string? requestedAudio = string.IsNullOrWhiteSpace(audioInput) ? null : audioInput.Trim();
+        if (string.IsNullOrWhiteSpace(requestedAudio))
+        {
+            lock (_lock)
+            {
+                if (_startRequestByRoom.TryGetValue(room, out var req) && !string.IsNullOrWhiteSpace(req.AudioInput))
+                {
+                    requestedAudio = req.AudioInput!.Trim();
+                }
+                else if (_runtimeByRoom.TryGetValue(room, out var st) && !string.IsNullOrWhiteSpace(st.AudioInput))
+                {
+                    requestedAudio = st.AudioInput!.Trim();
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(requestedAudio))
+        {
+            return new AudioProbeResult(false, room, "unknown", string.Empty, durationSec, 0, 0, 0, "audio_input_required");
+        }
+
+        string? resolved = ResolveAudioInputForEnv(requestedAudio);
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            return new AudioProbeResult(false, room, "unknown", string.Empty, durationSec, 0, 0, 0, "audio_input_not_resolved");
+        }
+        string selector = resolved.StartsWith("audio=", StringComparison.OrdinalIgnoreCase) ? resolved : $"audio={resolved}";
+
+        string ffmpegPath = string.IsNullOrWhiteSpace(_opt.FfmpegPath) ? "ffmpeg" : _opt.FfmpegPath;
+        string probePath = Path.Combine(Path.GetTempPath(), $"hidbridge_audio_probe_{Guid.NewGuid():N}.wav");
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-loglevel");
+        psi.ArgumentList.Add("warning");
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("dshow");
+        psi.ArgumentList.Add("-t");
+        psi.ArgumentList.Add(durationSec.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(selector);
+        psi.ArgumentList.Add("-vn");
+        psi.ArgumentList.Add("-ac");
+        psi.ArgumentList.Add("2");
+        psi.ArgumentList.Add("-ar");
+        psi.ArgumentList.Add("48000");
+        psi.ArgumentList.Add("-c:a");
+        psi.ArgumentList.Add("pcm_s16le");
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add(probePath);
+
+        try
+        {
+            using var proc = Process.Start(psi);
+            if (proc is null)
+            {
+                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, "ffmpeg_start_failed");
+            }
+
+            Task<string> errTask = proc.StandardError.ReadToEndAsync();
+            Task<string> outTask = proc.StandardOutput.ReadToEndAsync();
+            await proc.WaitForExitAsync(ct);
+            string stderr = await errTask;
+            _ = await outTask;
+            if (proc.ExitCode != 0)
+            {
+                string err = string.IsNullOrWhiteSpace(stderr) ? $"ffmpeg_exit_{proc.ExitCode}" : stderr.Trim();
+                if (err.Length > 500) err = err[..500];
+                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, err);
+            }
+
+            if (!File.Exists(probePath))
+            {
+                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, "probe_file_missing");
+            }
+
+            byte[] wav = await File.ReadAllBytesAsync(probePath, ct);
+            (double rms, int levelPct) = ComputeWavLevel(wav);
+            string signal = ClassifyAudioSignal(levelPct);
+            long bytes = wav.LongLength;
+            return new AudioProbeResult(true, room, signal, selector, durationSec, bytes, rms, levelPct, null);
+        }
+        catch (OperationCanceledException)
+        {
+            return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, "canceled");
+        }
+        catch (Exception ex)
+        {
+            return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, ex.Message);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(probePath))
+                {
+                    File.Delete(probePath);
+                }
+            }
+            catch { }
+        }
+    }
+
+    private static (double rms, int levelPct) ComputeWavLevel(byte[] wav)
+    {
+        if (wav is null || wav.Length <= 44)
+        {
+            return (0, 0);
+        }
+
+        int offset = 44;
+        int sampleCount = (wav.Length - offset) / 2;
+        if (sampleCount <= 0)
+        {
+            return (0, 0);
+        }
+
+        double sum = 0;
+        for (int i = offset; i + 1 < wav.Length; i += 2)
+        {
+            short s = (short)(wav[i] | (wav[i + 1] << 8));
+            double n = s / 32768.0;
+            sum += n * n;
+        }
+        double rms = Math.Sqrt(sum / sampleCount);
+        int pct = (int)Math.Round(Math.Clamp(rms * 220.0, 0.0, 100.0));
+        return (rms, pct);
+    }
+
+    private static string ClassifyAudioSignal(int levelPct)
+    {
+        if (levelPct <= 1)
+        {
+            return "silence";
+        }
+        if (levelPct <= 6)
+        {
+            return "noise-only";
+        }
+        return "signal present";
     }
 
     private static string NormalizeSourceModeForState(string? mode)
@@ -1421,7 +1770,10 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     request?.ImageQuality,
                     request?.CaptureInput,
                     request?.Encoder,
-                    request?.Codec);
+                    request?.Codec,
+                    request?.AudioEnabled,
+                    request?.AudioInput,
+                    request?.AudioBitrateKbps);
 
                 if (started.ok)
                 {

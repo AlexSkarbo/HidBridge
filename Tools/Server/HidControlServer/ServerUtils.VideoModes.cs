@@ -19,6 +19,16 @@ internal static partial class ServerUtils
     }
 
     /// <summary>
+    /// Executes ListDshowAudioDevices.
+    /// </summary>
+    /// <param name="ffmpegPath">The ffmpegPath.</param>
+    /// <returns>Result.</returns>
+    public static IReadOnlyList<VideoDshowDevice> ListDshowAudioDevices(string ffmpegPath)
+    {
+        return VideoModeService.ListDshowAudioDevices(ffmpegPath);
+    }
+
+    /// <summary>
     /// Executes ListDshowModes.
     /// </summary>
     /// <param name="ffmpegPath">The ffmpegPath.</param>

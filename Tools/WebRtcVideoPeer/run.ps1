@@ -13,6 +13,13 @@ if ([string]::IsNullOrWhiteSpace($Room)) { $Room = "video" }
 if ([string]::IsNullOrWhiteSpace($SourceMode)) { $SourceMode = "testsrc" }
 if ([string]::IsNullOrWhiteSpace($QualityPreset)) { $QualityPreset = "balanced" }
 
+# Keep helper console/log output in UTF-8 to avoid mojibake in device names.
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+$OutputEncoding = $utf8NoBom
+try { chcp 65001 > $null } catch {}
+
 $env:HIDBRIDGE_SERVER_URL = $ServerUrl
 $env:HIDBRIDGE_TOKEN = $Token
 $env:HIDBRIDGE_WEBRTC_ROOM = $Room
