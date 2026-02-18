@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HidControlServer.Endpoints.System;
 using Microsoft.OpenApi;
+using System.Diagnostics;
 
 // Parse CLI/config options and resolve effective serial port settings.
 var options = Options.Parse(args);
@@ -318,6 +319,7 @@ app.MapWebRtcWsEndpoints();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     ServerStartupService.StartBackgroundTasks(app, appState);
+    TryOpenStartupBrowser(app, options);
 });
 
 app.MapRazorPages();
@@ -329,3 +331,144 @@ if (app.Environment.IsDevelopment())
 }
 
 app.Run();
+
+static void TryOpenStartupBrowser(WebApplication app, Options options)
+{
+    try
+    {
+        if (!TryResolveStartupBrowserPath(out string? configuredPath))
+        {
+            return;
+        }
+
+        string target = BuildStartupBrowserUrl(app, options, configuredPath);
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = target,
+            UseShellExecute = true
+        });
+        ServerEventLog.Log("server", "browser_opened", new { target });
+    }
+    catch (Exception ex)
+    {
+        ServerEventLog.Log("server", "browser_open_failed", new { error = ex.Message });
+    }
+}
+
+static bool TryResolveStartupBrowserPath(out string? path)
+{
+    path = null;
+
+    string? envEnabledRaw = Environment.GetEnvironmentVariable("HIDBRIDGE_OPEN_BROWSER");
+    if (!string.IsNullOrWhiteSpace(envEnabledRaw) && bool.TryParse(envEnabledRaw, out bool envEnabled))
+    {
+        if (!envEnabled)
+        {
+            return false;
+        }
+        path = Environment.GetEnvironmentVariable("HIDBRIDGE_OPEN_BROWSER_URL");
+        return true;
+    }
+
+    string launchSettingsPath = Path.Combine(Directory.GetCurrentDirectory(), "Properties", "launchSettings.json");
+    if (!File.Exists(launchSettingsPath))
+    {
+        return false;
+    }
+
+    using var doc = JsonDocument.Parse(File.ReadAllText(launchSettingsPath));
+    if (!doc.RootElement.TryGetProperty("profiles", out JsonElement profiles) || profiles.ValueKind != JsonValueKind.Object)
+    {
+        return false;
+    }
+
+    string? profileName = Environment.GetEnvironmentVariable("DOTNET_LAUNCH_PROFILE");
+    JsonElement profile;
+    if (!string.IsNullOrWhiteSpace(profileName) && profiles.TryGetProperty(profileName, out JsonElement namedProfile))
+    {
+        profile = namedProfile;
+    }
+    else
+    {
+        JsonElement? first = null;
+        foreach (JsonProperty p in profiles.EnumerateObject())
+        {
+            first = p.Value;
+            break;
+        }
+        if (first is null)
+        {
+            return false;
+        }
+        profile = first.Value;
+    }
+
+    bool launchBrowser = profile.TryGetProperty("launchBrowser", out JsonElement launchBrowserEl) &&
+        launchBrowserEl.ValueKind == JsonValueKind.True;
+    if (!launchBrowser)
+    {
+        return false;
+    }
+
+    if (profile.TryGetProperty("launchUrl", out JsonElement launchUrlEl) && launchUrlEl.ValueKind == JsonValueKind.String)
+    {
+        path = launchUrlEl.GetString();
+    }
+
+    return true;
+}
+
+static string BuildStartupBrowserUrl(WebApplication app, Options options, string? configuredPath)
+{
+    if (!string.IsNullOrWhiteSpace(configuredPath) &&
+        Uri.TryCreate(configuredPath, UriKind.Absolute, out Uri? absolute))
+    {
+        return absolute.ToString();
+    }
+
+    string baseUrl = ResolveBrowserBaseUrl(app, options);
+    if (string.IsNullOrWhiteSpace(configuredPath))
+    {
+        return baseUrl;
+    }
+
+    if (!baseUrl.EndsWith("/", StringComparison.Ordinal))
+    {
+        baseUrl += "/";
+    }
+
+    return new Uri(new Uri(baseUrl), configuredPath.TrimStart('/')).ToString();
+}
+
+static string ResolveBrowserBaseUrl(WebApplication app, Options options)
+{
+    string? candidate = app.Urls.FirstOrDefault(u => u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) ??
+        app.Urls.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ??
+        options.Url;
+
+    if (!Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri))
+    {
+        return options.Url;
+    }
+
+    string host = uri.Host;
+    if (string.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(host, "::", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(host, "[::]", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(host, "+", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(host, "*", StringComparison.OrdinalIgnoreCase))
+    {
+        host = "127.0.0.1";
+    }
+
+    var builder = new UriBuilder(uri)
+    {
+        Host = host
+    };
+    return builder.Uri.GetLeftPart(UriPartial.Authority);
+}
