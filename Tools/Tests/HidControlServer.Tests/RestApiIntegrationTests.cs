@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using HidControl.Application.Abstractions;
 using HidControl.Application.UseCases;
+using HidControl.Application.UseCases.WebRtc;
 using HidControl.Contracts;
 using HidControl.Infrastructure.Services;
 using HidControl.UseCases;
@@ -115,6 +116,16 @@ public sealed class RestApiIntegrationTests
         builder.Services.AddSingleton<IWebRtcBackend, FakeBackend>();
         builder.Services.AddSingleton<IWebRtcRoomIdService, FakeRoomIdService>();
         builder.Services.AddSingleton<IWebRtcRoomsService, WebRtcRoomsService>();
+        builder.Services.AddSingleton<CreateWebRtcVideoRoomUseCase>();
+        builder.Services.AddSingleton<RestartWebRtcVideoRoomUseCase>();
+        builder.Services.AddSingleton<CreateWebRtcRoomUseCase>();
+        builder.Services.AddSingleton<DeleteWebRtcRoomUseCase>();
+        builder.Services.AddSingleton<DeleteWebRtcVideoRoomUseCase>();
+        builder.Services.AddSingleton<ListWebRtcRoomsUseCase>();
+        builder.Services.AddSingleton<GetWebRtcClientConfigUseCase>();
+        builder.Services.AddSingleton<GetWebRtcIceConfigUseCase>();
+        builder.Services.AddSingleton<IWebRtcIceService, WebRtcIceService>();
+        builder.Services.AddSingleton<IWebRtcConfigService, WebRtcConfigService>();
 
         var app = builder.Build();
         app.MapVideoEndpoints();
@@ -179,5 +190,39 @@ public sealed class RestApiIntegrationTests
         var cloneJson = await cloneResp.Content.ReadFromJsonAsync<JsonElement>(ct);
         Assert.True(cloneJson.GetProperty("ok").GetBoolean());
         Assert.Contains(cloneJson.GetProperty("profiles").EnumerateArray(), p => string.Equals(p.GetProperty("name").GetString(), "copy-rest", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_WithStreamProfile_ReturnsResolvedProfile()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (app, client) = await CreateAppAsync();
+        await using var _ = app;
+
+        var createResp = await client.PostAsJsonAsync(
+            "/status/webrtc/video/rooms",
+            new WebRtcCreateVideoRoomRequest("hb-v-room-rest", null, null, null, null, null, null, null, null, null, null, "low-latency"),
+            ct);
+        createResp.EnsureSuccessStatusCode();
+        var createJson = await createResp.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.True(createJson.GetProperty("ok").GetBoolean());
+        Assert.Equal("low-latency", createJson.GetProperty("streamProfile").GetString());
+    }
+
+    [Fact]
+    public async Task CreateVideoRoom_WithUnknownStreamProfile_ReturnsValidationError()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (app, client) = await CreateAppAsync();
+        await using var _ = app;
+
+        var createResp = await client.PostAsJsonAsync(
+            "/status/webrtc/video/rooms",
+            new WebRtcCreateVideoRoomRequest("hb-v-room-rest", null, null, null, null, null, null, null, null, null, null, "missing-profile"),
+            ct);
+        createResp.EnsureSuccessStatusCode();
+        var createJson = await createResp.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.False(createJson.GetProperty("ok").GetBoolean());
+        Assert.Equal("profile_not_found", createJson.GetProperty("error").GetString());
     }
 }
