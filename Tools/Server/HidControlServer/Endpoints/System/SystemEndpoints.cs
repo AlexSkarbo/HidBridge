@@ -1,4 +1,5 @@
 using System.Reflection;
+using HidControl.Application.Abstractions;
 using HidControlServer.Endpoints.Sys;
 using HidControlServer.Services;
 
@@ -110,6 +111,35 @@ public static class SystemEndpoints
         {
             var items = ServerEventLog.GetRecent(limit);
             return Results.Ok(new { ok = true, items });
+        });
+
+        app.MapGet("/status/storage", (Options opt, IHidStateStore stateStore) =>
+        {
+            string statePath = Path.Combine(Directory.GetCurrentDirectory(), "hidcontrol.state.json");
+            string sqlitePath = opt.MouseMappingDb;
+            string markerPath = $"{sqlitePath}.imported_to_pg.marker.json";
+            var snapshot = stateStore.Load();
+
+            return Results.Ok(new
+            {
+                ok = true,
+                runtimeMappingStore = "postgresql",
+                pgConnectionStringSet = !string.IsNullOrWhiteSpace(opt.PgConnectionString),
+                sqliteLegacyPath = sqlitePath,
+                sqliteExists = !string.IsNullOrWhiteSpace(sqlitePath) && File.Exists(sqlitePath),
+                sqliteImportMode = opt.MigrateSqliteToPg ? "deprecated" : "disabled",
+                sqliteImportMarkerPath = markerPath,
+                sqliteImportMarkerExists = File.Exists(markerPath),
+                stateStore = new
+                {
+                    backend = "json",
+                    path = statePath,
+                    exists = File.Exists(statePath),
+                    profilesCount = snapshot.VideoProfiles.Count,
+                    activeProfile = snapshot.ActiveVideoProfile,
+                    roomBindingsCount = snapshot.RoomProfileBindings.Count
+                }
+            });
         });
 
         // WebRTC status/control endpoints are registered in a dedicated mapper to keep this class thin.

@@ -9,14 +9,16 @@ namespace HidControlServer.Adapters.Application;
 public sealed class VideoProfileStoreAdapter : IVideoProfileStore
 {
     private readonly VideoProfileStore _store;
+    private readonly IHidStateStore? _stateStore;
 
     /// <summary>
     /// Executes VideoProfileStoreAdapter.
     /// </summary>
     /// <param name="store">Store.</param>
-    public VideoProfileStoreAdapter(VideoProfileStore store)
+    public VideoProfileStoreAdapter(VideoProfileStore store, IHidStateStore? stateStore = null)
     {
         _store = store;
+        _stateStore = stateStore;
     }
 
     /// <summary>
@@ -37,6 +39,7 @@ public sealed class VideoProfileStoreAdapter : IVideoProfileStore
     public void ReplaceAll(IReadOnlyList<VideoProfileConfig> profiles)
     {
         _store.ReplaceAll(profiles);
+        PersistProfilesSnapshot();
     }
 
     /// <summary>
@@ -44,11 +47,40 @@ public sealed class VideoProfileStoreAdapter : IVideoProfileStore
     /// </summary>
     /// <param name="name">Profile name.</param>
     /// <returns>True when activated.</returns>
-    public bool SetActive(string name) => _store.SetActive(name);
+    public bool SetActive(string name)
+    {
+        bool ok = _store.SetActive(name);
+        if (ok)
+        {
+            PersistProfilesSnapshot();
+        }
+        return ok;
+    }
 
     /// <inheritdoc />
-    public bool Upsert(VideoProfileConfig profile, out string? error) => _store.Upsert(profile, out error);
+    public bool Upsert(VideoProfileConfig profile, out string? error)
+    {
+        bool ok = _store.Upsert(profile, out error);
+        if (ok)
+        {
+            PersistProfilesSnapshot();
+        }
+        return ok;
+    }
 
     /// <inheritdoc />
-    public bool Delete(string name, out string? error) => _store.Delete(name, out error);
+    public bool Delete(string name, out string? error)
+    {
+        bool ok = _store.Delete(name, out error);
+        if (ok)
+        {
+            PersistProfilesSnapshot();
+        }
+        return ok;
+    }
+
+    private void PersistProfilesSnapshot()
+    {
+        _stateStore?.SaveVideoProfiles(_store.GetAll(), _store.ActiveProfile);
+    }
 }

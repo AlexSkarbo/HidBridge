@@ -19,6 +19,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     private readonly IWebRtcBackend _backend;
     private readonly IWebRtcRoomIdService _roomIds;
     private readonly IVideoProfileStore _videoProfiles;
+    private readonly IHidStateStore? _stateStore;
     private readonly ILogger<WebRtcRoomsService> _logger;
     private readonly object _videoProfilesLock = new();
     private readonly Dictionary<string, string?> _videoRoomProfiles = new(StringComparer.OrdinalIgnoreCase);
@@ -38,13 +39,16 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         IWebRtcBackend backend,
         IWebRtcRoomIdService roomIds,
         IVideoProfileStore? videoProfiles = null,
+        IHidStateStore? stateStore = null,
         ILogger<WebRtcRoomsService>? logger = null)
     {
         _backend = backend;
         _roomIds = roomIds;
         _videoProfiles = videoProfiles ?? EmptyVideoProfileStore.Instance;
+        _stateStore = stateStore;
         _logger = logger ?? NullLogger<WebRtcRoomsService>.Instance;
         LoadPersistedRooms();
+        RestoreRoomProfileBindingsFromState();
     }
 
     private sealed class EmptyVideoProfileStore : IVideoProfileStore
@@ -184,6 +188,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         {
             _videoRoomProfiles.Remove(room);
         }
+        SaveRoomProfileBindings();
 
         if (!stop.ok)
         {
@@ -481,10 +486,12 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             if (string.IsNullOrWhiteSpace(normalizedProfile))
             {
                 _videoRoomProfiles.Remove(normalizedRoom);
+                SaveRoomProfileBindings();
                 return Task.FromResult(new WebRtcRoomProfileResult(true, normalizedRoom, null, null));
             }
 
             _videoRoomProfiles[normalizedRoom] = normalizedProfile;
+            SaveRoomProfileBindings();
             return Task.FromResult(new WebRtcRoomProfileResult(true, normalizedRoom, normalizedProfile, null));
         }
     }
@@ -992,6 +999,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
                 _videoRoomProfiles[room] = normalized;
             }
         }
+        SaveRoomProfileBindings();
     }
 
     private void RememberKnownVideoRoom(string room)
@@ -1004,6 +1012,69 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         lock (_videoProfilesLock)
         {
             _videoRoomProfiles.TryAdd(room, null);
+        }
+        SaveRoomProfileBindings();
+    }
+
+    private void RestoreRoomProfileBindingsFromState()
+    {
+        if (_stateStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = _stateStore.Load();
+            if (snapshot.RoomProfileBindings.Count == 0)
+            {
+                return;
+            }
+
+            lock (_videoProfilesLock)
+            {
+                foreach (var kvp in snapshot.RoomProfileBindings)
+                {
+                    string room = (kvp.Key ?? string.Empty).Trim();
+                    if (!IsVideoRoom(room))
+                    {
+                        continue;
+                    }
+                    _videoRoomProfiles[room] = string.IsNullOrWhiteSpace(kvp.Value) ? null : kvp.Value!.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort restore; runtime should continue even if state file is broken.
+        }
+    }
+
+    private void SaveRoomProfileBindings()
+    {
+        if (_stateStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Dictionary<string, string?> snapshot;
+            lock (_videoProfilesLock)
+            {
+                snapshot = _videoRoomProfiles
+                    .Where(kvp => IsVideoRoom(kvp.Key))
+                    .ToDictionary(
+                        kvp => kvp.Key,
+                        kvp => string.IsNullOrWhiteSpace(kvp.Value) ? null : kvp.Value!.Trim(),
+                        StringComparer.OrdinalIgnoreCase);
+            }
+
+            _stateStore.SaveRoomProfileBindings(snapshot);
+        }
+        catch
+        {
+            // Best-effort persistence.
         }
     }
 

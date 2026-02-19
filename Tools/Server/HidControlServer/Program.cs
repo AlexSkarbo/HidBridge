@@ -58,6 +58,15 @@ var appState = new AppState
     ConfigPath = Options.ResolveConfigPath(args)
 };
 
+// Mutable runtime-managed state store (profiles, room-profile bindings).
+string hidStateStorePath = Path.Combine(Directory.GetCurrentDirectory(), "hidcontrol.state.json");
+var hidStateStore = new JsonHidStateStore(hidStateStorePath);
+var hidStateSnapshot = hidStateStore.Load();
+var bootProfiles = hidStateSnapshot.VideoProfiles.Count > 0 ? hidStateSnapshot.VideoProfiles : options.VideoProfiles;
+string bootActiveProfile = !string.IsNullOrWhiteSpace(hidStateSnapshot.ActiveVideoProfile)
+    ? hidStateSnapshot.ActiveVideoProfile!
+    : options.ActiveVideoProfile;
+
 // Configure ASP.NET Core host and DI container.
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(VideoUrlService.BuildBindUrls(options));
@@ -81,13 +90,14 @@ builder.Services.Configure<JsonOptions>(o =>
 // Scoped lifetimes are avoided because most services coordinate shared hardware state.
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(appState);
+builder.Services.AddSingleton<HidControl.Application.Abstractions.IHidStateStore>(hidStateStore);
 builder.Services.AddSingleton(new HidUartClient(options.SerialPort, options.Baud, DeviceKeyService.GetBootstrapKey(options), options.InjectQueueCapacity, options.InjectDropThreshold));
 builder.Services.AddSingleton<KeyboardState>();
 builder.Services.AddSingleton<MouseState>();
 builder.Services.AddSingleton(new MouseMappingStore(options.PgConnectionString));
 builder.Services.AddSingleton(new KeyboardMappingStore(options.PgConnectionString));
 builder.Services.AddSingleton(new VideoSourceStore(options.VideoSources));
-builder.Services.AddSingleton(new VideoProfileStore(options.VideoProfiles, options.ActiveVideoProfile));
+builder.Services.AddSingleton(new VideoProfileStore(bootProfiles, bootActiveProfile));
 builder.Services.AddSingleton<HidControl.Application.Abstractions.IWebRtcSignalingService, HidControl.Infrastructure.Services.WebRtcSignalingService>();
 builder.Services.AddSingleton<WebRtcControlPeerSupervisor>();
 builder.Services.AddSingleton<WebRtcVideoPeerSupervisor>();
