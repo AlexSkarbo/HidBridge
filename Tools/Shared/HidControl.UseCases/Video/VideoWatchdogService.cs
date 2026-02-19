@@ -40,6 +40,17 @@ public sealed class VideoWatchdogService
             if (!runtime.TryGetFfmpegProcess(src.Id, out var proc) || proc.HasExited)
             {
                 var state = runtime.GetOrAddFfmpegState(src.Id);
+                if (IsCaptureSourceId(src.Id) && state.LastExitCode == -22)
+                {
+                    _events?.Log("watchdog", "ffmpeg_restart_suppressed", new
+                    {
+                        id = src.Id,
+                        reason = "invalid_args_exit_-22",
+                        lastExitCode = state.LastExitCode,
+                        restartCount = state.RestartCount
+                    });
+                    continue;
+                }
                 if (state.RestartCount >= options.FfmpegMaxRestarts)
                 {
                     _events?.Log("watchdog", "ffmpeg_restart_limit", new
@@ -140,4 +151,8 @@ public sealed class VideoWatchdogService
             _ffmpegService.StartForSources(new[] { src }, outputState, restart: true, force: true);
         }
     }
+
+    private static bool IsCaptureSourceId(string sourceId) =>
+        !string.IsNullOrWhiteSpace(sourceId) &&
+        sourceId.StartsWith("cap-", StringComparison.OrdinalIgnoreCase);
 }

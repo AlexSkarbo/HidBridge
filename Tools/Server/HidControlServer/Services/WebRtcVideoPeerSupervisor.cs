@@ -18,6 +18,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     private const int RestartBaseDelayMs = 1000;
     private const int RestartMaxDelayMs = 30000;
     private const int RestartFailureWindowSeconds = 180;
+    private const int AudioProbeRetentionMinutes = 20;
 
     private readonly Options _opt;
     private readonly IWebRtcSignalingService _signaling;
@@ -29,10 +30,12 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     private readonly HashSet<string> _manualStopRooms = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RestartState> _restartByRoom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, StartRequestState> _startRequestByRoom = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AudioProbeArtifact> _audioProbeByRoom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _cleanupTimer;
 
     private sealed record ProcState(Process Process, DateTimeOffset StartedAtUtc, DateTimeOffset? IdleSinceUtc);
     private sealed record RestartState(int Attempts, DateTimeOffset LastFailureAtUtc);
+    private sealed record AudioProbeArtifact(string ProbeId, string Path, DateTimeOffset CreatedAtUtc, long Bytes);
     private sealed record StartRequestState(
         string? QualityPreset,
         int? BitrateKbps,
@@ -113,6 +116,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         long Bytes,
         double Rms,
         int LevelPct,
+        string? ProbeId = null,
         string? Error = null);
 
     /// <summary>
@@ -181,8 +185,36 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 }
             }
             ReleaseAllManualStops();
+            CleanupAudioProbeFilesLocked();
         }
         CleanupOrphansFromPidFiles();
+    }
+
+    /// <summary>
+    /// Returns latest audio probe WAV file for a room.
+    /// </summary>
+    public (bool Ok, string? Path, string? FileName, string? Error) GetAudioProbeFile(string room)
+    {
+        if (string.IsNullOrWhiteSpace(room))
+        {
+            return (false, null, null, "room_required");
+        }
+
+        lock (_lock)
+        {
+            CleanupExpiredAudioProbeFilesLocked();
+            if (!_audioProbeByRoom.TryGetValue(room, out var item))
+            {
+                return (false, null, null, "probe_not_found");
+            }
+            if (!File.Exists(item.Path))
+            {
+                _audioProbeByRoom.Remove(room);
+                return (false, null, null, "probe_missing");
+            }
+            string fileName = $"hidbridge_audio_probe_{room}_{item.ProbeId}.wav";
+            return (true, item.Path, fileName, null);
+        }
     }
 
     /// <summary>
@@ -305,6 +337,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                 if (string.Equals(_opt.WebRtcVideoPeerSourceMode, "capture", StringComparison.OrdinalIgnoreCase))
                 {
                     EnsureCaptureManualStops(room);
+                    ServerEventLog.Log("webrtc.videopeer", "capture_prepare_begin", new { room });
                     // Capture mode competes with legacy ffmpeg/capture workers for the same camera.
                     // Stop them first so dshow/v4l2 can open the device reliably.
                     IReadOnlyList<string> stoppedHelpers = StopTrackedCaptureHelpers(room, toolDir);
@@ -314,6 +347,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     {
                         ServerEventLog.Log("webrtc.videopeer", "capture_released", new { room, stoppedHelpers, stoppedWorkers, stoppedFfmpeg });
                     }
+                    ServerEventLog.Log("webrtc.videopeer", "capture_prepare_end", new { room, stoppedHelpers = stoppedHelpers.Count, stoppedWorkers = stoppedWorkers.Count, stoppedFfmpeg = stoppedFfmpeg.Count });
                 }
 
                 var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -347,6 +381,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
                     }
                 };
 
+                ServerEventLog.Log("webrtc.videopeer", "autostart_starting", new { room, exe = psi.FileName });
                 if (!p.Start())
                 {
                     ServerEventLog.Log("webrtc.videopeer", "autostart_failed", new { room, reason = "start_returned_false" });
@@ -1063,6 +1098,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     private IReadOnlyList<string> StopTrackedCaptureHelpers(string roomToKeep, string toolDir)
     {
         var stopped = new List<string>();
+        var toDispose = new List<Process>();
         foreach (var kvp in _procs.ToArray())
         {
             string room = kvp.Key;
@@ -1083,11 +1119,24 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             catch { }
             finally
             {
-                try { p.Dispose(); } catch { }
+                // Do not dispose under supervisor lock while Exited callback can still be running:
+                // that can block and stall create/restart room operations.
+                toDispose.Add(p);
                 _procs.Remove(room);
                 DeletePidFile(toolDir, room);
                 ReleaseManualStopsForRoom(room);
             }
+        }
+
+        if (toDispose.Count > 0)
+        {
+            _ = Task.Run(() =>
+            {
+                foreach (var proc in toDispose)
+                {
+                    try { proc.Dispose(); } catch { }
+                }
+            });
         }
 
         return stopped;
@@ -1490,7 +1539,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     {
         if (string.IsNullOrWhiteSpace(room))
         {
-            return new AudioProbeResult(false, room ?? string.Empty, "unknown", string.Empty, 0, 0, 0, 0, "room_required");
+            return new AudioProbeResult(false, room ?? string.Empty, "unknown", string.Empty, 0, 0, 0, 0, null, "room_required");
         }
         if (durationSec < 1 || durationSec > 10)
         {
@@ -1515,13 +1564,13 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
 
         if (string.IsNullOrWhiteSpace(requestedAudio))
         {
-            return new AudioProbeResult(false, room, "unknown", string.Empty, durationSec, 0, 0, 0, "audio_input_required");
+            return new AudioProbeResult(false, room, "unknown", string.Empty, durationSec, 0, 0, 0, null, "audio_input_required");
         }
 
         string? resolved = ResolveAudioInputForEnv(requestedAudio);
         if (string.IsNullOrWhiteSpace(resolved))
         {
-            return new AudioProbeResult(false, room, "unknown", string.Empty, durationSec, 0, 0, 0, "audio_input_not_resolved");
+            return new AudioProbeResult(false, room, "unknown", string.Empty, durationSec, 0, 0, 0, null, "audio_input_not_resolved");
         }
         string selector = resolved.StartsWith("audio=", StringComparison.OrdinalIgnoreCase) ? resolved : $"audio={resolved}";
 
@@ -1559,7 +1608,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             using var proc = Process.Start(psi);
             if (proc is null)
             {
-                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, "ffmpeg_start_failed");
+                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, null, "ffmpeg_start_failed");
             }
 
             Task<string> errTask = proc.StandardError.ReadToEndAsync();
@@ -1571,38 +1620,78 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
             {
                 string err = string.IsNullOrWhiteSpace(stderr) ? $"ffmpeg_exit_{proc.ExitCode}" : stderr.Trim();
                 if (err.Length > 500) err = err[..500];
-                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, err);
+                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, null, err);
             }
 
             if (!File.Exists(probePath))
             {
-                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, "probe_file_missing");
+                return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, null, "probe_file_missing");
             }
 
             byte[] wav = await File.ReadAllBytesAsync(probePath, ct);
             (double rms, int levelPct) = ComputeWavLevel(wav);
             string signal = ClassifyAudioSignal(levelPct);
             long bytes = wav.LongLength;
-            return new AudioProbeResult(true, room, signal, selector, durationSec, bytes, rms, levelPct, null);
+            string probeId = Guid.NewGuid().ToString("N");
+            string keepPath = Path.Combine(Path.GetTempPath(), $"hidbridge_audio_probe_{probeId}.wav");
+            File.Copy(probePath, keepPath, overwrite: true);
+            lock (_lock)
+            {
+                if (_audioProbeByRoom.TryGetValue(room, out var prev))
+                {
+                    TryDeleteFile(prev.Path);
+                }
+                _audioProbeByRoom[room] = new AudioProbeArtifact(probeId, keepPath, DateTimeOffset.UtcNow, bytes);
+                CleanupExpiredAudioProbeFilesLocked();
+            }
+            return new AudioProbeResult(true, room, signal, selector, durationSec, bytes, rms, levelPct, probeId, null);
         }
         catch (OperationCanceledException)
         {
-            return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, "canceled");
+            return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, null, "canceled");
         }
         catch (Exception ex)
         {
-            return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, ex.Message);
+            return new AudioProbeResult(false, room, "unknown", selector, durationSec, 0, 0, 0, null, ex.Message);
         }
         finally
         {
-            try
+            TryDeleteFile(probePath);
+        }
+    }
+
+    private static void TryDeleteFile(string? path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
             {
-                if (File.Exists(probePath))
-                {
-                    File.Delete(probePath);
-                }
+                File.Delete(path);
             }
-            catch { }
+        }
+        catch { }
+    }
+
+    private void CleanupAudioProbeFilesLocked()
+    {
+        foreach (var item in _audioProbeByRoom.Values)
+        {
+            TryDeleteFile(item.Path);
+        }
+        _audioProbeByRoom.Clear();
+    }
+
+    private void CleanupExpiredAudioProbeFilesLocked()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var stale = _audioProbeByRoom
+            .Where(kvp => (now - kvp.Value.CreatedAtUtc) > TimeSpan.FromMinutes(AudioProbeRetentionMinutes) || !File.Exists(kvp.Value.Path))
+            .Select(kvp => (kvp.Key, kvp.Value.Path))
+            .ToArray();
+        foreach (var (roomKey, path) in stale)
+        {
+            TryDeleteFile(path);
+            _audioProbeByRoom.Remove(roomKey);
         }
     }
 

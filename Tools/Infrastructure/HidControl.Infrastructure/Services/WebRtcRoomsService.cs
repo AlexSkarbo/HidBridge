@@ -2,6 +2,8 @@ using HidControl.Application.Abstractions;
 using HidControl.Contracts;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HidControl.Infrastructure.Services;
 
@@ -12,26 +14,36 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 {
     private const int PersistFileVersion = 1;
     private const int PersistActivityWriteMinSeconds = 30;
+    private static readonly TimeSpan VideoOpLockProbeInterval = TimeSpan.FromSeconds(5);
 
     private readonly IWebRtcBackend _backend;
     private readonly IWebRtcRoomIdService _roomIds;
     private readonly IVideoProfileStore _videoProfiles;
+    private readonly ILogger<WebRtcRoomsService> _logger;
     private readonly object _videoProfilesLock = new();
     private readonly Dictionary<string, string?> _videoRoomProfiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _videoRoomOpLock = new(1, 1);
     private readonly object _persistLock = new();
     private readonly Dictionary<string, PersistedRoomState> _persistedRooms = new(StringComparer.OrdinalIgnoreCase);
     private bool _restoreAttempted;
+    private readonly object _opDiagLock = new();
+    private string? _videoOpOwner;
+    private DateTimeOffset? _videoOpOwnerSinceUtc;
 
     /// <summary>
     /// Creates an instance.
     /// </summary>
     /// <param name="backend">Backend.</param>
-    public WebRtcRoomsService(IWebRtcBackend backend, IWebRtcRoomIdService roomIds, IVideoProfileStore? videoProfiles = null)
+    public WebRtcRoomsService(
+        IWebRtcBackend backend,
+        IWebRtcRoomIdService roomIds,
+        IVideoProfileStore? videoProfiles = null,
+        ILogger<WebRtcRoomsService>? logger = null)
     {
         _backend = backend;
         _roomIds = roomIds;
         _videoProfiles = videoProfiles ?? EmptyVideoProfileStore.Instance;
+        _logger = logger ?? NullLogger<WebRtcRoomsService>.Instance;
         LoadPersistedRooms();
     }
 
@@ -69,6 +81,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         var allRooms = new HashSet<string>(peers.Keys, StringComparer.OrdinalIgnoreCase);
         foreach (var hr in helperRooms) allRooms.Add(hr);
         foreach (var pr in GetPersistedRoomIdsSnapshot()) allRooms.Add(pr);
+        foreach (var vr in GetKnownVideoRoomsSnapshot()) allRooms.Add(vr);
 
         var rooms = allRooms
             .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
@@ -91,21 +104,55 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
     /// <inheritdoc />
     public async Task<WebRtcRoomCreateResult> CreateVideoAsync(string? room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, CancellationToken ct)
     {
-        await _videoRoomOpLock.WaitAsync(ct);
+        string opId = Guid.NewGuid().ToString("N")[..8];
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _logger.LogInformation("create_video begin op={OpId} room={Room} profile={Profile}", opId, room, streamProfile);
+        bool lockHeld = false;
+        if (!await TryAcquireVideoOpLockAsync($"create:{opId}", ct))
+        {
+            var owner = GetVideoOpOwner();
+            _logger.LogWarning("create_video busy op={OpId} room={Room} owner={Owner} elapsedMs={ElapsedMs}", opId, room, owner, sw.ElapsedMilliseconds);
+            return new WebRtcRoomCreateResult(false, room, false, null, "busy");
+        }
+        lockHeld = true;
         try
         {
-            return await CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, persist: false, ct);
+            // Persist video rooms as first-class entities (even when helper is later rotated/stopped),
+            // so room list and explicit delete stay stable from UI perspective.
+            var res = await CreateInternalAsync(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, persist: true, ct);
+            _logger.LogInformation("create_video end op={OpId} room={Room} ok={Ok} started={Started} err={Err} elapsedMs={ElapsedMs}", opId, res.Room, res.Ok, res.Started, res.Error, sw.ElapsedMilliseconds);
+            return res;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("create_video canceled op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
+            return new WebRtcRoomCreateResult(false, room, false, null, "canceled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "create_video error op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
+            throw;
         }
         finally
         {
-            _videoRoomOpLock.Release();
+            if (lockHeld) ReleaseVideoOpLock($"create:{opId}");
         }
     }
 
     /// <inheritdoc />
     public async Task<WebRtcRoomDeleteResult> DeleteAsync(string room, CancellationToken ct)
     {
-        await _videoRoomOpLock.WaitAsync(ct);
+        string opId = Guid.NewGuid().ToString("N")[..8];
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _logger.LogInformation("delete begin op={OpId} room={Room}", opId, room);
+        bool lockHeld = false;
+        if (!await TryAcquireVideoOpLockAsync($"delete:{opId}", ct))
+        {
+            var owner = GetVideoOpOwner();
+            _logger.LogWarning("delete busy op={OpId} room={Room} owner={Owner} elapsedMs={ElapsedMs}", opId, room, owner, sw.ElapsedMilliseconds);
+            return new WebRtcRoomDeleteResult(false, room, false, "busy");
+        }
+        lockHeld = true;
         try
         {
         if (string.Equals(room, "control", StringComparison.OrdinalIgnoreCase))
@@ -154,16 +201,37 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
         return new WebRtcRoomDeleteResult(stop.ok, room, stop.stopped, stop.error);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("delete canceled op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
+            return new WebRtcRoomDeleteResult(false, room, false, "canceled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "delete error op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
+            throw;
+        }
         finally
         {
-            _videoRoomOpLock.Release();
+            if (lockHeld) ReleaseVideoOpLock($"delete:{opId}");
+            _logger.LogInformation("delete end op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
         }
     }
 
     /// <inheritdoc />
     public async Task<WebRtcRoomRestartResult> RestartVideoAsync(string room, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile, CancellationToken ct)
     {
-        await _videoRoomOpLock.WaitAsync(ct);
+        string opId = Guid.NewGuid().ToString("N")[..8];
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _logger.LogInformation("restart_video begin op={OpId} room={Room} profile={Profile}", opId, room, streamProfile);
+        bool lockHeld = false;
+        if (!await TryAcquireVideoOpLockAsync($"restart:{opId}", ct))
+        {
+            var owner = GetVideoOpOwner();
+            _logger.LogWarning("restart_video busy op={OpId} room={Room} owner={Owner} elapsedMs={ElapsedMs}", opId, room, owner, sw.ElapsedMilliseconds);
+            return new WebRtcRoomRestartResult(false, room, false, false, null, "busy");
+        }
+        lockHeld = true;
         try
         {
         if (string.IsNullOrWhiteSpace(room))
@@ -267,11 +335,70 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
 
         RememberRoomStreamProfile(normalizedRoom, effectiveStreamProfile);
 
-        return new WebRtcRoomRestartResult(true, normalizedRoom, stop.stopped, start.started, start.pid, null, effectiveStreamProfile);
+        var result = new WebRtcRoomRestartResult(true, normalizedRoom, stop.stopped, start.started, start.pid, null, effectiveStreamProfile);
+        _logger.LogInformation("restart_video end op={OpId} room={Room} ok={Ok} started={Started} err={Err} elapsedMs={ElapsedMs}", opId, result.Room, result.Ok, result.Started, result.Error, sw.ElapsedMilliseconds);
+        return result;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("restart_video canceled op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
+            return new WebRtcRoomRestartResult(false, room, false, false, null, "canceled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "restart_video error op={OpId} room={Room} elapsedMs={ElapsedMs}", opId, room, sw.ElapsedMilliseconds);
+            throw;
         }
         finally
         {
-            _videoRoomOpLock.Release();
+            if (lockHeld) ReleaseVideoOpLock($"restart:{opId}");
+        }
+    }
+
+    private async Task<bool> TryAcquireVideoOpLockAsync(string owner, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            bool acquired = await _videoRoomOpLock.WaitAsync(VideoOpLockProbeInterval, ct);
+            if (!acquired)
+            {
+                _logger.LogWarning("video_op_lock_wait owner={Owner} blockedBy={BlockedBy}", owner, GetVideoOpOwner());
+                continue;
+            }
+
+            lock (_opDiagLock)
+            {
+                _videoOpOwner = owner;
+                _videoOpOwnerSinceUtc = DateTimeOffset.UtcNow;
+            }
+            return true;
+        }
+    }
+
+    private void ReleaseVideoOpLock(string owner)
+    {
+        lock (_opDiagLock)
+        {
+            if (string.Equals(_videoOpOwner, owner, StringComparison.Ordinal))
+            {
+                _videoOpOwner = null;
+                _videoOpOwnerSinceUtc = null;
+            }
+        }
+        _videoRoomOpLock.Release();
+    }
+
+    private string GetVideoOpOwner()
+    {
+        lock (_opDiagLock)
+        {
+            if (string.IsNullOrWhiteSpace(_videoOpOwner))
+            {
+                return "none";
+            }
+            long heldMs = _videoOpOwnerSinceUtc.HasValue ? (long)(DateTimeOffset.UtcNow - _videoOpOwnerSinceUtc.Value).TotalMilliseconds : -1;
+            return $"{_videoOpOwner} heldMs={heldMs}";
         }
     }
 
@@ -323,6 +450,7 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
         if (ok)
         {
+            RememberKnownVideoRoom(normalized);
             RememberRoomStreamProfile(normalized, effectiveStreamProfile);
         }
         return Task.FromResult(new WebRtcRoomCreateResult(ok, normalized, started, pid, error, effectiveStreamProfile));
@@ -634,6 +762,16 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
         }
     }
 
+    private IReadOnlyList<string> GetKnownVideoRoomsSnapshot()
+    {
+        lock (_videoProfilesLock)
+        {
+            return _videoRoomProfiles.Keys
+                .Where(IsVideoRoom)
+                .ToArray();
+        }
+    }
+
     private void SavePersistedRoomsUnsafe()
     {
         if (!_backend.RoomsPersistenceEnabled)
@@ -853,6 +991,19 @@ public sealed class WebRtcRoomsService : IWebRtcRoomsService
             {
                 _videoRoomProfiles[room] = normalized;
             }
+        }
+    }
+
+    private void RememberKnownVideoRoom(string room)
+    {
+        if (!IsVideoRoom(room))
+        {
+            return;
+        }
+
+        lock (_videoProfilesLock)
+        {
+            _videoRoomProfiles.TryAdd(room, null);
         }
     }
 
