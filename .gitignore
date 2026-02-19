@@ -30,6 +30,7 @@ Tools/HidControlServer/hidcontrol.config.json
 Tools/Server/HidControlServer/hidcontrol.config.json
 Tools/HidControlServer/devices_cache.json
 Tools/HidControlServer/tmp_source.json
+USBCaptureDesc.txt
 
 # Keep workspace editor settings
 !.vscode/*

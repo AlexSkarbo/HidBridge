@@ -282,6 +282,15 @@ func (p *peerState) ensurePC(stun string) (*webrtc.PeerConnection, error) {
 				audioTrackRef = audioTrack
 			}
 		}
+	} else {
+		// Keep an explicit inactive audio m-line for better browser interoperability
+		// when users toggle audio off at room/profile level.
+		if _, trErr := pc.AddTransceiverFromKind(
+			webrtc.RTPCodecTypeAudio,
+			webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionInactive},
+		); trErr != nil {
+			log.Printf("audio transceiver(inactive) add failed: %v", trErr)
+		}
 	}
 
 	useCombinedAV := audioTrackRef != nil && runtime.GOOS == "windows" && normalizeSourceMode(p.sourceMode) == "capture" &&
@@ -1254,7 +1263,7 @@ func buildAudioPipelineArgs(sourceMode string, rawAudioInput string, bitrateKbps
 					"-vn",
 					"-ac", "2",
 					"-ar", "48000",
-					"-af", "volume=6dB",
+					"-af", audioFilterArg(),
 					"-c:a", "libopus",
 					"-application", "lowdelay",
 					"-frame_duration", "20",
@@ -1297,9 +1306,12 @@ func buildAudioPipelineArgs(sourceMode string, rawAudioInput string, bitrateKbps
 }
 
 func audioFilterArg() string {
-	gainDb := clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_GAIN_DB", 20, 0, 40), 0, 40)
-	// Raise low HDMI/capture-card levels and smooth quiet program material.
-	return fmt.Sprintf("volume=%ddB,dynaudnorm=f=150:g=12", gainDb)
+	// Slight attenuation by default; many HDMI-capture audio paths have high idle hiss floor.
+	gainDb := clamp(envIntInRange("HIDBRIDGE_VIDEO_AUDIO_GAIN_DB", -3, -18, 24), -18, 24)
+	// Gate near-silence to suppress constant hiss when source has no program audio.
+	// Threshold can be tuned by env when needed.
+	threshold := strings.TrimSpace(envOr("HIDBRIDGE_VIDEO_AUDIO_GATE_THRESHOLD", "0.05"))
+	return fmt.Sprintf("agate=threshold=%s:ratio=18:attack=8:release=220,volume=%ddB", threshold, gainDb)
 }
 
 func audioDebugToneEnabled() bool {

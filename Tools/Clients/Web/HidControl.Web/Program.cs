@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Text;
 using System.Linq;
 using HidControl.ClientSdk;
+using HidControl.Contracts;
 using System.Net.WebSockets;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -19,6 +21,40 @@ static bool ReadBoolEnv(string name, bool defaultValue = false)
     string? raw = Environment.GetEnvironmentVariable(name);
     return bool.TryParse(raw,
         out bool value) ? value : defaultValue;
+}
+
+var webLogFileLock = new object();
+var webLogFilePath = ResolveWebLogPath();
+
+string ResolveWebLogPath()
+{
+    string? raw = Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_LOG_PATH");
+    if (!string.IsNullOrWhiteSpace(raw))
+    {
+        return raw.Trim();
+    }
+    string baseDir = AppContext.BaseDirectory;
+    string logDir = Path.Combine(baseDir, "logs");
+    return Path.Combine(logDir, "hidcontrol.web.log");
+}
+
+void WebLog(string message, object? data = null)
+{
+    try
+    {
+        string line = $"[web] {DateTimeOffset.UtcNow:O} {message} {(data is null ? "{}" : JsonSerializer.Serialize(data))}";
+        Console.WriteLine(line);
+        lock (webLogFileLock)
+        {
+            string? dir = Path.GetDirectoryName(webLogFilePath);
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.AppendAllText(webLogFilePath, line + Environment.NewLine, Encoding.UTF8);
+        }
+    }
+    catch { }
 }
 
 // Web client bind config:
@@ -822,6 +858,7 @@ app.MapGet("/",
                                     let rtcAudioPlayCtx = null;
                                     let rtcAudioPlaySourceNode = null;
                                     let rtcAudioPlayGainNode = null;
+                                    let rtcCreateInFlight = false;
                                     const rtcVideoRuntime = {
                                       running: false,
                                       fallbackUsed: false,
@@ -2212,9 +2249,16 @@ app.MapGet("/",
                                           const signal = String(j.signal || "unknown");
                                           const levelPct = Number(j.levelPct || 0);
                                           const bytes = Number(j.bytes || 0);
+                                          const fileUrl = String(j.fileUrl || "").trim();
                                           rtcVideoRuntime.audioProbeSignal = signal;
                                           rtcVideoRuntime.audioProbeAtMs = Date.now();
-                                          if (rtcAudioProbeResult) rtcAudioProbeResult.textContent = `probe: ${signal}, level ${levelPct}%, ${bytes} bytes`;
+                                          if (rtcAudioProbeResult) {
+                                            if (fileUrl) {
+                                              rtcAudioProbeResult.innerHTML = `probe: ${signal}, level ${levelPct}%, ${bytes} bytes, <a href="${fileUrl}" target="_blank" rel="noopener">wav</a>`;
+                                            } else {
+                                              rtcAudioProbeResult.textContent = `probe: ${signal}, level ${levelPct}%, ${bytes} bytes`;
+                                            }
+                                          }
                                           if (rtcAudioHealthHint) {
                                             if (signal === "silence" || signal === "noise-only") {
                                               rtcAudioHealthHint.textContent = "audio hint: source should be PCM stereo 48kHz (no Dolby/DTS/bitstream)";
@@ -3544,7 +3588,21 @@ app.MapGet("/",
                                       }
                                     });
 
-                                    document.getElementById("rtcGenRoom").addEventListener("click", async () => {
+                                    // Use `onclick` (not addEventListener) to avoid duplicate handlers when UI script
+                                    // is re-evaluated by host reload/re-init flows.
+                                    document.getElementById("rtcGenRoom").onclick = async () => {
+                                      if (rtcCreateInFlight) {
+                                        rtcLog({ webrtc: "ui.room_create_skipped", reason: "in_flight" });
+                                        return;
+                                      }
+                                      rtcCreateInFlight = true;
+                                      const genBtn = document.getElementById("rtcGenRoom");
+                                      if (genBtn && genBtn.disabled) {
+                                        rtcCreateInFlight = false;
+                                        rtcLog({ webrtc: "ui.room_create_skipped", reason: "button_disabled" });
+                                        return;
+                                      }
+                                      if (genBtn) genBtn.disabled = true;
                                       try {
                                         const mode = getMode();
                                         const createUrl = (mode === "video") ? "/api/webrtc/video/rooms" : "/api/webrtc/rooms";
@@ -3564,8 +3622,11 @@ app.MapGet("/",
                                       } catch (e) {
                                         rtcLog({ webrtc: "ui.room_create_error", error: String(e) });
                                         show({ ok: false, error: String(e) });
+                                      } finally {
+                                        rtcCreateInFlight = false;
+                                        if (genBtn) genBtn.disabled = false;
                                       }
-                                    });
+                                    };
 
                                     // Try to auto-load ICE servers from the server (TURN REST) if available.
                                     (async () => {
@@ -4664,7 +4725,71 @@ app.MapPost("/api/webrtc/video/rooms/{room}/audio-probe",
             {
                 body = JsonSerializer.Serialize(new { ok = false, room, error = "empty_response" });
             }
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("ok", out var okEl) &&
+                    okEl.ValueKind == JsonValueKind.True &&
+                    doc.RootElement.TryGetProperty("probeId", out var probeIdEl))
+                {
+                    string? probeId = probeIdEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(probeId))
+                    {
+                        using var outStream = new MemoryStream();
+                        using (var writer = new Utf8JsonWriter(outStream))
+                        {
+                            writer.WriteStartObject();
+                            foreach (var p in doc.RootElement.EnumerateObject())
+                            {
+                                p.WriteTo(writer);
+                            }
+                            writer.WriteString("fileUrl", $"/api/webrtc/video/rooms/{Uri.EscapeDataString(room)}/audio-probe/file/{Uri.EscapeDataString(probeId)}");
+                            writer.WriteEndObject();
+                        }
+                        body = Encoding.UTF8.GetString(outStream.ToArray());
+                    }
+                }
+            }
+            catch
+            {
+                // keep original body
+            }
             return Results.Content(body, "application/json", statusCode: (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException)
+        {
+            return Results.Json(new { ok = false, room, error = "timeout" });
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(new { ok = false, room, error = ex.Message });
+        }
+    });
+
+app.MapGet("/api/webrtc/video/rooms/{room}/audio-probe/file/{probeId}",
+    async (string room, string probeId, CancellationToken ct) =>
+    {
+        try
+        {
+            using var http = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(20)
+            };
+            if (!string.IsNullOrWhiteSpace(token))
+                http.DefaultRequestHeaders.Add("X-HID-Token", token);
+            string url = $"{serverUrl.TrimEnd('/')}/status/webrtc/video/rooms/{Uri.EscapeDataString(room)}/audio-probe/file/{Uri.EscapeDataString(probeId)}";
+            using var resp = await http.GetAsync(url, ct);
+            byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+            string contentType = resp.Content.Headers.ContentType?.MediaType ?? "audio/wav";
+            string fileName = resp.Content.Headers.ContentDisposition?.FileNameStar
+                              ?? resp.Content.Headers.ContentDisposition?.FileName
+                              ?? $"hidbridge_audio_probe_{room}_{probeId}.wav";
+            if (resp.IsSuccessStatusCode)
+            {
+                return Results.File(bytes, contentType, fileName);
+            }
+            return Results.Content(Encoding.UTF8.GetString(bytes), "application/json", statusCode: (int)resp.StatusCode);
         }
         catch (TaskCanceledException)
         {
@@ -5039,6 +5164,8 @@ app.MapPost("/api/webrtc/video/rooms",
     async (HttpRequest req,
         CancellationToken ct) =>
     {
+        string opId = Guid.NewGuid().ToString("N")[..8];
+        HashSet<string> preRooms = new(StringComparer.OrdinalIgnoreCase);
         HidControl.Contracts.WebRtcCreateVideoRoomRequest body = new(null,
             null,
             null,
@@ -5053,18 +5180,30 @@ app.MapPost("/api/webrtc/video/rooms",
             null);
         try
         {
+            WebLog("webrtc.web.create_video_proxy_begin", new { opId });
             using var http = new HttpClient
             {
-                Timeout = TimeSpan.FromSeconds(60)
+                Timeout = TimeSpan.FromSeconds(120)
             };
+            http.DefaultRequestHeaders.Add("X-Web-OpId", opId);
             if (!string.IsNullOrWhiteSpace(token))
                 http.DefaultRequestHeaders.Add("X-HID-Token",
                     token);
             var client = new HidControl.ClientSdk.HidControlClient(http,
                 new Uri(serverUrl));
+            try
+            {
+                var pre = await HidControl.ClientSdk.WebRtcClientExtensions.ListWebRtcVideoRoomsAsync(client, CancellationToken.None);
+                foreach (var r in pre?.Rooms ?? Array.Empty<WebRtcRoomDto>())
+                {
+                    if (!string.IsNullOrWhiteSpace(r.Room)) preRooms.Add(r.Room);
+                }
+            }
+            catch { }
             body =
                 await req.ReadFromJsonAsync<HidControl.Contracts.WebRtcCreateVideoRoomRequest>(cancellationToken: ct) ??
                 body;
+            WebLog("webrtc.web.create_video_proxy_request", new { opId, requestedRoom = body.Room, profile = body.StreamProfile });
             var res = await HidControl.ClientSdk.WebRtcClientExtensions.CreateWebRtcVideoRoomAsync(
                 client,
                 body.Room,
@@ -5080,6 +5219,7 @@ app.MapPost("/api/webrtc/video/rooms",
                 body.AudioBitrateKbps,
                 body.StreamProfile,
                 CancellationToken.None);
+            WebLog("webrtc.web.create_video_proxy_end", new { opId, ok = res?.Ok, room = res?.Room, started = res?.Started, error = res?.Error });
             return Results.Json(res ??
                                 new HidControl.Contracts.WebRtcCreateRoomResponse(false,
                                     null,
@@ -5089,6 +5229,7 @@ app.MapPost("/api/webrtc/video/rooms",
         }
         catch (TaskCanceledException)
         {
+            WebLog("webrtc.web.create_video_proxy_timeout", new { opId, requestedRoom = body.Room, profile = body.StreamProfile });
             try
             {
                 // Best-effort recovery: helper startup may complete while the proxy request times out.
@@ -5146,6 +5287,23 @@ app.MapPost("/api/webrtc/video/rooms",
                         }
                     }
                 }
+                else
+                {
+                    var added = (list?.Rooms ?? Array.Empty<WebRtcRoomDto>())
+                        .Select(r => r.Room)
+                        .Where(r => !string.IsNullOrWhiteSpace(r) && !preRooms.Contains(r!))
+                        .ToArray();
+                    if (added.Length > 0)
+                    {
+                        var resolved = added.FirstOrDefault(r => r!.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase))
+                                      ?? added[0];
+                        return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(true,
+                            resolved,
+                            false,
+                            null,
+                            null));
+                    }
+                }
             }
             catch
             {
@@ -5160,6 +5318,7 @@ app.MapPost("/api/webrtc/video/rooms",
         }
         catch (Exception ex)
         {
+            WebLog("webrtc.web.create_video_proxy_error", new { opId, requestedRoom = body.Room, error = ex.Message });
             return Results.Json(new HidControl.Contracts.WebRtcCreateRoomResponse(false,
                 null,
                 false,

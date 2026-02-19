@@ -70,29 +70,60 @@ public static class WebRtcStatusEndpoints
 
         app.MapGet("/status/webrtc/video/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
         {
-            var snap = await uc.Execute(ct);
-            var rooms = snap.Rooms
-                .Where(r =>
-                    string.Equals(r.Room, "video", StringComparison.OrdinalIgnoreCase) ||
-                    r.Room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase) ||
-                    r.Room.StartsWith("video-", StringComparison.OrdinalIgnoreCase))
-                .Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper })
-                .ToArray();
-            return Results.Ok(new { ok = true, rooms });
+            string opId = Guid.NewGuid().ToString("N")[..8];
+            try
+            {
+                var snap = await uc.Execute(ct);
+                var rooms = snap.Rooms
+                    .Where(r =>
+                        string.Equals(r.Room, "video", StringComparison.OrdinalIgnoreCase) ||
+                        r.Room.StartsWith("hb-v-", StringComparison.OrdinalIgnoreCase) ||
+                        r.Room.StartsWith("video-", StringComparison.OrdinalIgnoreCase))
+                    .Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper })
+                    .ToArray();
+                ServerEventLog.Log("webrtc.rooms", "list_video", new { opId, ok = true, count = rooms.Length });
+                return Results.Ok(new { ok = true, rooms });
+            }
+            catch (OperationCanceledException)
+            {
+                ServerEventLog.Log("webrtc.rooms", "list_video", new { opId, ok = false, error = "canceled" });
+                return Results.Ok(new { ok = false, rooms = Array.Empty<object>(), error = "canceled" });
+            }
         });
 
         app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
-            (string? roomId, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
-            var res = await uc.Execute(roomId, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
-            return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
+            string opId = Guid.NewGuid().ToString("N")[..8];
+            string? webOpId = req.Headers.TryGetValue("X-Web-OpId", out var h) ? h.ToString() : null;
+            try
+            {
+                (string? roomId, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
+                var res = await uc.Execute(roomId, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
+                ServerEventLog.Log("webrtc.rooms", "create_video", new { opId, webOpId, requestedRoom = roomId, room = res.Room, ok = res.Ok, started = res.Started, error = res.Error, profile = res.StreamProfile });
+                return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
+            }
+            catch (OperationCanceledException)
+            {
+                ServerEventLog.Log("webrtc.rooms", "create_video", new { opId, webOpId, ok = false, error = "canceled" });
+                return Results.Ok(new { ok = false, room = string.Empty, started = false, pid = (int?)null, error = "canceled", streamProfile = (string?)null });
+            }
         });
 
         app.MapPost("/status/webrtc/video/rooms/{room}/restart", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] RestartWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
-            (_, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
-            var res = await uc.Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
-            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
+            string opId = Guid.NewGuid().ToString("N")[..8];
+            try
+            {
+                (_, string? qualityPreset, int? bitrateKbps, int? fps, int? imageQuality, string? captureInput, string? encoder, string? codec, bool? audioEnabled, string? audioInput, int? audioBitrateKbps, string? streamProfile) = await ReadRequestedVideoRoomAsync(req, ct);
+                var res = await uc.Execute(room, qualityPreset, bitrateKbps, fps, imageQuality, captureInput, encoder, codec, audioEnabled, audioInput, audioBitrateKbps, streamProfile, ct);
+                ServerEventLog.Log("webrtc.rooms", "restart_video", new { opId, room = res.Room, ok = res.Ok, stopped = res.Stopped, started = res.Started, error = res.Error, profile = res.StreamProfile });
+                return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
+            }
+            catch (OperationCanceledException)
+            {
+                ServerEventLog.Log("webrtc.rooms", "restart_video", new { opId, room, ok = false, error = "canceled" });
+                return Results.Ok(new { ok = false, room, stopped = false, started = false, pid = (int?)null, error = "canceled", streamProfile = (string?)null });
+            }
         });
 
         app.MapGet("/status/webrtc/video/rooms/{room}/profile", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
@@ -119,8 +150,18 @@ public static class WebRtcStatusEndpoints
 
         app.MapDelete("/status/webrtc/video/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
-            var res = await uc.Execute(room, ct);
-            return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
+            string opId = Guid.NewGuid().ToString("N")[..8];
+            try
+            {
+                var res = await uc.Execute(room, ct);
+                ServerEventLog.Log("webrtc.rooms", "delete_video", new { opId, room = res.Room, ok = res.Ok, stopped = res.Stopped, error = res.Error });
+                return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
+            }
+            catch (OperationCanceledException)
+            {
+                ServerEventLog.Log("webrtc.rooms", "delete_video", new { opId, room, ok = false, error = "canceled" });
+                return Results.Ok(new { ok = false, room, stopped = false, error = "canceled" });
+            }
         });
 
         app.MapGet("/status/webrtc/video/peers/{room}", (string room, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
@@ -187,8 +228,27 @@ public static class WebRtcStatusEndpoints
                 bytes = result.Bytes,
                 rms = result.Rms,
                 levelPct = result.LevelPct,
+                probeId = result.ProbeId,
+                fileUrl = result.Ok && !string.IsNullOrWhiteSpace(result.ProbeId)
+                    ? $"/status/webrtc/video/rooms/{Uri.EscapeDataString(room)}/audio-probe/file/{Uri.EscapeDataString(result.ProbeId!)}"
+                    : null,
                 error = result.Error
             });
+        });
+
+        app.MapGet("/status/webrtc/video/rooms/{room}/audio-probe/file/{probeId}", (string room, string probeId, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
+        {
+            var file = sup.GetAudioProbeFile(room);
+            if (!file.Ok || string.IsNullOrWhiteSpace(file.Path) || string.IsNullOrWhiteSpace(file.FileName))
+            {
+                return Results.NotFound(new { ok = false, room, error = file.Error ?? "probe_not_found" });
+            }
+            // Prevent stale links pointing to a newer room probe artifact.
+            if (!string.Equals(Path.GetFileNameWithoutExtension(file.Path), $"hidbridge_audio_probe_{probeId}", StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.NotFound(new { ok = false, room, error = "probe_not_found" });
+            }
+            return Results.File(file.Path, "audio/wav", file.FileName);
         });
     }
 

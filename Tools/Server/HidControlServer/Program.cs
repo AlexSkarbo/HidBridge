@@ -15,6 +15,7 @@ using System.Text.Json.Serialization;
 using HidControlServer.Endpoints.System;
 using Microsoft.OpenApi;
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 // Parse CLI/config options and resolve effective serial port settings.
 var options = Options.Parse(args);
@@ -60,6 +61,16 @@ var appState = new AppState
 // Configure ASP.NET Core host and DI container.
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(VideoUrlService.BuildBindUrls(options));
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(o =>
+{
+    o.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ ";
+    o.SingleLine = true;
+});
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+builder.Logging.AddFilter("System", LogLevel.Warning);
+builder.Logging.AddFilter("HidControl.Infrastructure.Services.WebRtcRoomsService", LogLevel.Information);
 builder.Services.Configure<JsonOptions>(o =>
 {
     o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;

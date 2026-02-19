@@ -10,6 +10,7 @@ public sealed class VideoRuntimeAdapter : IVideoRuntime
 {
     private readonly AppState _state;
     private static int _debugStopTracesRemaining = 5;
+    private static readonly TimeSpan CaptureWorkerDisposeTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// Executes VideoRuntimeAdapter.
@@ -53,7 +54,11 @@ public sealed class VideoRuntimeAdapter : IVideoRuntime
             {
                 try
                 {
-                    await worker.DisposeAsync();
+                    await worker.DisposeAsync().AsTask().WaitAsync(CaptureWorkerDisposeTimeout, cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    ServerEventLog.Log("capture.worker", "dispose_timeout", new { id = kvp.Key, timeoutMs = (int)CaptureWorkerDisposeTimeout.TotalMilliseconds });
                 }
                 catch
                 {
