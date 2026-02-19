@@ -82,6 +82,40 @@ public static class SystemEndpoints
                 migrateSqliteToPgDeprecated = true,
                 stateStorePath = Path.Combine(Directory.GetCurrentDirectory(), "hidcontrol.state.json"),
                 stateStoreAuthoritativeForMutableState = true,
+                authoritativeSources = new
+                {
+                    videoProfiles = "hidcontrol.state.json",
+                    activeVideoProfile = "hidcontrol.state.json",
+                    roomProfileBindings = "hidcontrol.state.json",
+                    mouseMappings = !string.IsNullOrWhiteSpace(opt.PgConnectionString) ? "postgresql" : "sqlite_legacy"
+                },
+                deprecations = new
+                {
+                    mouseMappingDb = new
+                    {
+                        deprecated = true,
+                        replacement = "pgConnectionString",
+                        removalTarget = "day4_or_next_release"
+                    },
+                    migrateSqliteToPg = new
+                    {
+                        deprecated = true,
+                        replacement = "startup_import_from_sqlite_marker",
+                        removalTarget = "day4_or_next_release"
+                    },
+                    videoProfilesInConfig = new
+                    {
+                        deprecated = true,
+                        replacement = "hidcontrol.state.json.videoProfiles",
+                        removalTarget = "day4_or_next_release"
+                    },
+                    activeVideoProfileInConfig = new
+                    {
+                        deprecated = true,
+                        replacement = "hidcontrol.state.json.activeVideoProfile",
+                        removalTarget = "day4_or_next_release"
+                    }
+                },
                 mouseReportLen = opt.MouseReportLen,
                 injectQueueCapacity = opt.InjectQueueCapacity,
                 injectDropThreshold = opt.InjectDropThreshold,
@@ -256,6 +290,40 @@ public static class SystemEndpoints
                     migrateSqliteToPgDeprecated = true,
                     stateStorePath = Path.Combine(Directory.GetCurrentDirectory(), "hidcontrol.state.json"),
                     stateStoreAuthoritativeForMutableState = true,
+                    authoritativeSources = new
+                    {
+                        videoProfiles = "hidcontrol.state.json",
+                        activeVideoProfile = "hidcontrol.state.json",
+                        roomProfileBindings = "hidcontrol.state.json",
+                        mouseMappings = !string.IsNullOrWhiteSpace(opt.PgConnectionString) ? "postgresql" : "sqlite_legacy"
+                    },
+                    deprecations = new
+                    {
+                        mouseMappingDb = new
+                        {
+                            deprecated = true,
+                            replacement = "pgConnectionString",
+                            removalTarget = "day4_or_next_release"
+                        },
+                        migrateSqliteToPg = new
+                        {
+                            deprecated = true,
+                            replacement = "startup_import_from_sqlite_marker",
+                            removalTarget = "day4_or_next_release"
+                        },
+                        videoProfilesInConfig = new
+                        {
+                            deprecated = true,
+                            replacement = "hidcontrol.state.json.videoProfiles",
+                            removalTarget = "day4_or_next_release"
+                        },
+                        activeVideoProfileInConfig = new
+                        {
+                            deprecated = true,
+                            replacement = "hidcontrol.state.json.activeVideoProfile",
+                            removalTarget = "day4_or_next_release"
+                        }
+                    },
                     uartHmacKeySet = !string.IsNullOrWhiteSpace(opt.UartHmacKey),
                     mouseLeftMask = opt.MouseLeftMask,
                     mouseRightMask = opt.MouseRightMask,

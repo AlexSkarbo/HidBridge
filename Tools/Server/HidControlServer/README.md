@@ -286,6 +286,28 @@ curl -X POST http://127.0.0.1:8080/video/profiles/active \
   -d "{\"name\":\"auto\"}"
 ```
 
+## Storage authority and deprecations
+
+Authoritative mutable state:
+
+- `videoProfiles`, `activeVideoProfile`, `roomProfileBindings` -> `hidcontrol.state.json`
+- room runtime registry -> `webrtc_rooms.json` (when enabled)
+
+Inspect current authority/deprecations via:
+
+```bash
+curl http://127.0.0.1:8080/config
+curl http://127.0.0.1:8080/status/storage
+```
+
+Legacy/deprecated config fields (kept for compatibility only):
+
+- `MouseMappingDb` (prefer `pgConnectionString`)
+- `MigrateSqliteToPg` (startup import path; planned removal)
+- `videoProfiles` / `activeVideoProfile` in `hidcontrol.config.json` (state-store is authoritative at runtime)
+
+Planned cleanup target: Day 4 / next release.
+
 Дефолтні порти:
 
 - RTSP: `8554`
