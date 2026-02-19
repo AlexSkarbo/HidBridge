@@ -1,4 +1,5 @@
 using HidControl.UseCases.Video;
+using System.Text.Json;
 
 namespace HidControlServer.Services;
 
@@ -27,7 +28,7 @@ internal static class ServerStartupService
         {
             var mouseStore = app.Services.GetRequiredService<MouseMappingStore>();
             var keyboardStore = app.Services.GetRequiredService<KeyboardMappingStore>();
-            _ = Task.Run(() => SqliteMappingMigrator.MigrateAsync(opt.MouseMappingDb, mouseStore, keyboardStore, app.Lifetime.ApplicationStopping));
+            _ = Task.Run(() => RunSqliteImportOnceAsync(opt.MouseMappingDb, mouseStore, keyboardStore, app.Lifetime.ApplicationStopping));
         }
         if (opt.DevicesAutoRefreshMs > 0)
         {
@@ -87,6 +88,54 @@ internal static class ServerStartupService
         else
         {
             ServerEventLog.Log("watchdog", "disabled", new { opt.FfmpegWatchdogEnabled });
+        }
+    }
+
+    private static async Task RunSqliteImportOnceAsync(
+        string sqlitePath,
+        MouseMappingStore mouseStore,
+        KeyboardMappingStore keyboardStore,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sqlitePath))
+        {
+            return;
+        }
+
+        string markerPath = $"{sqlitePath}.imported_to_pg.marker.json";
+        if (File.Exists(markerPath))
+        {
+            ServerEventLog.Log("storage", "sqlite_import_skipped", new { reason = "marker_exists", markerPath });
+            return;
+        }
+
+        if (!File.Exists(sqlitePath))
+        {
+            ServerEventLog.Log("storage", "sqlite_import_skipped", new { reason = "sqlite_missing", sqlitePath });
+            return;
+        }
+
+        try
+        {
+            ServerEventLog.Log("storage", "sqlite_import_begin", new { sqlitePath, markerPath });
+            await SqliteMappingMigrator.MigrateAsync(sqlitePath, mouseStore, keyboardStore, ct);
+            var marker = new
+            {
+                migratedAtUtc = DateTimeOffset.UtcNow,
+                sqlitePath
+            };
+            string? markerDir = Path.GetDirectoryName(markerPath);
+            Directory.CreateDirectory(string.IsNullOrWhiteSpace(markerDir) ? Directory.GetCurrentDirectory() : markerDir);
+            await File.WriteAllTextAsync(markerPath, JsonSerializer.Serialize(marker), ct);
+            ServerEventLog.Log("storage", "sqlite_import_done", new { markerPath });
+        }
+        catch (OperationCanceledException)
+        {
+            ServerEventLog.Log("storage", "sqlite_import_canceled", new { sqlitePath });
+        }
+        catch (Exception ex)
+        {
+            ServerEventLog.Log("storage", "sqlite_import_failed", new { sqlitePath, error = ex.Message });
         }
     }
 }
