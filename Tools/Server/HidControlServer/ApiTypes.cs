@@ -808,7 +808,7 @@ public sealed record Options(
         int videoModesCacheTtlSeconds = cfg?.VideoModesCacheTtlSeconds ?? 300;
         int devicesCacheMaxAgeSeconds = cfg?.DevicesCacheMaxAgeSeconds ?? 600;
         int serverEventLogMaxEntries = cfg?.ServerEventLogMaxEntries ?? 200;
-        string serverLogDir = ResolvePath(baseDir, cfg?.ServerLogDir, "logs");
+        string serverLogDir = ResolvePath(Directory.GetCurrentDirectory(), cfg?.ServerLogDir, "logs");
         int serverLogRotateMinutes = cfg?.ServerLogRotateMinutes ?? 60;
         int serverLogRetentionMinutes = cfg?.ServerLogRetentionMinutes ?? (24 * 60);
         bool webRtcControlPeerAutoStart = cfg?.WebRtcControlPeerAutoStart ?? false;
@@ -1195,7 +1195,7 @@ public sealed record Options(
             }
             else if (a == "--serverLogDir" && v is not null)
             {
-                serverLogDir = ResolvePath(baseDir, v, "logs");
+                serverLogDir = ResolvePath(Directory.GetCurrentDirectory(), v, "logs");
                 i++;
             }
             else if (a == "--serverLogRotateMinutes" && v is not null && int.TryParse(v, out int slrm))
@@ -1211,7 +1211,7 @@ public sealed record Options(
         }
 
         ffmpegPath = ResolveExecutablePath(baseDir, ffmpegPath, "ffmpeg", "ffmpeg");
-        serverLogDir = ResolvePath(baseDir, serverLogDir, "logs");
+        serverLogDir = ResolvePath(Directory.GetCurrentDirectory(), serverLogDir, "logs");
         serverLogRotateMinutes = Math.Max(1, serverLogRotateMinutes);
         serverLogRetentionMinutes = Math.Max(serverLogRotateMinutes, serverLogRetentionMinutes);
 

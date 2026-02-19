@@ -10,6 +10,7 @@ using System.IO;
 using System.Text.Json.Serialization;
 using System.Globalization;
 using HidControl.Web;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(o =>
@@ -26,7 +27,7 @@ static bool ReadBoolEnv(string name, bool defaultValue = false)
 
 int webLogRotateMinutes = int.TryParse(Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_LOG_ROTATE_MINUTES"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var wrot) ? Math.Max(1, wrot) : 60;
 int webLogRetentionMinutes = int.TryParse(Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_LOG_RETENTION_MINUTES"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var wret) ? Math.Max(webLogRotateMinutes, wret) : (24 * 60);
-string webLogDir = Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_LOG_DIR")?.Trim() ?? Path.Combine(AppContext.BaseDirectory, "logs");
+string webLogDir = Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_LOG_DIR")?.Trim() ?? Path.Combine(Directory.GetCurrentDirectory(), "logs");
 string webLogPrefix = "hidcontrol.web";
 string? webLogPathCompat = Environment.GetEnvironmentVariable("HIDBRIDGE_WEB_LOG_PATH");
 if (!string.IsNullOrWhiteSpace(webLogPathCompat))
@@ -43,7 +44,14 @@ if (!string.IsNullOrWhiteSpace(webLogPathCompat))
         webLogPrefix = compatPrefix;
     }
 }
-var webFileLog = new ClockRollingTextFile(webLogDir, webLogPrefix, webLogRotateMinutes, webLogRetentionMinutes);
+if (!Path.IsPathRooted(webLogDir))
+{
+    webLogDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), webLogDir));
+}
+builder.Logging.AddProvider(new ClockRollingFileLoggerProvider(webLogDir, webLogPrefix, webLogRotateMinutes, webLogRetentionMinutes));
+builder.Logging.AddFilter("Microsoft", LogLevel.Information);
+builder.Logging.AddFilter("System", LogLevel.Warning);
+ILogger? webDiagLogger = null;
 
 void WebLog(string message, object? data = null)
 {
@@ -51,7 +59,7 @@ void WebLog(string message, object? data = null)
     {
         string line = $"[web] {DateTimeOffset.UtcNow:O} {message} {(data is null ? "{}" : JsonSerializer.Serialize(data))}";
         Console.WriteLine(line);
-        webFileLog.WriteLine(line);
+        webDiagLogger?.LogInformation("{Line}", line);
     }
     catch { }
 }
@@ -93,10 +101,7 @@ else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCOR
 }
 
 var app = builder.Build();
-app.Lifetime.ApplicationStopping.Register(() =>
-{
-    try { webFileLog.Dispose(); } catch { }
-});
+webDiagLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("HidControl.Web.Diagnostics");
 app.UseWebSockets();
 app.UseStaticFiles();
 

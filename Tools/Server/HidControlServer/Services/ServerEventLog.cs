@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace HidControlServer.Services;
 
@@ -11,14 +12,14 @@ internal static class ServerEventLog
     private static ServerEvent[] _buffer = Array.Empty<ServerEvent>();
     private static int _count;
     private static int _next;
-    private static string _logPath = string.Empty;
+    private static ILogger? _logger;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
     };
 
     /// <summary>
-    /// Configures the event log buffer and log file location.
+    /// Configures the event log buffer.
     /// </summary>
     /// <param name="maxEntries">Maximum number of events to keep in memory.</param>
     public static void Configure(int maxEntries)
@@ -27,16 +28,40 @@ internal static class ServerEventLog
         {
             maxEntries = 1;
         }
-        string logDir = Path.Combine(AppContext.BaseDirectory, "logs");
-        Directory.CreateDirectory(logDir);
-        _logPath = Path.Combine(logDir, "server.log");
-
+        try
+        {
+            string[] legacyPaths =
+            {
+                Path.Combine(AppContext.BaseDirectory, "logs", "server.log"),
+                Path.Combine(Directory.GetCurrentDirectory(), "logs", "server.log")
+            };
+            foreach (string legacyPath in legacyPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (File.Exists(legacyPath))
+                {
+                    File.Delete(legacyPath);
+                }
+            }
+        }
+        catch
+        {
+            // ignore cleanup failures
+        }
         lock (Gate)
         {
             _buffer = new ServerEvent[maxEntries];
             _count = 0;
             _next = 0;
         }
+    }
+
+    /// <summary>
+    /// Binds a structured logger used for persisted server-event output.
+    /// </summary>
+    /// <param name="logger">Target logger.</param>
+    public static void BindLogger(ILogger logger)
+    {
+        _logger = logger;
     }
 
     /// <summary>
@@ -64,8 +89,7 @@ internal static class ServerEventLog
 
         try
         {
-            string line = JsonSerializer.Serialize(entry, JsonOptions);
-            File.AppendAllText(_logPath, line + Environment.NewLine);
+            _logger?.LogInformation("server_event category={Category} message={Message} data={DataJson}", entry.Category, entry.Message, entry.DataJson);
         }
         catch
         {

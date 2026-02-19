@@ -233,6 +233,7 @@ builder.Services.AddOpenApi(openApiOptions =>
 
 // Build the web application pipeline.
 var app = builder.Build();
+ServerEventLog.BindLogger(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ServerEventLog"));
 
 // Developer UX endpoints.
 //app.UseSwagger();
