@@ -87,6 +87,11 @@ builder.Logging.SetMinimumLevel(LogLevel.Information);
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
 builder.Logging.AddFilter("System", LogLevel.Warning);
 builder.Logging.AddFilter("HidControl.Infrastructure.Services.WebRtcRoomsService", LogLevel.Information);
+builder.Logging.AddProvider(new ClockRollingFileLoggerProvider(
+    options.ServerLogDir,
+    "hidcontrol.server",
+    options.ServerLogRotateMinutes,
+    options.ServerLogRetentionMinutes));
 builder.Services.Configure<JsonOptions>(o =>
 {
     o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;

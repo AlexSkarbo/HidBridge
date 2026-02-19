@@ -120,6 +120,9 @@ public static class Hex
 /// <param name="VideoModesCacheTtlSeconds">VideoModesCacheTtlSeconds.</param>
 /// <param name="DevicesCacheMaxAgeSeconds">DevicesCacheMaxAgeSeconds.</param>
 /// <param name="ServerEventLogMaxEntries">ServerEventLogMaxEntries.</param>
+/// <param name="ServerLogDir">ServerLogDir.</param>
+/// <param name="ServerLogRotateMinutes">ServerLogRotateMinutes.</param>
+/// <param name="ServerLogRetentionMinutes">ServerLogRetentionMinutes.</param>
 /// <param name="WebRtcControlPeerAutoStart">WebRtcControlPeerAutoStart.</param>
 /// <param name="WebRtcControlPeerRoom">WebRtcControlPeerRoom.</param>
 /// <param name="WebRtcControlPeerStun">WebRtcControlPeerStun.</param>
@@ -214,6 +217,9 @@ public sealed record Options(
     int VideoModesCacheTtlSeconds,
     int DevicesCacheMaxAgeSeconds,
     int ServerEventLogMaxEntries,
+    string ServerLogDir,
+    int ServerLogRotateMinutes,
+    int ServerLogRetentionMinutes,
     bool WebRtcControlPeerAutoStart,
     string WebRtcControlPeerRoom,
     string WebRtcControlPeerStun,
@@ -550,6 +556,9 @@ public sealed record Options(
         int? VideoModesCacheTtlSeconds,
         int? DevicesCacheMaxAgeSeconds,
         int? ServerEventLogMaxEntries,
+        string? ServerLogDir,
+        int? ServerLogRotateMinutes,
+        int? ServerLogRetentionMinutes,
         bool? WebRtcControlPeerAutoStart,
         string? WebRtcControlPeerRoom,
         string? WebRtcControlPeerStun,
@@ -799,6 +808,9 @@ public sealed record Options(
         int videoModesCacheTtlSeconds = cfg?.VideoModesCacheTtlSeconds ?? 300;
         int devicesCacheMaxAgeSeconds = cfg?.DevicesCacheMaxAgeSeconds ?? 600;
         int serverEventLogMaxEntries = cfg?.ServerEventLogMaxEntries ?? 200;
+        string serverLogDir = ResolvePath(baseDir, cfg?.ServerLogDir, "logs");
+        int serverLogRotateMinutes = cfg?.ServerLogRotateMinutes ?? 60;
+        int serverLogRetentionMinutes = cfg?.ServerLogRetentionMinutes ?? (24 * 60);
         bool webRtcControlPeerAutoStart = cfg?.WebRtcControlPeerAutoStart ?? false;
         string webRtcControlPeerRoom = cfg?.WebRtcControlPeerRoom ?? "control";
         string webRtcControlPeerStun = cfg?.WebRtcControlPeerStun ?? "stun:stun.l.google.com:19302";
@@ -1176,9 +1188,32 @@ public sealed record Options(
                 devicesCacheMaxAgeSeconds = dcma;
                 i++;
             }
+            else if (a == "--serverEventLogMaxEntries" && v is not null && int.TryParse(v, out int selm))
+            {
+                serverEventLogMaxEntries = selm;
+                i++;
+            }
+            else if (a == "--serverLogDir" && v is not null)
+            {
+                serverLogDir = ResolvePath(baseDir, v, "logs");
+                i++;
+            }
+            else if (a == "--serverLogRotateMinutes" && v is not null && int.TryParse(v, out int slrm))
+            {
+                serverLogRotateMinutes = slrm;
+                i++;
+            }
+            else if (a == "--serverLogRetentionMinutes" && v is not null && int.TryParse(v, out int slret))
+            {
+                serverLogRetentionMinutes = slret;
+                i++;
+            }
         }
 
         ffmpegPath = ResolveExecutablePath(baseDir, ffmpegPath, "ffmpeg", "ffmpeg");
+        serverLogDir = ResolvePath(baseDir, serverLogDir, "logs");
+        serverLogRotateMinutes = Math.Max(1, serverLogRotateMinutes);
+        serverLogRetentionMinutes = Math.Max(serverLogRotateMinutes, serverLogRetentionMinutes);
 
         /// <summary>
         /// Executes Options.
@@ -1281,6 +1316,9 @@ public sealed record Options(
             videoModesCacheTtlSeconds,
             devicesCacheMaxAgeSeconds,
             serverEventLogMaxEntries,
+            serverLogDir,
+            serverLogRotateMinutes,
+            serverLogRetentionMinutes,
             webRtcControlPeerAutoStart,
             webRtcControlPeerRoom,
             webRtcControlPeerStun,
