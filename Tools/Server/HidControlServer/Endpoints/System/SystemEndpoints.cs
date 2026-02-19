@@ -121,7 +121,7 @@ public static class SystemEndpoints
 
         app.MapGet("/status/storage", (Options opt, IHidStateStore stateStore) =>
         {
-            string statePath = Path.Combine(Directory.GetCurrentDirectory(), "hidcontrol.state.json");
+            HidStateStoreStatus stateStatus = stateStore.GetStatus();
             string sqlitePath = opt.MouseMappingDb;
             string markerPath = $"{sqlitePath}.imported_to_pg.marker.json";
             var snapshot = stateStore.Load();
@@ -136,11 +136,20 @@ public static class SystemEndpoints
                 sqliteImportMode = opt.MigrateSqliteToPg ? "deprecated" : "disabled",
                 sqliteImportMarkerPath = markerPath,
                 sqliteImportMarkerExists = File.Exists(markerPath),
+                authoritativeSource = new
+                {
+                    profiles = "hidcontrol.state.json",
+                    activeProfile = "hidcontrol.state.json",
+                    roomProfileBindings = "hidcontrol.state.json"
+                },
                 stateStore = new
                 {
-                    backend = "json",
-                    path = statePath,
-                    exists = File.Exists(statePath),
+                    backend = stateStatus.Backend,
+                    schemaVersion = stateStatus.SchemaVersion,
+                    path = stateStatus.Path,
+                    exists = stateStatus.Exists,
+                    fileSizeBytes = stateStatus.FileSizeBytes,
+                    lastWriteUtc = stateStatus.LastWriteUtc,
                     profilesCount = snapshot.VideoProfiles.Count,
                     activeProfile = snapshot.ActiveVideoProfile,
                     roomBindingsCount = snapshot.RoomProfileBindings.Count

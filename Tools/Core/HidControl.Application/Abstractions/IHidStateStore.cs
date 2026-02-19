@@ -1,4 +1,5 @@
 using HidControl.Contracts;
+using System;
 
 namespace HidControl.Application.Abstractions;
 
@@ -12,6 +13,23 @@ public sealed record HidStateSnapshot(
     IReadOnlyList<VideoProfileConfig> VideoProfiles,
     string? ActiveVideoProfile,
     IReadOnlyDictionary<string, string?> RoomProfileBindings);
+
+/// <summary>
+/// State store diagnostics snapshot.
+/// </summary>
+/// <param name="Backend">Backend kind.</param>
+/// <param name="SchemaVersion">Schema version.</param>
+/// <param name="Path">State path.</param>
+/// <param name="Exists">Whether state file exists.</param>
+/// <param name="FileSizeBytes">File size in bytes.</param>
+/// <param name="LastWriteUtc">Last write timestamp (UTC).</param>
+public sealed record HidStateStoreStatus(
+    string Backend,
+    int SchemaVersion,
+    string Path,
+    bool Exists,
+    long? FileSizeBytes,
+    DateTimeOffset? LastWriteUtc);
 
 /// <summary>
 /// Persistent store for mutable runtime-managed state.
@@ -36,4 +54,10 @@ public interface IHidStateStore
     /// </summary>
     /// <param name="bindings">Bindings.</param>
     void SaveRoomProfileBindings(IReadOnlyDictionary<string, string?> bindings);
+
+    /// <summary>
+    /// Returns store diagnostics.
+    /// </summary>
+    /// <returns>Status snapshot.</returns>
+    HidStateStoreStatus GetStatus();
 }

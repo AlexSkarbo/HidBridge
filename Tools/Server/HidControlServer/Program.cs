@@ -61,11 +61,18 @@ var appState = new AppState
 // Mutable runtime-managed state store (profiles, room-profile bindings).
 string hidStateStorePath = Path.Combine(Directory.GetCurrentDirectory(), "hidcontrol.state.json");
 var hidStateStore = new JsonHidStateStore(hidStateStorePath);
+bool hidStateExists = File.Exists(hidStateStorePath);
+if (!hidStateExists)
+{
+    // First run bootstrap only: seed mutable state from config, then state-store becomes authoritative.
+    hidStateStore.SaveVideoProfiles(options.VideoProfiles, options.ActiveVideoProfile);
+    hidStateStore.SaveRoomProfileBindings(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase));
+}
 var hidStateSnapshot = hidStateStore.Load();
-var bootProfiles = hidStateSnapshot.VideoProfiles.Count > 0 ? hidStateSnapshot.VideoProfiles : options.VideoProfiles;
-string bootActiveProfile = !string.IsNullOrWhiteSpace(hidStateSnapshot.ActiveVideoProfile)
-    ? hidStateSnapshot.ActiveVideoProfile!
-    : options.ActiveVideoProfile;
+var bootProfiles = hidStateSnapshot.VideoProfiles;
+string bootActiveProfile = string.IsNullOrWhiteSpace(hidStateSnapshot.ActiveVideoProfile)
+    ? "auto"
+    : hidStateSnapshot.ActiveVideoProfile!;
 
 // Configure ASP.NET Core host and DI container.
 var builder = WebApplication.CreateBuilder(args);

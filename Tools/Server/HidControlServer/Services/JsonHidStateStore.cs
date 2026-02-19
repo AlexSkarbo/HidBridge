@@ -60,10 +60,26 @@ public sealed class JsonHidStateStore : IHidStateStore
                     bindings[room] = string.IsNullOrWhiteSpace(kvp.Value) ? null : kvp.Value!.Trim();
                 }
 
-                return new HidStateSnapshot(profiles, NormalizeName(file.ActiveVideoProfile), bindings);
+                var snapshot = new HidStateSnapshot(profiles, NormalizeName(file.ActiveVideoProfile), bindings);
+                ServerEventLog.Log("storage", "state_store_load", new
+                {
+                    backend = "json",
+                    path = _path,
+                    schemaVersion = SchemaVersion,
+                    profiles = snapshot.VideoProfiles.Count,
+                    bindings = snapshot.RoomProfileBindings.Count,
+                    active = snapshot.ActiveVideoProfile
+                });
+                return snapshot;
             }
-            catch
+            catch (Exception ex)
             {
+                ServerEventLog.Log("storage", "state_store_recover_fallback", new
+                {
+                    backend = "json",
+                    path = _path,
+                    error = ex.Message
+                });
                 return EmptySnapshot();
             }
         }
@@ -88,6 +104,14 @@ public sealed class JsonHidStateStore : IHidStateStore
                 .ToList();
             file.ActiveVideoProfile = NormalizeName(activeProfile);
             SaveFileUnsafe(file);
+            ServerEventLog.Log("storage", "state_store_save_profiles", new
+            {
+                backend = "json",
+                path = _path,
+                schemaVersion = SchemaVersion,
+                profiles = file.VideoProfiles.Count,
+                active = file.ActiveVideoProfile
+            });
         }
     }
 
@@ -104,6 +128,45 @@ public sealed class JsonHidStateStore : IHidStateStore
                     kvp => NormalizeName(kvp.Value),
                     StringComparer.OrdinalIgnoreCase);
             SaveFileUnsafe(file);
+            ServerEventLog.Log("storage", "state_store_save_bindings", new
+            {
+                backend = "json",
+                path = _path,
+                schemaVersion = SchemaVersion,
+                bindings = file.RoomProfileBindings.Count
+            });
+        }
+    }
+
+    /// <inheritdoc />
+    public HidStateStoreStatus GetStatus()
+    {
+        lock (_lock)
+        {
+            bool exists = !string.IsNullOrWhiteSpace(_path) && File.Exists(_path);
+            long? size = null;
+            DateTimeOffset? lastWrite = null;
+            if (exists)
+            {
+                try
+                {
+                    var fi = new FileInfo(_path);
+                    size = fi.Length;
+                    lastWrite = fi.LastWriteTimeUtc;
+                }
+                catch
+                {
+                    // Best effort diagnostics only.
+                }
+            }
+
+            return new HidStateStoreStatus(
+                Backend: "json",
+                SchemaVersion: SchemaVersion,
+                Path: _path,
+                Exists: exists,
+                FileSizeBytes: size,
+                LastWriteUtc: lastWrite);
         }
     }
 
@@ -122,8 +185,14 @@ public sealed class JsonHidStateStore : IHidStateStore
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            ServerEventLog.Log("storage", "state_store_recover_fallback", new
+            {
+                backend = "json",
+                path = _path,
+                error = ex.Message
+            });
             // fall back to empty schema
         }
 
