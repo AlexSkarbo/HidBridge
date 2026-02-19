@@ -238,15 +238,10 @@ public static class WebRtcStatusEndpoints
 
         app.MapGet("/status/webrtc/video/rooms/{room}/audio-probe/file/{probeId}", (string room, string probeId, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
         {
-            var file = sup.GetAudioProbeFile(room);
+            var file = sup.GetAudioProbeFile(room, probeId);
             if (!file.Ok || string.IsNullOrWhiteSpace(file.Path) || string.IsNullOrWhiteSpace(file.FileName))
             {
                 return Results.NotFound(new { ok = false, room, error = file.Error ?? "probe_not_found" });
-            }
-            // Prevent stale links pointing to a newer room probe artifact.
-            if (!string.Equals(Path.GetFileNameWithoutExtension(file.Path), $"hidbridge_audio_probe_{probeId}", StringComparison.OrdinalIgnoreCase))
-            {
-                return Results.NotFound(new { ok = false, room, error = "probe_not_found" });
             }
             return Results.File(file.Path, "audio/wav", file.FileName);
         });

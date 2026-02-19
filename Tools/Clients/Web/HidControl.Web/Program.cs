@@ -1729,6 +1729,8 @@ app.MapGet("/",
                                       if (!audioOn) return "off";
                                       if (!audioRun) return "starting";
                                       if (!Number.isFinite(rmsPct) || rmsPct < 0) return "n/a";
+                                      // When payload bitrate is present but RMS is near-zero, treat as low-level/noise path.
+                                      if (rmsPct <= 1 && measuredKbps > 0) return "noise-only";
                                       if (rmsPct <= 1) return "silence";
                                       if (rmsPct <= 6 && measuredKbps > 0) return "noise-only";
                                       return "signal present";
@@ -1745,7 +1747,7 @@ app.MapGet("/",
                                       const lowForMs = rtcVideoRuntime.audioLowSinceMs ? (now - rtcVideoRuntime.audioLowSinceMs) : 0;
                                       if ((health === "silence" || health === "noise-only") && lowForMs >= 8000) {
                                         rtcAudioHealthHint.textContent = "audio hint: check HDMI source -> PCM stereo 48kHz";
-                                      } else if (health === "signal-present") {
+                                      } else if (health === "signal present") {
                                         rtcAudioHealthHint.textContent = "";
                                       } else if (health === "off") {
                                         rtcAudioHealthHint.textContent = "audio hint: audio stream disabled";

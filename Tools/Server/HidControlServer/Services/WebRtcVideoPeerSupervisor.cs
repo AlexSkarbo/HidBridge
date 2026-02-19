@@ -193,7 +193,7 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
     /// <summary>
     /// Returns latest audio probe WAV file for a room.
     /// </summary>
-    public (bool Ok, string? Path, string? FileName, string? Error) GetAudioProbeFile(string room)
+    public (bool Ok, string? Path, string? FileName, string? Error) GetAudioProbeFile(string room, string? probeId = null)
     {
         if (string.IsNullOrWhiteSpace(room))
         {
@@ -204,6 +204,11 @@ public sealed class WebRtcVideoPeerSupervisor : IDisposable
         {
             CleanupExpiredAudioProbeFilesLocked();
             if (!_audioProbeByRoom.TryGetValue(room, out var item))
+            {
+                return (false, null, null, "probe_not_found");
+            }
+            if (!string.IsNullOrWhiteSpace(probeId) &&
+                !string.Equals(item.ProbeId, probeId.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 return (false, null, null, "probe_not_found");
             }
