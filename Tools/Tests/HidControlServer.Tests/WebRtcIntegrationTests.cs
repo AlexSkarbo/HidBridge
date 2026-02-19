@@ -136,6 +136,68 @@ public sealed class WebRtcIntegrationTests
         public IReadOnlyList<string> StopFfmpegProcesses() => Array.Empty<string>();
     }
 
+    private sealed class FakeStateStore : IHidStateStore
+    {
+        private readonly object _lock = new();
+        private HidStateSnapshot _snapshot;
+
+        public FakeStateStore(
+            IReadOnlyList<VideoProfileConfig>? profiles = null,
+            string? activeProfile = null,
+            IReadOnlyDictionary<string, string?>? bindings = null)
+        {
+            _snapshot = new HidStateSnapshot(
+                profiles ?? Array.Empty<VideoProfileConfig>(),
+                activeProfile,
+                bindings ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        public int SaveProfilesCalls { get; private set; }
+        public int SaveBindingsCalls { get; private set; }
+
+        public HidStateSnapshot Load()
+        {
+            lock (_lock)
+            {
+                return _snapshot with { };
+            }
+        }
+
+        public void SaveVideoProfiles(IReadOnlyList<VideoProfileConfig> profiles, string? activeProfile)
+        {
+            lock (_lock)
+            {
+                SaveProfilesCalls++;
+                _snapshot = _snapshot with
+                {
+                    VideoProfiles = profiles,
+                    ActiveVideoProfile = activeProfile
+                };
+            }
+        }
+
+        public void SaveRoomProfileBindings(IReadOnlyDictionary<string, string?> bindings)
+        {
+            lock (_lock)
+            {
+                SaveBindingsCalls++;
+                _snapshot = _snapshot with
+                {
+                    RoomProfileBindings = new Dictionary<string, string?>(bindings, StringComparer.OrdinalIgnoreCase)
+                };
+            }
+        }
+
+        public HidStateStoreStatus GetStatus()
+            => new(
+                Backend: "fake",
+                SchemaVersion: 1,
+                Path: "memory",
+                Exists: true,
+                FileSizeBytes: null,
+                LastWriteUtc: DateTimeOffset.UtcNow);
+    }
+
     [Fact]
     public async Task ListRooms_IncludesPeerAndHelperRooms_AndMarksControl()
     {
@@ -384,6 +446,51 @@ public sealed class WebRtcIntegrationTests
         var room = Assert.Single(snap.Rooms, r => string.Equals(r.Room, "hb-v-50443405-lag", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(1, room.Peers);
         Assert.False(room.HasHelper);
+    }
+
+    [Fact]
+    public async Task ListVideoRooms_PreservesKnownRoom_AfterHelperRotationAndZeroPeers()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds);
+        var createUc = new CreateWebRtcVideoRoomUseCase(roomsSvc, roomIds);
+        var listUc = new ListWebRtcRoomsUseCase(roomsSvc);
+
+        var created = await createUc.Execute("hb-v-50443405-known", "optimal", 2500, 30, 85, null, "cpu", "h264", CancellationToken.None);
+        Assert.True(created.Ok);
+
+        // Simulate helper rotation/race: helper and peers are temporarily absent.
+        backend.SetHelperRoom("hb-v-50443405-known", false);
+        backend.SetRoomPeers("hb-v-50443405-known", 0);
+
+        var snap = await listUc.Execute(CancellationToken.None);
+        var room = Assert.Single(snap.Rooms, r => string.Equals(r.Room, "hb-v-50443405-known", StringComparison.OrdinalIgnoreCase));
+        Assert.False(room.HasHelper);
+        Assert.Equal(0, room.Peers);
+    }
+
+    [Fact]
+    public async Task DeleteVideoRoom_RemovesRoomBinding_FromStateStore()
+    {
+        var backend = new FakeBackend(deviceIdHex: "50443405deadbeef");
+        var state = new FakeStateStore(
+            bindings: new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["hb-v-50443405-bound"] = "pc-hdmi-pcm48"
+            });
+        var roomIds = new WebRtcRoomIdService(backend);
+        var roomsSvc = new WebRtcRoomsService(backend, roomIds, stateStore: state);
+        var deleteUc = new DeleteWebRtcVideoRoomUseCase(roomsSvc);
+
+        backend.SetHelperRoom("hb-v-50443405-bound", false);
+        backend.SetRoomPeers("hb-v-50443405-bound", 0);
+        var deleted = await deleteUc.Execute("hb-v-50443405-bound", CancellationToken.None);
+
+        Assert.True(deleted.Ok);
+        var snapshot = state.Load();
+        Assert.DoesNotContain(snapshot.RoomProfileBindings.Keys, k => string.Equals(k, "hb-v-50443405-bound", StringComparison.OrdinalIgnoreCase));
+        Assert.True(state.SaveBindingsCalls > 0);
     }
 
     [Fact]
