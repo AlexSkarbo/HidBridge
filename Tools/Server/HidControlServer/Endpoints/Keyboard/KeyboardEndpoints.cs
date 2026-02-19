@@ -14,7 +14,8 @@ public static class KeyboardEndpoints
     /// <param name="app">The app.</param>
     public static void MapKeyboardEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/keyboard");
+        var group = app.MapGroup("/keyboard")
+            .WithTags("Keyboard");
 
         group.MapPost("/press", async (KeyboardPressRequest req, KeyboardPressUseCase useCase, CancellationToken ct) =>
         {
@@ -24,7 +25,9 @@ public static class KeyboardEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Press and release one key")
+            .WithDescription("Sends single keyboard usage with optional modifiers/interface.");
 
         group.MapPost("/down", async (KeyboardPressRequest req, KeyboardDownUseCase useCase, CancellationToken ct) =>
         {
@@ -34,7 +37,9 @@ public static class KeyboardEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Key down")
+            .WithDescription("Sends key down event without releasing.");
 
         group.MapPost("/up", async (KeyboardPressRequest req, KeyboardUpUseCase useCase, CancellationToken ct) =>
         {
@@ -44,7 +49,9 @@ public static class KeyboardEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Key up")
+            .WithDescription("Sends key up event for usage/modifier.");
 
         static async Task<IResult> HandleType(KeyboardTypeRequest req, KeyboardTextUseCase useCase, CancellationToken ct)
         {
@@ -66,8 +73,12 @@ public static class KeyboardEndpoints
             return Results.Ok(new { ok = true });
         }
 
-        group.MapPost("/type", HandleType);
-        group.MapPost("/text", HandleType);
+        group.MapPost("/type", HandleType)
+            .WithSummary("Type text")
+            .WithDescription("Types Unicode text using HID key mapping.");
+        group.MapPost("/text", HandleType)
+            .WithSummary("Type text (alias)")
+            .WithDescription("Alias for /keyboard/type.");
 
         group.MapPost("/shortcut", async (KeyboardShortcutRequest req, KeyboardShortcutUseCase useCase, CancellationToken ct) =>
         {
@@ -90,7 +101,9 @@ public static class KeyboardEndpoints
                 modifiers = result.Modifiers,
                 keys = result.Keys
             });
-        });
+        })
+            .WithSummary("Execute shortcut")
+            .WithDescription("Executes shortcut chord like Ctrl+Alt+Del with optional hold/mapping options.");
 
         group.MapPost("/report", async (KeyboardReportRequest req, KeyboardReportUseCase useCase, CancellationToken ct) =>
         {
@@ -100,7 +113,9 @@ public static class KeyboardEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Send raw keyboard report")
+            .WithDescription("Sends full HID keyboard report payload (modifiers + keys array).");
 
         group.MapPost("/reset", async (KeyboardResetRequest req, KeyboardResetUseCase useCase, CancellationToken ct) =>
         {
@@ -110,13 +125,17 @@ public static class KeyboardEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Reset keyboard state")
+            .WithDescription("Releases all pressed keys for selected interface.");
 
         group.MapGet("/state", (KeyboardState state) =>
         {
             KeyboardSnapshot snap = state.Snapshot();
             return Results.Ok(new { ok = true, modifiers = snap.Modifiers, keys = snap.Keys });
-        });
+        })
+            .WithSummary("Get keyboard state")
+            .WithDescription("Returns server-side cached keyboard state snapshot.");
 
         group.MapGet("/layout", async (byte itf, byte? reportId, HidUartClient uart, CancellationToken ct) =>
         {

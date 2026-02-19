@@ -13,7 +13,8 @@ public static class DevicesEndpoints
     /// <param name="app">The app.</param>
     public static void MapDevicesEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/devices");
+        var group = app.MapGroup("/devices")
+            .WithTags("Devices");
 
         var appState = app.Services.GetRequiredService<AppState>();
 
@@ -30,7 +31,9 @@ public static class DevicesEndpoints
                 staleAt = appState.CachedDevicesAt,
                 list = appState.CachedDevicesDetailDoc.RootElement
             });
-        });
+        })
+            .WithSummary("Get cached devices snapshot")
+            .WithDescription("Returns last cached devices list without active UART polling.");
 
         group.MapGet("", async (int? timeoutMs, bool? includeReportDesc, bool? useBootstrapKey, bool? allowStale, Options opt, HidUartClient uart, MouseMappingStore mouseStore, KeyboardMappingStore keyboardStore, CancellationToken ct) =>
         {
@@ -126,6 +129,8 @@ public static class DevicesEndpoints
                     try { await uart.SetLogLevelAsync(prevLevel, CancellationToken.None); } catch { }
                 }
             }
-        });
+        })
+            .WithSummary("Get live devices list")
+            .WithDescription("Requests current device/interface list from UART; can return stale fallback.");
     }
 }

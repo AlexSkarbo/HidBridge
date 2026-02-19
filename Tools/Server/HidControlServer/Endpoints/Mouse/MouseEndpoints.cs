@@ -15,7 +15,8 @@ public static class MouseEndpoints
     /// <param name="app">The app.</param>
     public static void MapMouseEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/mouse");
+        var group = app.MapGroup("/mouse")
+            .WithTags("Mouse");
 
         group.MapPost("/move", async (MouseMoveRequest req, MouseMoveUseCase useCase, CancellationToken ct) =>
         {
@@ -29,7 +30,9 @@ public static class MouseEndpoints
                 return Results.Ok(new { ok = true, skipped = true });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Move cursor")
+            .WithDescription("Sends relative mouse movement and optional wheel delta.");
 
         group.MapPost("/button", async (MouseButtonRequest req, MouseButtonUseCase useCase, CancellationToken ct) =>
         {
@@ -39,7 +42,9 @@ public static class MouseEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Mouse button action")
+            .WithDescription("Presses or releases a single button.");
 
         group.MapPost("/wheel", async (MouseWheelRequest req, MouseWheelUseCase useCase, CancellationToken ct) =>
         {
@@ -53,7 +58,9 @@ public static class MouseEndpoints
                 return Results.Ok(new { ok = true, skipped = true });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Mouse wheel")
+            .WithDescription("Sends wheel scroll delta.");
 
         group.MapPost("/buttons", async (MouseButtonsMaskRequest req, MouseButtonsMaskUseCase useCase, CancellationToken ct) =>
         {
@@ -63,7 +70,9 @@ public static class MouseEndpoints
                 return Results.BadRequest(new { ok = false, error = result.Error ?? "failed" });
             }
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Set buttons mask")
+            .WithDescription("Sets full mouse buttons bitmask state.");
 
         DateTimeOffset lastButtonsMapCapturedAt = DateTimeOffset.MinValue;
         JsonElement? lastButtonsMapMapping = null;
@@ -107,7 +116,9 @@ public static class MouseEndpoints
                 DateTimeOffset.UtcNow);
             store.Upsert(record);
             return Results.Ok(new { ok = true });
-        });
+        })
+            .WithSummary("Upsert mouse mapping")
+            .WithDescription("Creates or updates persisted mouse mapping by device/hash.");
 
         group.MapGet("/mapping", (string deviceId, MouseMappingStore store) =>
         {
@@ -126,7 +137,9 @@ public static class MouseEndpoints
                 mapping = record.Mapping,
                 updatedAt = record.UpdatedAt
             });
-        });
+        })
+            .WithSummary("Get mouse mapping")
+            .WithDescription("Returns persisted mouse mapping by deviceId.");
 
         group.MapGet("/mapping/byItf", (byte itf, HidUartClient uart, MouseMappingStore store) =>
         {

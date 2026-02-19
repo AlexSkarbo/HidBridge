@@ -16,7 +16,10 @@ public static class WebRtcStatusEndpoints
     /// <param name="app">The application builder.</param>
     public static void MapWebRtcStatusEndpoints(this WebApplication app)
     {
-        app.MapGet("/status/webrtc/ice", async ([Microsoft.AspNetCore.Mvc.FromServices] GetWebRtcIceConfigUseCase uc, CancellationToken ct) =>
+        var group = app.MapGroup("/status/webrtc")
+            .WithTags("WebRTC");
+
+        group.MapGet("/ice", async ([Microsoft.AspNetCore.Mvc.FromServices] GetWebRtcIceConfigUseCase uc, CancellationToken ct) =>
         {
             var cfg = await uc.Execute(ct);
             var iceServers = cfg.IceServers
@@ -30,9 +33,11 @@ public static class WebRtcStatusEndpoints
                 .ToArray();
 
             return Results.Ok(new { ok = true, ttlSeconds = cfg.TtlSeconds, iceServers });
-        });
+        })
+            .WithSummary("Get ICE configuration")
+            .WithDescription("Returns STUN/TURN configuration for WebRTC clients.");
 
-        app.MapGet("/status/webrtc/config", async ([Microsoft.AspNetCore.Mvc.FromServices] GetWebRtcClientConfigUseCase uc, CancellationToken ct) =>
+        group.MapGet("/config", async ([Microsoft.AspNetCore.Mvc.FromServices] GetWebRtcClientConfigUseCase uc, CancellationToken ct) =>
         {
             var cfg = await uc.Execute(ct);
             return Results.Ok(new
@@ -44,31 +49,39 @@ public static class WebRtcStatusEndpoints
                 roomIdleStopSeconds = cfg.RoomIdleStopSeconds,
                 roomsMaxHelpers = cfg.RoomsMaxHelpers
             });
-        });
+        })
+            .WithSummary("Get WebRTC client config")
+            .WithDescription("Returns timeouts and helper limits used by the browser client.");
 
-        app.MapGet("/status/webrtc/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        group.MapGet("/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
         {
             var snap = await uc.Execute(ct);
             var rooms = snap.Rooms
                 .Select(r => new { room = r.Room, peers = r.Peers, hasHelper = r.HasHelper, isControl = r.IsControl })
                 .ToArray();
             return Results.Ok(new { ok = true, rooms });
-        });
+        })
+            .WithSummary("List all WebRTC rooms")
+            .WithDescription("Returns control and video rooms with peer/helper state.");
 
-        app.MapPost("/status/webrtc/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcRoomUseCase uc, CancellationToken ct) =>
+        group.MapPost("/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcRoomUseCase uc, CancellationToken ct) =>
         {
             string? roomId = await ReadRequestedRoomIdAsync(req, ct);
             var res = await uc.Execute(roomId, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, started = res.Started, pid = res.Pid, error = res.Error, streamProfile = res.StreamProfile });
-        });
+        })
+            .WithSummary("Create generic WebRTC room")
+            .WithDescription("Creates a room and optionally starts helper for control scenarios.");
 
-        app.MapDelete("/status/webrtc/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
+        group.MapDelete("/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcRoomUseCase uc, CancellationToken ct) =>
         {
             var res = await uc.Execute(room, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, stopped = res.Stopped, error = res.Error });
-        });
+        })
+            .WithSummary("Delete generic WebRTC room")
+            .WithDescription("Stops helper (if running) and removes generic room metadata.");
 
-        app.MapGet("/status/webrtc/video/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
+        group.MapGet("/video/rooms", async ([Microsoft.AspNetCore.Mvc.FromServices] ListWebRtcRoomsUseCase uc, CancellationToken ct) =>
         {
             string opId = Guid.NewGuid().ToString("N")[..8];
             try
@@ -89,9 +102,11 @@ public static class WebRtcStatusEndpoints
                 ServerEventLog.Log("webrtc.rooms", "list_video", new { opId, ok = false, error = "canceled" });
                 return Results.Ok(new { ok = false, rooms = Array.Empty<object>(), error = "canceled" });
             }
-        });
+        })
+            .WithSummary("List video rooms")
+            .WithDescription("Returns only video rooms used by video streaming workflows.");
 
-        app.MapPost("/status/webrtc/video/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        group.MapPost("/video/rooms", async (HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] CreateWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
             string opId = Guid.NewGuid().ToString("N")[..8];
             string? webOpId = req.Headers.TryGetValue("X-Web-OpId", out var h) ? h.ToString() : null;
@@ -107,9 +122,11 @@ public static class WebRtcStatusEndpoints
                 ServerEventLog.Log("webrtc.rooms", "create_video", new { opId, webOpId, ok = false, error = "canceled" });
                 return Results.Ok(new { ok = false, room = string.Empty, started = false, pid = (int?)null, error = "canceled", streamProfile = (string?)null });
             }
-        });
+        })
+            .WithSummary("Create video room")
+            .WithDescription("Creates a video room and starts WebRtcVideoPeer with requested stream profile and overrides.");
 
-        app.MapPost("/status/webrtc/video/rooms/{room}/restart", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] RestartWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        group.MapPost("/video/rooms/{room}/restart", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] RestartWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
             string opId = Guid.NewGuid().ToString("N")[..8];
             try
@@ -124,15 +141,19 @@ public static class WebRtcStatusEndpoints
                 ServerEventLog.Log("webrtc.rooms", "restart_video", new { opId, room, ok = false, error = "canceled" });
                 return Results.Ok(new { ok = false, room, stopped = false, started = false, pid = (int?)null, error = "canceled", streamProfile = (string?)null });
             }
-        });
+        })
+            .WithSummary("Restart video room")
+            .WithDescription("Stops and starts the room helper while applying optional stream profile overrides.");
 
-        app.MapGet("/status/webrtc/video/rooms/{room}/profile", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
+        group.MapGet("/video/rooms/{room}/profile", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
         {
             var res = await svc.GetVideoRoomProfileAsync(room, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, streamProfile = res.StreamProfile, error = res.Error });
-        });
+        })
+            .WithSummary("Get video room profile")
+            .WithDescription("Returns effective stream profile binding for the room.");
 
-        app.MapPost("/status/webrtc/video/rooms/{room}/profile", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
+        group.MapPost("/video/rooms/{room}/profile", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] IWebRtcRoomsService svc, CancellationToken ct) =>
         {
             WebRtcCreateVideoRoomRequest? body = null;
             try
@@ -146,9 +167,11 @@ public static class WebRtcStatusEndpoints
 
             var res = await svc.SetVideoRoomProfileAsync(room, body?.StreamProfile, ct);
             return Results.Ok(new { ok = res.Ok, room = res.Room, streamProfile = res.StreamProfile, error = res.Error });
-        });
+        })
+            .WithSummary("Set video room profile")
+            .WithDescription("Sets or clears stream profile binding for the room.");
 
-        app.MapDelete("/status/webrtc/video/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
+        group.MapDelete("/video/rooms/{room}", async (string room, [Microsoft.AspNetCore.Mvc.FromServices] DeleteWebRtcVideoRoomUseCase uc, CancellationToken ct) =>
         {
             string opId = Guid.NewGuid().ToString("N")[..8];
             try
@@ -162,9 +185,11 @@ public static class WebRtcStatusEndpoints
                 ServerEventLog.Log("webrtc.rooms", "delete_video", new { opId, room, ok = false, error = "canceled" });
                 return Results.Ok(new { ok = false, room, stopped = false, error = "canceled" });
             }
-        });
+        })
+            .WithSummary("Delete video room")
+            .WithDescription("Stops helper and removes room/runtime/profile binding state.");
 
-        app.MapGet("/status/webrtc/video/peers/{room}", (string room, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
+        group.MapGet("/video/peers/{room}", (string room, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
         {
             var st = sup.GetRoomRuntimeStatus(room);
             if (st is null)
@@ -201,9 +226,11 @@ public static class WebRtcStatusEndpoints
                 audioMeasuredKbps = st.AudioMeasuredKbps,
                 audioRunning = st.AudioRunning
             });
-        });
+        })
+            .WithSummary("Get video peer runtime state")
+            .WithDescription("Returns detailed helper runtime telemetry for a specific video room.");
 
-        app.MapPost("/status/webrtc/video/rooms/{room}/audio-probe", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup, CancellationToken ct) =>
+        group.MapPost("/video/rooms/{room}/audio-probe", async (string room, HttpRequest req, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup, CancellationToken ct) =>
         {
             WebRtcAudioProbeRequest? body = null;
             try
@@ -234,9 +261,11 @@ public static class WebRtcStatusEndpoints
                     : null,
                 error = result.Error
             });
-        });
+        })
+            .WithSummary("Run audio probe")
+            .WithDescription("Captures short WAV sample and computes basic audio health metrics for selected room/input.");
 
-        app.MapGet("/status/webrtc/video/rooms/{room}/audio-probe/file/{probeId}", (string room, string probeId, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
+        group.MapGet("/video/rooms/{room}/audio-probe/file/{probeId}", (string room, string probeId, [Microsoft.AspNetCore.Mvc.FromServices] WebRtcVideoPeerSupervisor sup) =>
         {
             var file = sup.GetAudioProbeFile(room, probeId);
             if (!file.Ok || string.IsNullOrWhiteSpace(file.Path) || string.IsNullOrWhiteSpace(file.FileName))
@@ -244,7 +273,9 @@ public static class WebRtcStatusEndpoints
                 return Results.NotFound(new { ok = false, room, error = file.Error ?? "probe_not_found" });
             }
             return Results.File(file.Path, "audio/wav", file.FileName);
-        });
+        })
+            .WithSummary("Download audio probe file")
+            .WithDescription("Downloads generated WAV file by probe id.");
     }
 
     /// <summary>

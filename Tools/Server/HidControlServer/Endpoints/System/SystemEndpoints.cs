@@ -17,10 +17,14 @@ public static class SystemEndpoints
     public static void MapSystemEndpoints(this WebApplication app)
     {
         var appState = app.Services.GetRequiredService<AppState>();
+        var group = app.MapGroup(string.Empty)
+            .WithTags("System");
 
-        app.MapGet("/health", () => Results.Ok(new { ok = true }));
+        group.MapGet("/health", () => Results.Ok(new { ok = true }))
+            .WithSummary("Health check")
+            .WithDescription("Returns lightweight API availability status.");
 
-        app.MapGet("/version", () =>
+        group.MapGet("/version", () =>
         {
             string? repoVersion = DeviceDiagnostics.FindRepoVersion();
             string? assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString();
@@ -30,9 +34,11 @@ public static class SystemEndpoints
                 repoVersion,
                 assemblyVersion
             });
-        });
+        })
+            .WithSummary("Server version info")
+            .WithDescription("Returns repository and assembly version metadata.");
 
-        app.MapGet("/config", (Options opt) =>
+        group.MapGet("/config", (Options opt) =>
         {
             return Results.Ok(new
             {
@@ -57,6 +63,9 @@ public static class SystemEndpoints
                 ffmpegRestartDelayMs = opt.FfmpegRestartDelayMs,
                 ffmpegMaxRestarts = opt.FfmpegMaxRestarts,
                 ffmpegRestartWindowMs = opt.FfmpegRestartWindowMs,
+                serverLogDir = opt.ServerLogDir,
+                serverLogRotateMinutes = opt.ServerLogRotateMinutes,
+                serverLogRetentionMinutes = opt.ServerLogRetentionMinutes,
                 videoRtspPort = opt.VideoRtspPort,
                 videoSrtBasePort = opt.VideoSrtBasePort,
                 videoSrtLatencyMs = opt.VideoSrtLatencyMs,
@@ -145,15 +154,19 @@ public static class SystemEndpoints
                 mouseForwardMask = opt.MouseForwardMask,
                 tokenEnabled = !string.IsNullOrWhiteSpace(opt.Token)
             });
-        });
+        })
+            .WithSummary("Effective server configuration")
+            .WithDescription("Returns runtime-effective configuration, deprecation markers and authoritative storage sources.");
 
-        app.MapGet("/logs/last", (int? limit) =>
+        group.MapGet("/logs/last", (int? limit) =>
         {
             var items = ServerEventLog.GetRecent(limit);
             return Results.Ok(new { ok = true, items });
-        });
+        })
+            .WithSummary("Recent server events")
+            .WithDescription("Returns the latest server event log entries. Use query parameter 'limit' to cap results.");
 
-        app.MapGet("/status/storage", (Options opt, IHidStateStore stateStore) =>
+        group.MapGet("/status/storage", (Options opt, IHidStateStore stateStore) =>
         {
             HidStateStoreStatus stateStatus = stateStore.GetStatus();
             string sqlitePath = opt.MouseMappingDb;
@@ -189,25 +202,31 @@ public static class SystemEndpoints
                     roomBindingsCount = snapshot.RoomProfileBindings.Count
                 }
             });
-        });
+        })
+            .WithSummary("Storage status")
+            .WithDescription("Returns storage backends, migration markers and mutable-state authoritative source details.");
 
         // WebRTC status/control endpoints are registered in a dedicated mapper to keep this class thin.
         app.MapWebRtcStatusEndpoints();
 
-        app.MapGet("/serial/ports", () =>
+        group.MapGet("/serial/ports", () =>
         {
             var list = SerialPortService.ListSerialPortCandidates();
             return Results.Ok(new { ok = true, ports = list });
-        });
+        })
+            .WithSummary("List serial ports")
+            .WithDescription("Returns serial COM/tty candidates discovered on the host.");
 
-        app.MapGet("/serial/probe", (Options opt, int? timeoutMs) =>
+        group.MapGet("/serial/probe", (Options opt, int? timeoutMs) =>
         {
             int timeout = Math.Clamp(timeoutMs ?? 600, 100, 3000);
             var list = SerialPortService.ProbeSerialDevices(opt.Baud, DeviceKeyService.GetBootstrapKey(opt), opt.InjectQueueCapacity, opt.InjectDropThreshold, timeout);
             return Results.Ok(new { ok = true, timeoutMs = timeout, ports = list });
-        });
+        })
+            .WithSummary("Probe serial HID bridge devices")
+            .WithDescription("Performs active serial probing with optional timeoutMs query parameter.");
 
-        app.MapGet("/stats", (Options opt, HidUartClient uart, KeyboardState keyboard, MouseState mouse) =>
+        group.MapGet("/stats", (Options opt, HidUartClient uart, KeyboardState keyboard, MouseState mouse) =>
         {
             string hmacMode = uart.IsBootstrapForced() ? "bootstrap" : (uart.HasDerivedKey() ? "derived" : "bootstrap");
             HidUartClientStats uartStats = uart.GetStats();
@@ -270,6 +289,9 @@ public static class SystemEndpoints
                     ffmpegRestartDelayMs = opt.FfmpegRestartDelayMs,
                     ffmpegMaxRestarts = opt.FfmpegMaxRestarts,
                     ffmpegRestartWindowMs = opt.FfmpegRestartWindowMs,
+                    serverLogDir = opt.ServerLogDir,
+                    serverLogRotateMinutes = opt.ServerLogRotateMinutes,
+                    serverLogRetentionMinutes = opt.ServerLogRetentionMinutes,
                     videoRtspPort = opt.VideoRtspPort,
                     videoSrtBasePort = opt.VideoSrtBasePort,
                     videoSrtLatencyMs = opt.VideoSrtLatencyMs,
@@ -332,7 +354,9 @@ public static class SystemEndpoints
                     mouseForwardMask = opt.MouseForwardMask
                 }
             });
-        });
+        })
+            .WithSummary("Runtime stats")
+            .WithDescription("Returns UART, keyboard, mouse, video and WebRTC runtime telemetry snapshot.");
     }
 
     // Room ID generation and validation live in Infrastructure (WebRtcRoomsService) so API endpoints remain thin.

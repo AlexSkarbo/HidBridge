@@ -20,7 +20,8 @@ public static class VideoEndpoints
     /// <param name="app">The app.</param>
     public static void MapVideoEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/video");
+        var group = app.MapGroup("/video")
+            .WithTags("Video");
 
         var appState = app.Services.GetRequiredService<AppState>();
         var runtime = app.Services.GetRequiredService<VideoRuntimeService>();
@@ -31,25 +32,33 @@ public static class VideoEndpoints
         group.MapGet("/sources", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoSourcesUseCase useCase) =>
         {
             return Results.Ok(new { ok = true, sources = useCase.Execute() });
-        });
+        })
+            .WithSummary("List video sources")
+            .WithDescription("Returns configured video inputs.");
 
         group.MapPost("/sources", (VideoSourcesRequest req, [Microsoft.AspNetCore.Mvc.FromServices] SetVideoSourcesUseCase useCase) =>
         {
             var result = useCase.Execute(req);
             return Results.Ok(new { ok = result.Ok, configSaved = result.ConfigSaved, configPath = result.ConfigPath, configError = result.ConfigError });
-        });
+        })
+            .WithSummary("Replace video sources")
+            .WithDescription("Replaces full video sources list and persists config.");
 
         group.MapPost("/sources/upsert", (VideoSourceConfig req, [Microsoft.AspNetCore.Mvc.FromServices] UpsertVideoSourceUseCase useCase) =>
         {
             var result = useCase.Execute(req);
             return Results.Ok(new { ok = result.Ok, configSaved = result.ConfigSaved, configPath = result.ConfigPath, configError = result.ConfigError });
-        });
+        })
+            .WithSummary("Upsert video source")
+            .WithDescription("Creates or updates a single video source.");
 
         group.MapGet("/profiles", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoProfilesUseCase useCase) =>
         {
             var snapshot = useCase.Execute();
             return Results.Ok(new { ok = true, active = snapshot.ActiveProfile, profiles = snapshot.Profiles });
-        });
+        })
+            .WithSummary("List video stream profiles")
+            .WithDescription("Returns active profile and all available stream profiles.");
 
         group.MapGet("/modes", async (string? id, bool? refresh, [Microsoft.AspNetCore.Mvc.FromServices] GetVideoModesUseCase useCase, HttpContext ctx) =>
         {
@@ -67,12 +76,16 @@ public static class VideoEndpoints
                 modes = result.Modes.Select(m => new { width = m.Width, height = m.Height, maxFps = m.MaxFps }).ToList(),
                 supportsMjpeg = result.SupportsMjpeg
             });
-        });
+        })
+            .WithSummary("List supported capture modes")
+            .WithDescription("Returns available resolutions/FPS for selected source.");
 
         group.MapGet("/diag", ([Microsoft.AspNetCore.Mvc.FromServices] GetVideoDiagUseCase useCase) =>
         {
             return Results.Ok(useCase.Execute());
-        });
+        })
+            .WithSummary("Video diagnostics")
+            .WithDescription("Returns runtime diagnostics for video pipeline.");
 
         group.MapPost("/capture/stop", async (string? id, [Microsoft.AspNetCore.Mvc.FromServices] StopVideoCaptureUseCase useCase, HttpContext ctx) =>
         {
@@ -83,7 +96,9 @@ public static class VideoEndpoints
             }
             ServerEventLog.Log("video.capture", "manual_stop", new { id, count = result.Stopped.Count });
             return Results.Ok(new { ok = true, stopped = result.Stopped, count = result.Stopped.Count });
-        });
+        })
+            .WithSummary("Stop capture process")
+            .WithDescription("Stops running FFmpeg capture pipeline for source id (or active source).");
 
         group.MapPost("/profiles", (VideoProfilesRequest req, [Microsoft.AspNetCore.Mvc.FromServices] SetVideoProfilesUseCase useCase) =>
         {
