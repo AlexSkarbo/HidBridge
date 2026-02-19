@@ -13,6 +13,8 @@ public sealed class FfmpegProcState
     public DateTimeOffset? LastExitAt;
     public int? LastExitCode;
     public int RestartCount;
+    public string? LastWatchdogSkipReason;
+    public DateTimeOffset? LastWatchdogSkipAt;
     public DateTimeOffset? WindowStart;
     public string? LogPath;
     public string? Args;

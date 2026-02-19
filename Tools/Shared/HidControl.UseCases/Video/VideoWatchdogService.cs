@@ -1,4 +1,5 @@
 using HidControl.Contracts;
+using HidControl.Core;
 
 namespace HidControl.UseCases.Video;
 
@@ -29,23 +30,29 @@ public sealed class VideoWatchdogService
     {
         var sources = sourcesStore.GetAll().Where(s => s.Enabled).ToList();
         if (sources.Count == 0) return;
+        bool noOutputsEnabled = !outputState.Hls && !outputState.Mjpeg && !outputState.Flv;
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         foreach (VideoSourceConfig src in sources)
         {
             if (runtime.IsManualStop(src.Id))
             {
+                var manualState = runtime.GetOrAddFfmpegState(src.Id);
+                LogWatchdogSkip(manualState, now, src.Id, "manual_stop");
                 continue;
             }
             if (!runtime.TryGetFfmpegProcess(src.Id, out var proc) || proc.HasExited)
             {
                 var state = runtime.GetOrAddFfmpegState(src.Id);
+                if (noOutputsEnabled)
+                {
+                    LogWatchdogSkip(state, now, src.Id, "roomless_no_output_enabled");
+                    continue;
+                }
                 if (IsCaptureSourceId(src.Id) && state.LastExitCode == -22)
                 {
-                    _events?.Log("watchdog", "ffmpeg_restart_suppressed", new
+                    LogWatchdogSkip(state, now, src.Id, "invalid_args_exit_-22", new
                     {
-                        id = src.Id,
-                        reason = "invalid_args_exit_-22",
                         lastExitCode = state.LastExitCode,
                         restartCount = state.RestartCount
                     });
@@ -53,9 +60,8 @@ public sealed class VideoWatchdogService
                 }
                 if (state.RestartCount >= options.FfmpegMaxRestarts)
                 {
-                    _events?.Log("watchdog", "ffmpeg_restart_limit", new
+                    LogWatchdogSkip(state, now, src.Id, "restart_limit", new
                     {
-                        id = src.Id,
                         restartCount = state.RestartCount,
                         maxRestarts = options.FfmpegMaxRestarts
                     });
@@ -64,6 +70,11 @@ public sealed class VideoWatchdogService
                 if (state.LastStartAt.HasValue &&
                     state.LastStartAt.Value.AddMilliseconds(options.FfmpegRestartDelayMs) > now)
                 {
+                    LogWatchdogSkip(state, now, src.Id, "restart_delay_window", new
+                    {
+                        lastStartAt = state.LastStartAt,
+                        restartDelayMs = options.FfmpegRestartDelayMs
+                    });
                     continue;
                 }
                 if (state.LastStartAt.HasValue &&
@@ -72,6 +83,8 @@ public sealed class VideoWatchdogService
                     state.RestartCount = 0;
                 }
                 state.RestartCount++;
+                state.LastWatchdogSkipReason = null;
+                state.LastWatchdogSkipAt = null;
                 _events?.Log("watchdog", "ffmpeg_restart", new
                 {
                     id = src.Id,
@@ -155,4 +168,40 @@ public sealed class VideoWatchdogService
     private static bool IsCaptureSourceId(string sourceId) =>
         !string.IsNullOrWhiteSpace(sourceId) &&
         sourceId.StartsWith("cap-", StringComparison.OrdinalIgnoreCase);
+
+    private void LogWatchdogSkip(FfmpegProcState state, DateTimeOffset now, string sourceId, string reason, object? extra = null)
+    {
+        if (!ShouldLogSkipReason(state, now, reason))
+        {
+            return;
+        }
+
+        if (extra is null)
+        {
+            _events?.Log("watchdog", "watchdog_skip_reason", new { id = sourceId, reason });
+            return;
+        }
+
+        _events?.Log("watchdog", "watchdog_skip_reason", new
+        {
+            id = sourceId,
+            reason,
+            data = extra
+        });
+    }
+
+    private static bool ShouldLogSkipReason(FfmpegProcState state, DateTimeOffset now, string reason)
+    {
+        // Avoid noisy duplicate logs every watchdog tick for the same skip reason.
+        if (string.Equals(state.LastWatchdogSkipReason, reason, StringComparison.OrdinalIgnoreCase) &&
+            state.LastWatchdogSkipAt.HasValue &&
+            (now - state.LastWatchdogSkipAt.Value) < TimeSpan.FromSeconds(10))
+        {
+            return false;
+        }
+
+        state.LastWatchdogSkipReason = reason;
+        state.LastWatchdogSkipAt = now;
+        return true;
+    }
 }
