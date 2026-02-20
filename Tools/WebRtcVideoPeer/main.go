@@ -602,6 +602,37 @@ func (p *peerState) onCandidate(ctx context.Context, cand webrtc.ICECandidateIni
 }
 
 func runVideoStream(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string, onStatus func(event string, mode string, detail string, extra map[string]any)) error {
+	core := strings.TrimSpace(strings.ToLower(envOr("HIDBRIDGE_STREAM_CORE", "legacy")))
+	if core == "v2" {
+		if onStatus != nil {
+			onStatus("stream_core_selected", sourceMode, "v2", map[string]any{
+				"streamCore": "v2",
+			})
+		}
+		return runVideoStreamV2(ctx, track, sourceMode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, rawFFmpegArgs, rawCaptureInput, onStatus)
+	}
+	if onStatus != nil {
+		onStatus("stream_core_selected", sourceMode, "legacy", map[string]any{
+			"streamCore": "legacy",
+		})
+	}
+	return runVideoStreamLegacy(ctx, track, sourceMode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, rawFFmpegArgs, rawCaptureInput, onStatus)
+}
+
+// Stage A skeleton for Stream Core v2.
+// Current behavior: explicit v2 entrypoint delegates to legacy path with logging.
+func runVideoStreamV2(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string, onStatus func(event string, mode string, detail string, extra map[string]any)) error {
+	log.Printf("stream_core_v2 entrypoint active (stage-a), delegating to legacy video path")
+	if onStatus != nil {
+		onStatus("stream_core_v2_stage", sourceMode, "delegating_legacy", map[string]any{
+			"streamCore": "v2",
+			"stage":      "a",
+		})
+	}
+	return runVideoStreamLegacy(ctx, track, sourceMode, qualityPreset, imageQuality, encoderMode, codecMode, bitrateKbps, fps, rawFFmpegArgs, rawCaptureInput, onStatus)
+}
+
+func runVideoStreamLegacy(ctx context.Context, track *webrtc.TrackLocalStaticRTP, sourceMode string, qualityPreset string, imageQuality int, encoderMode string, codecMode string, bitrateKbps int, fps int, rawFFmpegArgs string, rawCaptureInput string, onStatus func(event string, mode string, detail string, extra map[string]any)) error {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		return fmt.Errorf("listen udp: %w", err)
