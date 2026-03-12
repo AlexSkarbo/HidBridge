@@ -188,6 +188,75 @@ public sealed class SessionOpenRequestViewModel
 }
 
 /// <summary>
+/// Represents one session command dispatch request issued from the session room.
+/// </summary>
+public sealed class SessionCommandDispatchRequestViewModel
+{
+    /// <summary>
+    /// Gets or sets the command identifier.
+    /// </summary>
+    public string CommandId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the transport channel expected by the backend.
+    /// </summary>
+    public string Channel { get; set; } = "Hid";
+
+    /// <summary>
+    /// Gets or sets the normalized command action name.
+    /// </summary>
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets command arguments.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?> Args { get; set; } = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets or sets the command timeout.
+    /// </summary>
+    public int TimeoutMs { get; set; } = 3000;
+
+    /// <summary>
+    /// Gets or sets the idempotency key.
+    /// </summary>
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the tenant identifier.
+    /// </summary>
+    public string? TenantId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the organization identifier.
+    /// </summary>
+    public string? OrganizationId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the operator roles carried with the request.
+    /// </summary>
+    public IReadOnlyList<string> OperatorRoles { get; set; } = [];
+}
+
+/// <summary>
+/// Represents one command dispatch acknowledgement.
+/// </summary>
+public sealed record CommandAckViewModel(
+    string CommandId,
+    string Status,
+    ErrorInfoViewModel? Error = null,
+    IReadOnlyDictionary<string, double>? Metrics = null);
+
+/// <summary>
+/// Represents one backend error payload.
+/// </summary>
+public sealed record ErrorInfoViewModel(
+    string Domain,
+    string Code,
+    string Message,
+    bool Retryable);
+
+/// <summary>
 /// Represents one share grant request issued from the session room.
 /// </summary>
 public sealed class SessionShareGrantRequestViewModel

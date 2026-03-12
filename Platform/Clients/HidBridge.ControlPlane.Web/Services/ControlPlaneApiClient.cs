@@ -56,6 +56,19 @@ public sealed class ControlPlaneApiClient
         => await SendJsonAsync<SessionOpenRequestViewModel>(HttpMethod.Post, "/api/v1/sessions", body, cancellationToken);
 
     /// <summary>
+    /// Dispatches one command through the specified session room.
+    /// </summary>
+    public async Task<CommandAckViewModel?> DispatchCommandAsync(
+        string sessionId,
+        SessionCommandDispatchRequestViewModel body,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<CommandAckViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/commands",
+            body,
+            cancellationToken);
+
+    /// <summary>
     /// Reads one collaboration dashboard for the specified session.
     /// </summary>
     public async Task<SessionDashboardViewModel?> GetSessionDashboardAsync(string sessionId, CancellationToken cancellationToken = default)

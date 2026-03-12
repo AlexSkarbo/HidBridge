@@ -159,6 +159,45 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the command-dispatch route and payload.
+    /// </summary>
+    [Fact]
+    public async Task DispatchCommandAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new SessionCommandDispatchRequestViewModel
+        {
+            CommandId = "cmd-1",
+            Channel = "Hid",
+            Action = "keyboard.shortcut",
+            Args = new Dictionary<string, object?>
+            {
+                ["shortcut"] = "CTRL+ALT+M",
+                ["principalId"] = "operator-a",
+                ["participantId"] = "participant-1",
+            },
+            TimeoutMs = 3000,
+            IdempotencyKey = "idem-1",
+            TenantId = "local-tenant",
+            OrganizationId = "local-org",
+            OperatorRoles = ["operator.moderator"],
+        };
+        var handler = new RecordingHandler(new CommandAckViewModel("cmd-1", "Applied"));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.DispatchCommandAsync("session-1", request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/commands", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("cmd-1", payload!["commandId"]?.ToString());
+        Assert.Equal("keyboard.shortcut", payload["action"]?.ToString());
+        Assert.Equal("Hid", payload["channel"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the request-control action route and payload.
     /// </summary>
     [Fact]

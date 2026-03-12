@@ -190,6 +190,59 @@
                         }
                     </div>
                 </div>
+
+                <div>
+                    <div class="hid-panel-toolbar">
+                        <div>
+                            <h3 class="hid-card-title">@T["CommandDeckTitle"]</h3>
+                            <p class="hid-card-subtitle">@T["CommandDeckSubtitle"]</p>
+                        </div>
+                    </div>
+
+                    <p class="hid-meta-note">@T["CommandDeckHint"]</p>
+
+                    <div class="hid-form-grid">
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandTextLabel"]</span>
+                            <input class="hid-input" @bind="_demoCommandText" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandShortcutLabel"]</span>
+                            <input class="hid-input" @bind="_demoShortcut" />
+                        </label>
+                    </div>
+
+                    <div class="hid-candidate-actions">
+                        <button class="hid-button-primary hid-button-sm"
+                                disabled="@(_busy || string.IsNullOrWhiteSpace(_demoCommandText))"
+                                @onclick="SendDemoTextCommandAsync">
+                            @T["SendDemoTextCommand"]
+                        </button>
+                        <button class="hid-button-secondary hid-button-sm"
+                                disabled="@(_busy || string.IsNullOrWhiteSpace(_demoShortcut))"
+                                @onclick="SendDemoShortcutCommandAsync">
+                            @T["SendDemoShortcutCommand"]
+                        </button>
+                        <button class="hid-button-secondary hid-button-sm"
+                                disabled="@_busy"
+                                @onclick="SendDemoMouseMoveCommandAsync">
+                            @T["SendDemoMouseMoveCommand"]
+                        </button>
+                    </div>
+
+                    @if (_lastCommandAck is not null)
+                    {
+                        <div class="hid-detail-card">
+                            <div class="hid-detail-label">@T["LastCommandAck"]</div>
+                            <div class="hid-detail-value">@_lastCommandAck.Status</div>
+                            <div class="hid-meta-note">@T["CommandId"]: @_lastCommandAck.CommandId</div>
+                            @if (_lastCommandAck.Error is not null)
+                            {
+                                <div class="hid-meta-note">@_lastCommandAck.Error.Code · @_lastCommandAck.Error.Message</div>
+                            }
+                        </div>
+                    }
+                </div>
             </section>
 
             <section class="hid-section-block">
@@ -398,6 +451,9 @@
     private string? _backendUnavailableMessage;
     private bool _busy;
     private SessionShareGrantRequestViewModel _shareRequest = new();
+    private CommandAckViewModel? _lastCommandAck;
+    private string _demoCommandText = "Hello from MicroMeet";
+    private string _demoShortcut = "CTRL+ALT+M";
     private static readonly string[] SessionRoles = ["Observer", "Controller", "Presenter"];
 
     private string CurrentOperatorPrincipalId => Identity.PrincipalId;
@@ -557,6 +613,40 @@
                 Identity.OrganizationId,
                 Identity.OperatorRoles));
 
+    private Task SendDemoTextCommandAsync()
+        => DispatchDemoCommandAsync(
+            "keyboard.text",
+            string.Format(T["CommandDispatchedMessage"], "keyboard.text"),
+            new KeyValuePair<string, object?>("text", _demoCommandText.Trim()));
+
+    private Task SendDemoShortcutCommandAsync()
+        => DispatchDemoCommandAsync(
+            "keyboard.shortcut",
+            string.Format(T["CommandDispatchedMessage"], "keyboard.shortcut"),
+            new KeyValuePair<string, object?>("shortcut", _demoShortcut.Trim()));
+
+    private Task SendDemoMouseMoveCommandAsync()
+        => DispatchDemoCommandAsync(
+            "mouse.move",
+            string.Format(T["CommandDispatchedMessage"], "mouse.move"),
+            new KeyValuePair<string, object?>("dx", 24),
+            new KeyValuePair<string, object?>("dy", 12));
+
+    private async Task DispatchDemoCommandAsync(
+        string action,
+        string successMessage,
+        params KeyValuePair<string, object?>[] args)
+    {
+        var participantId = ResolveCurrentParticipantId();
+        var payload = BuildCommandRequest(action, args, participantId);
+        await RunActionAsync(
+            successMessage,
+            async () =>
+            {
+                _lastCommandAck = await ApiClient.DispatchCommandAsync(SessionId, payload);
+            });
+    }
+
     private async Task RunActionAsync(string successMessage, Func<Task> action)
     {
         try
@@ -593,6 +683,55 @@
         {
             _busy = false;
         }
+    }
+
+    private SessionCommandDispatchRequestViewModel BuildCommandRequest(
+        string action,
+        IReadOnlyList<KeyValuePair<string, object?>> args,
+        string? participantId)
+    {
+        var commandArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["principalId"] = CurrentOperatorPrincipalId,
+        };
+
+        if (!string.IsNullOrWhiteSpace(participantId))
+        {
+            commandArgs["participantId"] = participantId;
+        }
+
+        foreach (var arg in args)
+        {
+            commandArgs[arg.Key] = arg.Value;
+        }
+
+        return new SessionCommandDispatchRequestViewModel
+        {
+            CommandId = $"cmd-{Guid.NewGuid():N}",
+            Channel = "Hid",
+            Action = action,
+            Args = commandArgs,
+            TimeoutMs = 3000,
+            IdempotencyKey = $"idem-{Guid.NewGuid():N}",
+            TenantId = Identity.TenantId,
+            OrganizationId = Identity.OrganizationId,
+            OperatorRoles = Identity.OperatorRoles,
+        };
+    }
+
+    private string? ResolveCurrentParticipantId()
+    {
+        var inControlCandidates = _control?.Candidates
+            .FirstOrDefault(candidate => string.Equals(candidate.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase))
+            ?.ParticipantId;
+        if (!string.IsNullOrWhiteSpace(inControlCandidates))
+        {
+            return inControlCandidates;
+        }
+
+        return _participants?
+            .FirstOrDefault(participant => string.Equals(participant.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase))
+            ?.ParticipantId;
     }
 
     private bool CanRelease(ControlCandidateViewModel candidate)
