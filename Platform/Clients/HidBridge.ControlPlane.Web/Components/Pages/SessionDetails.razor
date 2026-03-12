@@ -212,22 +212,57 @@
                         </label>
                     </div>
 
-                    <div class="hid-candidate-actions">
-                        <button class="hid-button-primary hid-button-sm"
-                                disabled="@(_busy || string.IsNullOrWhiteSpace(_demoCommandText))"
-                                @onclick="SendDemoTextCommandAsync">
-                            @T["SendDemoTextCommand"]
-                        </button>
-                        <button class="hid-button-secondary hid-button-sm"
-                                disabled="@(_busy || string.IsNullOrWhiteSpace(_demoShortcut))"
-                                @onclick="SendDemoShortcutCommandAsync">
-                            @T["SendDemoShortcutCommand"]
-                        </button>
-                        <button class="hid-button-secondary hid-button-sm"
-                                disabled="@_busy"
-                                @onclick="SendDemoMouseMoveCommandAsync">
-                            @T["SendDemoMouseMoveCommand"]
-                        </button>
+                    <div class="hid-candidate-stack">
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioTextTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioTextHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioTextId)">@GetScenarioBadgeLabel(CommandScenarioTextId)</span>
+                                    <button class="hid-button-primary hid-button-sm"
+                                            disabled="@(_busy || string.IsNullOrWhiteSpace(_demoCommandText))"
+                                            @onclick="SendDemoTextCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioShortcutTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioShortcutHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioShortcutId)">@GetScenarioBadgeLabel(CommandScenarioShortcutId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@(_busy || string.IsNullOrWhiteSpace(_demoShortcut))"
+                                            @onclick="SendDemoShortcutCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioMouseTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioMouseHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioMouseId)">@GetScenarioBadgeLabel(CommandScenarioMouseId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoMouseMoveCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     @if (_lastCommandAck is not null)
@@ -242,6 +277,34 @@
                             }
                         </div>
                     }
+
+                    <div>
+                        <h4 class="hid-card-title">@T["CommandAuditTrailTitle"]</h4>
+                        <div class="hid-list-stack">
+                            @if (_commandAuditTrail.Count == 0)
+                            {
+                                <div class="hid-empty-state">@T["CommandAuditTrailEmpty"]</div>
+                            }
+                            else
+                            {
+                                @foreach (var entry in _commandAuditTrail)
+                                {
+                                    <div class="hid-list-card">
+                                        <div class="hid-list-card-header hid-list-card-header--center">
+                                            <div>
+                                                <div class="hid-list-title">@entry.ScenarioName</div>
+                                                <div class="hid-list-subtitle">@entry.Detail</div>
+                                            </div>
+                                            <div class="hid-candidate-actions">
+                                                <span class="@GetTrailBadgeClass(entry)">@GetTrailBadgeLabel(entry)</span>
+                                                <div class="hid-list-timestamp">@FormatTime(entry.OccurredAtUtc)</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -454,6 +517,12 @@
     private CommandAckViewModel? _lastCommandAck;
     private string _demoCommandText = "Hello from MicroMeet";
     private string _demoShortcut = "CTRL+ALT+M";
+    private readonly Dictionary<string, CommandScenarioSnapshot> _commandScenarioSnapshots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<CommandAuditTrailEntry> _commandAuditTrail = [];
+    private const int CommandAuditTrailCapacity = 6;
+    private const string CommandScenarioTextId = "text";
+    private const string CommandScenarioShortcutId = "shortcut";
+    private const string CommandScenarioMouseId = "mouse";
     private static readonly string[] SessionRoles = ["Observer", "Controller", "Presenter"];
 
     private string CurrentOperatorPrincipalId => Identity.PrincipalId;
@@ -615,36 +684,88 @@
 
     private Task SendDemoTextCommandAsync()
         => DispatchDemoCommandAsync(
+            CommandScenarioTextId,
+            T["CommandScenarioTextTitle"],
             "keyboard.text",
             string.Format(T["CommandDispatchedMessage"], "keyboard.text"),
             new KeyValuePair<string, object?>("text", _demoCommandText.Trim()));
 
     private Task SendDemoShortcutCommandAsync()
         => DispatchDemoCommandAsync(
+            CommandScenarioShortcutId,
+            T["CommandScenarioShortcutTitle"],
             "keyboard.shortcut",
             string.Format(T["CommandDispatchedMessage"], "keyboard.shortcut"),
             new KeyValuePair<string, object?>("shortcut", _demoShortcut.Trim()));
 
     private Task SendDemoMouseMoveCommandAsync()
         => DispatchDemoCommandAsync(
+            CommandScenarioMouseId,
+            T["CommandScenarioMouseTitle"],
             "mouse.move",
             string.Format(T["CommandDispatchedMessage"], "mouse.move"),
             new KeyValuePair<string, object?>("dx", 24),
             new KeyValuePair<string, object?>("dy", 12));
 
     private async Task DispatchDemoCommandAsync(
+        string scenarioId,
+        string scenarioName,
         string action,
         string successMessage,
         params KeyValuePair<string, object?>[] args)
     {
-        var participantId = ResolveCurrentParticipantId();
-        var payload = BuildCommandRequest(action, args, participantId);
-        await RunActionAsync(
-            successMessage,
-            async () =>
-            {
-                _lastCommandAck = await ApiClient.DispatchCommandAsync(SessionId, payload);
-            });
+        try
+        {
+            _busy = true;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+
+            var participantId = ResolveCurrentParticipantId();
+            var payload = BuildCommandRequest(action, args, participantId);
+            _lastCommandAck = await ApiClient.DispatchCommandAsync(SessionId, payload);
+
+            var resolvedAck = _lastCommandAck ?? new CommandAckViewModel(payload.CommandId, "Unknown");
+            var accepted = IsAcceptedCommandAck(resolvedAck.Status);
+            var detail = resolvedAck.Error is null
+                ? $"{action} -> {resolvedAck.Status}"
+                : $"{resolvedAck.Error.Code}: {resolvedAck.Error.Message}";
+
+            RegisterCommandScenarioResult(scenarioId, scenarioName, resolvedAck.Status, accepted, detail);
+            _actionMessage = accepted
+                ? successMessage
+                : string.Format(T["CommandRejectedMessage"], action, resolvedAck.Status);
+
+            await RefreshAsync();
+            ResetDrafts();
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+            RegisterCommandScenarioResult(scenarioId, scenarioName, "Unavailable", false, exception.Message);
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
+            var detail = exception.AuthorizationDenied?.Message ?? exception.Message;
+            RegisterCommandScenarioResult(scenarioId, scenarioName, "Rejected", false, detail);
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
+            RegisterCommandScenarioResult(scenarioId, scenarioName, "Rejected", false, exception.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task RunActionAsync(string successMessage, Func<Task> action)
@@ -719,6 +840,43 @@
         };
     }
 
+    private string GetScenarioBadgeLabel(string scenarioId)
+        => _commandScenarioSnapshots.TryGetValue(scenarioId, out var snapshot)
+            ? (snapshot.Accepted ? T["ScenarioPass"] : T["ScenarioReject"])
+            : T["ScenarioNotRun"];
+
+    private string GetScenarioBadgeClass(string scenarioId)
+        => _commandScenarioSnapshots.TryGetValue(scenarioId, out var snapshot)
+            ? (snapshot.Accepted ? "hid-badge hid-badge--positive" : "hid-badge hid-badge--danger")
+            : "hid-badge hid-badge--warning";
+
+    private string GetTrailBadgeLabel(CommandAuditTrailEntry entry)
+        => entry.Accepted ? T["ScenarioPass"] : T["ScenarioReject"];
+
+    private static string GetTrailBadgeClass(CommandAuditTrailEntry entry)
+        => entry.Accepted ? "hid-badge hid-badge--positive" : "hid-badge hid-badge--danger";
+
+    private void RegisterCommandScenarioResult(
+        string scenarioId,
+        string scenarioName,
+        string ackStatus,
+        bool accepted,
+        string detail)
+    {
+        var occurredAtUtc = DateTimeOffset.UtcNow;
+        _commandScenarioSnapshots[scenarioId] = new CommandScenarioSnapshot(ackStatus, accepted, detail, occurredAtUtc);
+
+        _commandAuditTrail.Insert(0, new CommandAuditTrailEntry(scenarioName, ackStatus, accepted, detail, occurredAtUtc));
+        if (_commandAuditTrail.Count > CommandAuditTrailCapacity)
+        {
+            _commandAuditTrail.RemoveRange(CommandAuditTrailCapacity, _commandAuditTrail.Count - CommandAuditTrailCapacity);
+        }
+    }
+
+    private static bool IsAcceptedCommandAck(string? status)
+        => string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "Applied", StringComparison.OrdinalIgnoreCase);
+
     private string? ResolveCurrentParticipantId()
     {
         var inControlCandidates = _control?.Candidates
@@ -787,4 +945,17 @@
 
     private static string FormatTime(DateTimeOffset? value)
         => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—";
+
+    private sealed record CommandScenarioSnapshot(
+        string AckStatus,
+        bool Accepted,
+        string Detail,
+        DateTimeOffset OccurredAtUtc);
+
+    private sealed record CommandAuditTrailEntry(
+        string ScenarioName,
+        string AckStatus,
+        bool Accepted,
+        string Detail,
+        DateTimeOffset OccurredAtUtc);
 }
