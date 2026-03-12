@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>HIDBRIDGE</title>
+
+  <!-- Tailwind Play CDN (OK for landing; for production later можна зібрати локально) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    // Platform-aware logo: Apple -> sans, Win/Linux -> mono
+    (function () {
+      const p = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+      const ua = (navigator.userAgent || "").toLowerCase();
+      const isApple =
+        p.includes("mac") || p.includes("iphone") || p.includes("ipad") || p.includes("ipod") ||
+        ua.includes("mac os") || ua.includes("iphone") || ua.includes("ipad");
+      const isWin = p.includes("win") || ua.includes("windows");
+      const isLinux = p.includes("linux") || ua.includes("linux");
+      document.documentElement.dataset.platform = isApple ? "apple" : (isWin ? "win" : (isLinux ? "linux" : "other"));
+    })();
+
+    // Tailwind config
+    tailwind.config = {
+      darkMode: 'media',
+      theme: {
+        extend: {
+          fontFamily: {
+            ui: ['ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Noto Sans','Ubuntu','Cantarell','Helvetica Neue','Arial','sans-serif'],
+            mono: ['ui-monospace','SFMono-Regular','Menlo','Monaco','Consolas','Liberation Mono','DejaVu Sans Mono','Courier New','monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Use OS colors for true platform feel */
+    body { background: Canvas; color: CanvasText; }
+
+    /* Subtle grid glow background */
+    .bg {
+      position: fixed; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(circle at 20% 20%, color-mix(in srgb, #6aa9ff 14%, transparent) 0%, transparent 45%),
+        radial-gradient(circle at 80% 30%, color-mix(in srgb, #7cffd6 10%, transparent) 0%, transparent 40%),
+        linear-gradient(to right, color-mix(in srgb, CanvasText 8%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, CanvasText 8%, transparent) 1px, transparent 1px);
+      background-size: auto, auto, 28px 28px, 28px 28px;
+      opacity: .55;
+    }
+
+    /* Platform logo switch */
+    .logo { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, "DejaVu Sans Mono", "Courier New", monospace; }
+    html[data-platform="apple"] .logo { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif; letter-spacing: .10em; font-weight: 800; }
+    html[data-platform="win"] .logo, html[data-platform="linux"] .logo { letter-spacing: .14em; font-weight: 700; }
+  </style>
+</head>
+
+<body class="font-ui">
+  <div class="bg"></div>
+
+  <main class="min-h-screen grid place-items-center p-6 sm:p-10">
+    <section class="w-full max-w-5xl rounded-2xl border border-black/10 dark:border-white/15
+                    bg-white/70 dark:bg-white/5 backdrop-blur-md shadow-[0_10px_40px_rgba(0,0,0,.10)]
+                    p-6 sm:p-10">
+
+      <header class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 class="logo text-[clamp(40px,6vw,64px)] uppercase leading-none tracking-[.14em] m-0">
+            HIDBRIDGE
+          </h1>
+          <p class="mt-3 text-base sm:text-lg opacity-85 max-w-2xl">
+            True Transparency. Nothing In Between. Transparent HID access over the network - no translation, no lag.
+          </p>
+        </div>
+
+        <div class="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm
+                    border border-black/10 dark:border-white/15 bg-white/70 dark:bg-white/10">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-25 animate-ping motion-reduce:animate-none"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+          </span>
+          <span class="opacity-90">Server online</span>
+        </div>
+      </header>
+
+      <div class="mt-7 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="rounded-2xl border border-black/10 dark:border-white/15 bg-white/70 dark:bg-white/5 p-5">
+          <h2 class="text-lg font-semibold tracking-tight">What it does</h2>
+          <p class="mt-2 opacity-85 leading-relaxed">
+            HidBridge exposes your HID devices securely over the network.
+            Use one keyboard/mouse (and more) anywhere - home, studio, office - with the original signal intact.
+          </p>
+
+          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Transparency</div>
+              <div class="mt-1 opacity-85">Protocol intact, signal untouched</div>
+            </div>
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Latency</div>
+              <div class="mt-1 opacity-85">Built for real-time input</div>
+            </div>
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Use cases</div>
+              <div class="mt-1 opacity-85">Gamers • Geeks • Teams • Families</div>
+            </div>
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Next</div>
+              <div class="mt-1 opacity-85">
+                <span class="font-mono text-sm px-2 py-0.5 rounded-lg border border-black/10 dark:border-white/15">/demo</span>
+                <span class="font-mono text-sm px-2 py-0.5 rounded-lg border border-black/10 dark:border-white/15">/api</span>
+                <span class="font-mono text-sm px-2 py-0.5 rounded-lg border border-black/10 dark:border-white/15">/ws</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 flex flex-wrap gap-2">
+            <a class="inline-flex items-center justify-center rounded-xl px-4 py-2 font-semibold
+                      bg-gradient-to-br from-sky-400/80 to-emerald-300/70 text-black
+                      border border-black/10 hover:brightness-105 active:translate-y-px"
+               href="/demo">
+              Open Demo
+            </a>
+            <a class="inline-flex items-center justify-center rounded-xl px-4 py-2 font-semibold
+                      border border-black/10 dark:border-white/15 bg-white/60 dark:bg-white/5
+                      hover:brightness-105 active:translate-y-px"
+               href="https://github.com/AlexSkarbo/HidBridge/tree/main/Docs">
+              Docs
+            </a>
+            <a class="inline-flex items-center justify-center rounded-xl px-4 py-2 font-semibold
+                      border border-black/10 dark:border-white/15 bg-white/60 dark:bg-white/5
+                      hover:brightness-105 active:translate-y-px"
+               href="https://github.com/AlexSkarbo/HidBridge" target="_blank" rel="noreferrer">
+              GitHub
+            </a>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-black/10 dark:border-white/15 bg-white/70 dark:bg-white/5 p-5">
+          <h2 class="text-lg font-semibold tracking-tight">Quick checks</h2>
+          <p class="mt-2 opacity-85 leading-relaxed">
+            If you see this page over HTTPS, DNS + ports + certs are configured correctly.
+          </p>
+
+          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Domains</div>
+              <div class="mt-1 opacity-85">hidbridge.com • hidbridge.online</div>
+            </div>
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Transport</div>
+              <div class="mt-1 opacity-85">HTTP 80 -> HTTPS 443</div>
+            </div>
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Cert</div>
+              <div class="mt-1 opacity-85">Let’s Encrypt (auto-renew)</div>
+            </div>
+            <div class="rounded-xl border border-dashed border-black/15 dark:border-white/20 p-4">
+              <div class="text-xs uppercase tracking-wider opacity-80 font-semibold">Host</div>
+              <div class="mt-1 opacity-85">Raspberry Pi + Docker</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="mt-6 pt-4 border-t border-black/10 dark:border-white/15 flex flex-wrap justify-between gap-3 text-sm opacity-80">
+        <div>© <span id="y"></span> HidBridge</div>
+        <a class="font-mono" href=https://github.com/AlexSkarbo/HidBridge?tab=License-1-ov-file#readme>LICENSE</a>
+      </footer>
+    </section>
+  </main>
+
+  <script>
+    document.getElementById("y").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
