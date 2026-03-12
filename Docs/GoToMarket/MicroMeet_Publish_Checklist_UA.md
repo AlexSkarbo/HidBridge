@@ -39,6 +39,8 @@
 
 - [ ] `Docs/GoToMarket/MicroMeet_Reddit_Post_UA.md`
 - [ ] `Docs/GoToMarket/MicroMeet_LinkedIn_Post_UA.md`
+- [ ] `Docs/GoToMarket/MicroMeet_Release_Notes_v0.1.0_EN.md`
+- [ ] `Docs/GoToMarket/MicroMeet_Test_Matrix_UA.md`
 - [ ] headline:
   - `Micro Meet: shared control rooms for real endpoints, not just screen sharing`
 
