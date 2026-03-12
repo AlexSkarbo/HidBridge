@@ -55,6 +55,7 @@
                 </div>
                 <div class="hid-candidate-actions">
                     <a class="hid-button-secondary hid-button-sm" href="/">@T["BackToFleet"]</a>
+                    <button class="hid-button-danger hid-button-sm" disabled="@_busy" @onclick="EndSessionAsync">@T["EndRoom"]</button>
                     <button class="hid-button-secondary hid-button-sm" @onclick="RefreshAsync">@T["Refresh"]</button>
                 </div>
             </div>
@@ -761,6 +762,43 @@
             _error = exception.Message;
             _backendUnavailableMessage = null;
             RegisterCommandScenarioResult(scenarioId, scenarioName, "Rejected", false, exception.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task EndSessionAsync()
+    {
+        try
+        {
+            _busy = true;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+
+            await ApiClient.CloseSessionAsync(SessionId, $"closed by {CurrentOperatorPrincipalId}");
+            Navigation.NavigateTo("/", forceLoad: false);
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
         }
         finally
         {

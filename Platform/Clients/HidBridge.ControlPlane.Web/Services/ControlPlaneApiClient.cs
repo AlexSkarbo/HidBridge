@@ -56,6 +56,28 @@ public sealed class ControlPlaneApiClient
         => await SendJsonAsync<SessionOpenRequestViewModel>(HttpMethod.Post, "/api/v1/sessions", body, cancellationToken);
 
     /// <summary>
+    /// Closes one session room and releases its endpoint binding.
+    /// </summary>
+    public async Task CloseSessionAsync(
+        string sessionId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var relativeUri = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/close";
+        using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri)
+        {
+            Content = JsonContent.Create(new
+            {
+                sessionId,
+                reason,
+            }),
+        };
+
+        using var response = await SendAsync(() => _httpClient.SendAsync(request, cancellationToken), relativeUri);
+        await EnsureSuccessAsync(response, relativeUri, cancellationToken);
+    }
+
+    /// <summary>
     /// Dispatches one command through the specified session room.
     /// </summary>
     public async Task<CommandAckViewModel?> DispatchCommandAsync(

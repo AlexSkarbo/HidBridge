@@ -159,6 +159,31 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the close-session route and payload.
+    /// </summary>
+    [Fact]
+    public async Task CloseSessionAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new
+        {
+            sessionId = "room-endpoint-local-001",
+            reason = "closed from operator shell",
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        await apiClient.CloseSessionAsync("room-endpoint-local-001", "closed from operator shell", cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/room-endpoint-local-001/close", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("room-endpoint-local-001", payload!["sessionId"]?.ToString());
+        Assert.Equal("closed from operator shell", payload["reason"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the command-dispatch route and payload.
     /// </summary>
     [Fact]
