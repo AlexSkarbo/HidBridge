@@ -54,6 +54,11 @@
                     <h3 class="hid-card-title">@T["FleetQuickStartTitle"]</h3>
                     <p class="hid-card-subtitle">@T["FleetQuickStartSubtitle"]</p>
                 </div>
+                <button class="hid-button-primary hid-button-sm"
+                        disabled="@(!CanQuickStart(availableEndpoint, activeSession) || !string.IsNullOrWhiteSpace(_busyEndpointId))"
+                        @onclick="() => StartOrResumeDemoAsync(availableEndpoint, activeSession)">
+                    @GetQuickStartActionLabel(availableEndpoint, activeSession)
+                </button>
             </div>
             <div class="hid-inline-meta">
                 <span>1. @T["FleetQuickStartStep1"]</span>
@@ -287,6 +292,41 @@
         {
             _busyEndpointId = null;
         }
+    }
+
+    private bool CanQuickStart(InventoryEndpointCardViewModel? availableEndpoint, SessionProjectionItemViewModel? activeSession)
+        => availableEndpoint is not null || activeSession is not null;
+
+    private string GetQuickStartActionLabel(InventoryEndpointCardViewModel? availableEndpoint, SessionProjectionItemViewModel? activeSession)
+    {
+        if (availableEndpoint is not null)
+        {
+            return _busyEndpointId == availableEndpoint.EndpointId ? T["StartingSession"] : T["LaunchRoom"];
+        }
+
+        if (activeSession is not null)
+        {
+            return T["ResumeRoom"];
+        }
+
+        return T["NoAvailableEndpoint"];
+    }
+
+    private Task StartOrResumeDemoAsync(InventoryEndpointCardViewModel? availableEndpoint, SessionProjectionItemViewModel? activeSession)
+    {
+        if (availableEndpoint is not null)
+        {
+            return StartSessionAsync(availableEndpoint);
+        }
+
+        if (activeSession is not null)
+        {
+            Navigation.NavigateTo($"/sessions/{Uri.EscapeDataString(activeSession.SessionId)}");
+            return Task.CompletedTask;
+        }
+
+        _actionMessage = T["NoAvailableEndpoint"];
+        return Task.CompletedTask;
     }
 
     private static string BuildSessionId(string endpointId)

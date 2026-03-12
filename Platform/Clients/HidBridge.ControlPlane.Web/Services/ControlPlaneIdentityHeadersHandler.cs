@@ -4,6 +4,7 @@ using HidBridge.ControlPlane.Web.Configuration;
 using HidBridge.ControlPlane.Web.Identity;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;
 
 namespace HidBridge.ControlPlane.Web.Services;
@@ -89,8 +90,13 @@ public sealed class ControlPlaneIdentityHeadersHandler : DelegatingHandler
             return null;
         }
 
-        return await context.GetTokenAsync(CookieAuthenticationDefaults.AuthenticationScheme, "access_token")
+        var cookieAuthResult = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        var accessToken = cookieAuthResult.Properties?.GetTokenValue("access_token")
+            ?? await context.GetTokenAsync(CookieAuthenticationDefaults.AuthenticationScheme, "access_token")
+            ?? await context.GetTokenAsync(OpenIdConnectDefaults.AuthenticationScheme, "access_token")
             ?? await context.GetTokenAsync("access_token");
+
+        return string.IsNullOrWhiteSpace(accessToken) ? null : accessToken;
     }
 
     private static void AddHeader(HttpRequestMessage request, string name, string? value)

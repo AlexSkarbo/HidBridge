@@ -34,7 +34,7 @@ public sealed record ApiRuntimePolicyBootstrapViewModel(
     string ScopeId,
     string? TenantId,
     string? OrganizationId,
-    string ViewerRoleRequired,
+    bool ViewerRoleRequired,
     bool ModeratorOverrideEnabled,
     bool AdminOverrideEnabled,
     int AssignmentCount);
@@ -713,7 +713,9 @@ public sealed class PolicyAssignmentUpsertRequestViewModel
 public sealed record OperationalArtifactSummaryViewModel(
     string PlatformRoot,
     OperationalArtifactGroupViewModel? Doctor,
+    OperationalArtifactGroupViewModel? CiLocal,
     OperationalArtifactGroupViewModel? Checks,
+    OperationalArtifactGroupViewModel? Smoke,
     OperationalArtifactGroupViewModel? Full,
     OperationalArtifactGroupViewModel? TokenDebug,
     OperationalArtifactGroupViewModel? BearerRollout,

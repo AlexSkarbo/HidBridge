@@ -47,7 +47,7 @@ public sealed class ControlPlaneApiClientTests
             "App_Data",
             "hidbridge",
             true,
-            new ApiRuntimePolicyBootstrapViewModel("default", "local-tenant", "local-org", "operator.viewer", true, true, 3),
+            new ApiRuntimePolicyBootstrapViewModel("default", "local-tenant", "local-org", true, true, true, 3),
             new ApiRuntimeAuthenticationViewModel(true, "http://127.0.0.1:18096/realms/hidbridge-dev", null, false, true, ["/api/v1/diagnostics/policies"], ["/api/v1/sessions"], []),
             new ApiRuntimePolicyRevisionLifecycleViewModel(30, 30, 25),
             new ApiRuntimeMaintenanceViewModel(30, 120, 30, 30, 7)));
@@ -58,6 +58,70 @@ public sealed class ControlPlaneApiClientTests
 
         Assert.Equal(HttpMethod.Get, handler.LastMethod);
         Assert.Equal("http://localhost:18093/api/v1/runtime/uart", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the runtime payload from the API endpoint shape can be deserialized by the web client model.
+    /// </summary>
+    [Fact]
+    public async Task GetRuntimeAsync_ParsesApiRuntimePayloadShape()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new
+        {
+            port = "COM6",
+            baudRate = 3000000,
+            mouseSelector = 255,
+            keyboardSelector = 254,
+            agentId = "agent-1",
+            endpointId = "endpoint-1",
+            persistenceProvider = "Sql",
+            dataRoot = "App_Data",
+            sqlSchema = "hidbridge",
+            sqlApplyMigrations = true,
+            policyBootstrap = new
+            {
+                scopeId = "default",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+                viewerRoleRequired = true,
+                moderatorOverrideEnabled = true,
+                adminOverrideEnabled = true,
+                assignmentCount = 3,
+            },
+            authentication = new
+            {
+                enabled = true,
+                authority = "http://127.0.0.1:18096/realms/hidbridge-dev",
+                audience = "controlplane-api",
+                requireHttpsMetadata = false,
+                allowHeaderFallback = true,
+                bearerOnlyPrefixes = new[] { "/api/v1/diagnostics/policies" },
+                callerContextRequiredPrefixes = new[] { "/api/v1/sessions" },
+                headerFallbackDisabledPatterns = Array.Empty<string>(),
+            },
+            policyRevisionLifecycle = new
+            {
+                maintenanceIntervalSeconds = 30,
+                retentionDays = 30,
+                maxRevisionsPerEntity = 25,
+            },
+            maintenance = new
+            {
+                leaseSeconds = 30,
+                recoveryGraceSeconds = 120,
+                cleanupIntervalSeconds = 30,
+                auditRetentionDays = 30,
+                telemetryRetentionDays = 7,
+            },
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        var runtime = await apiClient.GetRuntimeAsync(cancellationToken);
+
+        Assert.NotNull(runtime);
+        Assert.True(runtime!.PolicyBootstrap.ViewerRoleRequired);
     }
 
     /// <summary>

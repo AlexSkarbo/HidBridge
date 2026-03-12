@@ -215,6 +215,30 @@
                     <span class="hid-section-toolbar-meta">@(_artifacts?.PlatformRoot ?? "—")</span>
                 </div>
                 <div class="hid-list-stack">
+                    @if (!EnumerateArtifactGroups().Any())
+                    {
+                        <div class="hid-card-soft hid-empty-state">@T["NoArtifactsFound"]</div>
+                    }
+                    else
+                    {
+                        <div class="hid-list-card">
+                            <div class="hid-list-title">@T["QuickLinks"]</div>
+                            <div class="hid-candidate-actions">
+                                @foreach (var quickLink in EnumerateQuickArtifactLinks())
+                                {
+                                    var preferredLink = quickLink.Group?.PreferredLink;
+                                    if (preferredLink is not null)
+                                    {
+                                        <a class="hid-button-secondary hid-button-sm" href="@BuildArtifactHref(preferredLink.RelativePath)" target="_blank" rel="noopener noreferrer">@quickLink.Label</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="hid-pill">@quickLink.Label: —</span>
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
                     @foreach (var group in EnumerateArtifactGroups())
                     {
                         <div class="hid-list-card">
@@ -222,6 +246,7 @@
                                 <div>
                                     <div class="hid-list-title">@group.DisplayName</div>
                                     <div class="hid-list-subtitle">@group.RunId · @group.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                                    <div class="hid-list-subtitle">@group.RelativeDirectoryPath</div>
                                 </div>
                                 <div class="hid-list-side">
                                     <div class="hid-list-title">@T["ArtifactsCount"]</div>
@@ -235,7 +260,7 @@
                                 </div>
                             }
                             <div class="hid-list-stack">
-                                @foreach (var artifact in group.Links.Take(3))
+                                @foreach (var artifact in group.Links.Take(5))
                                 {
                                     <div class="hid-list-card">
                                         <div class="hid-list-card-header">
@@ -302,15 +327,43 @@
         => values is null || values.Count == 0 ? "—" : string.Join(", ", values.Select(x => $"{x.ConnectorType}:{x.Count}"));
 
     private IEnumerable<OperationalArtifactGroupViewModel> EnumerateArtifactGroups()
-        => new[]
+        => new OperationalArtifactGroupViewModel?[]
         {
             _artifacts?.Doctor,
-            _artifacts?.Checks,
+            _artifacts?.CiLocal,
             _artifacts?.Full,
-            _artifacts?.TokenDebug,
+            _artifacts?.Smoke,
+            _artifacts?.Checks,
             _artifacts?.BearerRollout,
             _artifacts?.IdentityReset,
-        }.Where(static x => x is not null)!;
+            _artifacts?.TokenDebug,
+        }
+        .OfType<OperationalArtifactGroupViewModel>()
+        .OrderBy(group => GetArtifactImportanceOrder(group.DisplayName))
+        .ThenByDescending(static group => group.UpdatedAtUtc);
+
+    private IEnumerable<(string Label, OperationalArtifactGroupViewModel? Group)> EnumerateQuickArtifactLinks()
+        => new (string Label, OperationalArtifactGroupViewModel? Group)[]
+        {
+            ("Doctor", _artifacts?.Doctor),
+            ("CI Local", _artifacts?.CiLocal),
+            ("Full", _artifacts?.Full),
+            ("Smoke", _artifacts?.Smoke),
+        };
+
+    private static int GetArtifactImportanceOrder(string displayName)
+        => displayName switch
+        {
+            "Doctor" => 0,
+            "CI Local" => 1,
+            "Full" => 2,
+            var value when value.StartsWith("Smoke", StringComparison.OrdinalIgnoreCase) => 3,
+            "Checks" => 4,
+            "Bearer Rollout" => 5,
+            "Identity Reset" => 6,
+            "Token Debug" => 7,
+            _ => int.MaxValue,
+        };
 
     private static string BuildArtifactHref(string relativePath)
         => $"/ops-artifacts/file?path={Uri.EscapeDataString(relativePath)}";

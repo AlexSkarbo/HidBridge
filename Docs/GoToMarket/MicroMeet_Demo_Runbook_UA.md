@@ -1,66 +1,96 @@
-# Micro Meet Demo Runbook
+# Micro Meet Demo Runbook (Step-by-Step)
 
 ## Мета
-Показати короткий сценарій, який виглядає як продукт, а не як інфраструктурний стенд:
+Провести стабільне demo без ручного "лікування" інфраструктури:
 
-1. login
-2. Fleet Overview
-3. Start session
-4. Invite or request second operator
-5. Accept / approve invitation
-6. Control handoff
-7. Timeline update
+1. Підготувати середовище.
+2. Запустити автоматичний demo-flow.
+3. Показати кімнату сесії з invite/control handoff.
+4. Підтвердити після демо, що контур лишився зеленим.
 
-## Передумови
+## 1) Preflight (чистий старт)
 
-1. Підняти повний контур:
+1. Перейти в корінь репозиторію.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+cd C:\Work\Pocker\Server\pico_hid_bridge_v9.9
 ```
 
-2. Перевірити стек:
+2. Зупинити старі API/Web рантайми (щоб уникнути конфліктів env/auth режимів).
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object {
+  $_.CommandLine -like "*HidBridge.ControlPlane.Api.csproj*" -or
+  $_.CommandLine -like "*HidBridge.ControlPlane.Web.csproj*"
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+3. Базова перевірка.
 ```powershell
 powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi
 ```
 
-3. Відкрити `HidBridge.ControlPlane.Web`.
+## 2) Базовий quality gate перед демо
 
-## Happy Path
+1. Локальний інтеграційний контур.
+```powershell
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local
+```
 
-1. Відкрити `/`.
-2. У `Quick Start` натиснути `Launch room` або в рядку endpoint натиснути `Start session`.
-3. Переконатися, що браузер переходить на `/sessions/{id}`.
-4. У `Session Room` показати:
+2. Повний контур.
+```powershell
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+```
+
+Очікування:
+- `Doctor PASS`
+- `Checks (Sql) PASS`
+- `Bearer Smoke PASS`
+- `Realm Sync PASS`
+- `CI Local PASS`
+
+## 3) Автоматичний запуск демо
+
+1. Стандартний сценарій (рекомендовано).
+```powershell
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset
+```
+
+2. Якщо свідомо хочеш реюзати вже запущені API/Web процеси.
+```powershell
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -ReuseRunningServices
+```
+
+Успішний результат:
+- `Doctor PASS`
+- `CI Local PASS`
+- `Start API PASS`
+- `Demo Seed PASS`
+- `Start Web PASS`
+
+## 4) Що робити в UI під час демо
+
+1. Відкрити URL, який вивів `demo-flow` у блоці `Demo endpoints`.
+2. Залогінитись через Keycloak.
+3. На `/` (Fleet Overview):
+- у `Quick Start` натиснути `Launch room`, або
+- в endpoint-картці натиснути `Start session`.
+4. Перевірити перехід на `/sessions/{id}`.
+5. У `Session Room` показати:
 - `Session Snapshot`
 - `Control Operations`
 - `Invitation Moderation`
 - `Participants`
 - `Timeline`
-
-5. Скопіювати `Room link`.
-6. Відкрити link у другому профілі браузера.
-7. У першому профілі:
-- `Grant invite`
-   або
-- чекати `Request invite` від другого профілю
-
-8. Схвалити або прийняти invite.
-9. Показати нового учасника в `Participants`.
-10. Виконати:
+6. Скопіювати `Room link`, відкрити у другому профілі браузера.
+7. В першому профілі виконати один із сценаріїв:
+- `Grant invite`, або
+- прийняти `Request invite` від другого профілю.
+8. Виконати handoff:
 - `Request control`
 - `Release`
-- або `Force takeover` для moderator/admin
+- `Force takeover` (для moderator/admin)
+9. Підтвердити, що `Timeline` оновився.
 
-11. Показати, що `Timeline` оновився.
-
-## Що говорити під час демо
-
-1. Це не просто screen share.
-2. Тут є кімната для реального endpoint.
-3. Тут є операторські ролі, invite flow і контрольований handoff.
-4. Усе, що сталося в кімнаті, лишається в timeline.
-
-## Мінімальний check після демо
+## 5) Перевірка після демо
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer
@@ -68,3 +98,45 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer
 
 Очікування:
 - `PASS`
+
+## 6) Як зупинити процеси після демо
+
+1. Якщо `demo-flow` вивів `Stop-Process -Id ...`, виконати ці команди.
+2. Або масово зупинити API/Web:
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object {
+  $_.CommandLine -like "*HidBridge.ControlPlane.Api.csproj*" -or
+  $_.CommandLine -like "*HidBridge.ControlPlane.Web.csproj*"
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+## 7) Швидкий troubleshooting
+
+1. `demo-seed` з помилкою `cannot connect`:
+- причина: API не запущений;
+- дія: запускати `demo-seed` тільки після `Start API` або через `demo-flow`.
+
+2. `open session -> 401 authentication_required` у smoke/ci-local:
+- причина: на порту 18093 лишився API з іншим auth-режимом;
+- дія: зупинити процеси API/Web і повторити `ci-local`, потім `demo-flow`.
+
+3. `invalid_scope` на `/signin-oidc`:
+- причина: Keycloak realm/client-scope не синхронізовані;
+- дія:
+```powershell
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
+```
+
+4. Проблеми з зовнішнім Google provider після reset:
+- дія:
+```powershell
+powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Sync-HidBridgeDevRealm.ps1 -ExternalProviderConfigPaths "Platform/Identity/Keycloak/providers/google-oidc.local.json"
+```
+
+## 8) Де шукати логи
+
+- `Platform\.logs\doctor\...`
+- `Platform\.logs\ci-local\...`
+- `Platform\.logs\full\...`
+- `Platform\.logs\demo-flow\...`
+- `Platform\.smoke-data\Sql\...`

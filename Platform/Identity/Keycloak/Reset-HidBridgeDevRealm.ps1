@@ -275,8 +275,11 @@ function Invoke-ResetStep {
 }
 
 $desiredRealm = Get-Content $ImportPath -Raw | ConvertFrom-Json
-$resolvedExternalProviderConfigPaths = Resolve-ExternalProviderConfigPaths
-$desiredIdentityProviders = @($desiredRealm.identityProviders)
+$resolvedExternalProviderConfigPaths = @(Resolve-ExternalProviderConfigPaths)
+$desiredIdentityProviders = @()
+if ($null -ne $desiredRealm.identityProviders) {
+    $desiredIdentityProviders = @($desiredRealm.identityProviders | Where-Object { $null -ne $_ })
+}
 $hasProviderRestoreInputs = $desiredIdentityProviders.Count -gt 0 -or $resolvedExternalProviderConfigPaths.Count -gt 0
 if (-not $hasProviderRestoreInputs -and -not $AllowIdentityProviderLoss) {
     throw @"

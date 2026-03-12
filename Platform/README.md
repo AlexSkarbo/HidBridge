@@ -201,6 +201,7 @@ Test entrypoint:
 - `Platform/run_backend_smoke.ps1`
 - `Platform/run_file_smoke.ps1`
 - `Platform/run_sql_smoke.ps1`
+- `Platform/run_demo_flow.ps1`
 - The runner restores the solution, builds it, and then runs `HidBridge.Platform.Tests`.
 - `Platform/run_checks.ps1` runs the unit-test pipeline first and then runs the selected smoke profile.
 - `Platform/run_smoke.ps1` is the single entrypoint wrapper that dispatches to file or SQL smoke validation.
@@ -255,6 +256,31 @@ Local PostgreSQL for Platform:
   - `powershell -ExecutionPolicy Bypass -File Platform/run_file_smoke.ps1`
 - Example smoke-run:
   - `powershell -ExecutionPolicy Bypass -File Platform/run_sql_smoke.ps1 -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+
+One-command demo flow:
+- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow`
+- Step-by-step runbooks:
+  - `Docs/GoToMarket/MicroMeet_Demo_Runbook_UA.md`
+  - `Docs/GoToMarket/MicroMeet_Demo_Runbook_EN.md`
+- Default sequence:
+  - realm reset (`identity-reset`)
+  - runtime checks (`doctor`)
+  - CI-local checks (`ci-local`)
+  - demo seed (`demo-seed`) closes active sessions in scope and ensures at least one idle endpoint for quick-start
+  - starts API (`http://127.0.0.1:18093`) and Web (`http://127.0.0.1:18110`)
+- Useful switches:
+  - `-SkipIdentityReset`
+    - use this when you already have a working realm and do not want to reset IdP users/settings
+  - `-SkipServiceStartup`
+  - `-ReuseRunningServices`
+    - by default `demo-flow` restarts API/Web to apply deterministic demo env
+  - `-IncludeFull`
+  - `-NoBuild`
+  - `-ShowServiceWindows` (default is hidden service windows)
+
+Manual demo seed only:
+- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-seed -BaseUrl http://127.0.0.1:18093`
+- by default `demo-seed` gets bearer token via `controlplane-smoke / operator.smoke.admin`
 
 Thin operator UI shell:
 - open design backlog:

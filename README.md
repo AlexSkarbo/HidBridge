@@ -15,6 +15,30 @@ At a high level:
 - `A_device` presents itself to the target PC as a **USB HID device**.
 - `HidControlServer` can inject extra mouse/keyboard input into `B_host` over a dedicated **control UART** (SLIP framed, authenticated) and also provides video streaming endpoints driven by FFmpeg.
 
+## Micro Meet
+
+`Micro Meet` is the operator-facing collaboration layer built on top of the new `Platform/` stack.
+
+What it demonstrates:
+- fleet view of available endpoints
+- one-click `Start session` / `Launch room`
+- room-based invite and join flow
+- explicit control handoff between operators
+- room timeline for what happened and when
+
+This is positioned as:
+- shared control rooms for real endpoints
+- not just another screen-sharing demo
+
+Primary docs:
+- runtime and local stack: `Platform/README.md`
+- demo walkthrough (UA): `Docs/GoToMarket/MicroMeet_Demo_Runbook_UA.md`
+- demo walkthrough (EN): `Docs/GoToMarket/MicroMeet_Demo_Runbook_EN.md`
+- GitHub packaging notes: `Docs/GoToMarket/MicroMeet_GitHub_Package_UA.md`
+- Reddit draft: `Docs/GoToMarket/MicroMeet_Reddit_Post_UA.md`
+- LinkedIn draft: `Docs/GoToMarket/MicroMeet_LinkedIn_Post_UA.md`
+- publish checklist: `Docs/GoToMarket/MicroMeet_Publish_Checklist_UA.md`
+
 ## Repository Layout
 
 - `Firmware/`
@@ -70,6 +94,8 @@ Notes:
 - UART control protocol: `Docs/uart_control_protocol.md`
 - WebSocket control protocol: `Docs/ws_control_protocol.md`
 - Video endpoints mapping: `Docs/video_streams.md`
+- Micro Meet demo/sales runbook (UA): `Docs/GoToMarket/MicroMeet_Demo_Runbook_UA.md`
+- Micro Meet demo/sales runbook (EN): `Docs/GoToMarket/MicroMeet_Demo_Runbook_EN.md`
 
 ## Test Runner
 

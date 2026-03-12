@@ -632,6 +632,26 @@ try {
     Assert-True ($archiveTelemetry.total -ge 1) "Expected archive telemetry slice to contain entries."
     Assert-True ($archiveCommands.total -ge 1) "Expected archive command slice to contain entries."
 
+    $lastStep = "close smoke session"
+    $closedSession = Invoke-Json -Method "POST" -Uri "$BaseUrl/api/v1/sessions/$sessionId/close" -Headers $ownerHeaders -Body @{
+        sessionId = $sessionId
+        reason = "smoke teardown"
+    }
+
+    $lastStep = "read inventory dashboard after close"
+    $inventoryDashboardAfterClose = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/dashboards/inventory" -Headers $ownerHeaders
+    $closedEndpoint = @($inventoryDashboardAfterClose.endpoints | Where-Object { $_.endpointId -eq "endpoint_local_demo" } | Select-Object -First 1)[0]
+    Assert-True ($null -ne $closedEndpoint) "Expected endpoint_local_demo to exist after close."
+
+    $lastStep = "list sessions after close"
+    $sessionsAfterClose = @(Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/sessions" -Headers $ownerHeaders)
+    $closedSessionStillVisible = @($sessionsAfterClose | Where-Object { $_.sessionId -eq $sessionId }).Count -gt 0
+    Assert-True (-not $closedSessionStillVisible) "Expected closed smoke session to disappear from the session list."
+
+    if ($closedEndpoint.PSObject.Properties["activeSessionId"] -and -not [string]::IsNullOrWhiteSpace([string]$closedEndpoint.activeSessionId)) {
+        Assert-True ($closedEndpoint.activeSessionId -ne $sessionId) "Expected endpoint_local_demo to stop referencing the closed smoke session."
+    }
+
     $result = [pscustomobject]@{
         Provider = $Provider
         TokenMode = $tokenMode
@@ -666,6 +686,9 @@ try {
         ArchiveAudit = $archiveAudit
         ArchiveTelemetry = $archiveTelemetry
         ArchiveCommands = $archiveCommands
+        ClosedSession = $closedSession
+        SessionsAfterClose = $sessionsAfterClose
+        InventoryDashboardAfterClose = $inventoryDashboardAfterClose
         SessionCount = Get-Count $sessions
         ParticipantCount = Get-Count $participants
         ShareCount = Get-Count $shares

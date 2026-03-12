@@ -81,6 +81,40 @@ public static class SessionEndpoints
             .WithSummary("Read the command journal for one session.")
             .WithDescription("Returns persisted command journal entries for the specified session in storage order.");
 
+        sessionGroup.MapPost("/{sessionId}/close", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionOrchestrator orchestrator,
+            ISessionStore sessionStore,
+            SessionCloseBody request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                if (caller.IsPresent)
+                {
+                    await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                }
+
+                var normalized = request with { SessionId = sessionId };
+                return Results.Ok(await orchestrator.CloseAsync(normalized, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Accepts<SessionCloseBody>("application/json")
+        .Produces<SessionCloseBody>(StatusCodes.Status200OK)
+        .WithSummary("Close one session and release its endpoint.")
+        .WithDescription("Closes the specified session and persists one close audit event. The route sessionId wins over any SessionId value in the request body.");
+
         sessionGroup.MapPost("/{sessionId}/commands", async (
             string sessionId,
             HttpContext httpContext,
