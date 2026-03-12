@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/Connectors/">
+    <Project Path="Connectors/HidBridge.Connectors.HidBridgeUart/HidBridge.Connectors.HidBridgeUart.csproj" />
+  </Folder>
+  <Folder Name="/Core/">
+    <Project Path="Core/HidBridge.Application/HidBridge.Application.csproj" />
+    <Project Path="Core/HidBridge.Domain/HidBridge.Domain.csproj" />
+  </Folder>
+  <Folder Name="/Platform/">
+    <Project Path="Platform/HidBridge.ConnectorHost/HidBridge.ConnectorHost.csproj" />
+    <Project Path="Platform/HidBridge.ControlPlane.Api/HidBridge.ControlPlane.Api.csproj" />
+    <Project Path="Platform/HidBridge.SessionOrchestrator/HidBridge.SessionOrchestrator.csproj" />
+  </Folder>
+  <Folder Name="/Shared/">
+    <Project Path="Shared/HidBridge.Abstractions/HidBridge.Abstractions.csproj" />
+    <Project Path="Shared/HidBridge.Contracts/HidBridge.Contracts.csproj" />
+  </Folder>
+</Solution>

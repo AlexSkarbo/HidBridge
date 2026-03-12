@@ -14,6 +14,13 @@ build_1502/
 
 # Logs / runtime artifacts
 *.log
+Platform/.logs/
+Platform/.smoke-data/
+Platform/TestResults/
+Platform/sql-smoke-api.out.log
+Platform/sql-smoke-api.err.log
+Platform/Backups/
+Platform/Identity/Keycloak/backups/
 Tools/Server/HidControlServer/video_hls/
 Tools/Server/HidControlServer/video_logs/
 Tools/Server/HidControlServer/webrtc_rooms.json
@@ -28,11 +35,16 @@ Tools/WebRtcControlPeer/pids/
 Tools/WebRtcVideoPeer/pids/
 
 # Local machine config / caches
+Platform/.vs/
+Platform/HidBridge.Platform.slnLaunch.user
 Tools/HidControlServer/hidcontrol.config.json
 Tools/Server/HidControlServer/hidcontrol.config.json
 Tools/HidControlServer/devices_cache.json
 Tools/HidControlServer/tmp_source.json
 USBCaptureDesc.txt
+Platform/Identity/Keycloak/providers/*.local.json
+.tmp_keycloak_debug.ps1
+pi@192.168.0.152
 
 # Keep workspace editor settings
 !.vscode/*

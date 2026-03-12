@@ -1,0 +1,301 @@
+@page "/"
+@attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
+@inject NavigationManager Navigation
+@inject OperatorIdentityContext Identity
+@inject OperatorText T
+
+<PageTitle>@T["NavFleetOverview"]</PageTitle>
+
+<section class="hid-page">
+    <div class="hid-page-heading">
+        <p class="hid-section-kicker">@T["FleetOverviewTitle"]</p>
+        <h2 class="hid-section-title">@T["FleetOverviewTitle"]</h2>
+        <p class="hid-section-subtitle">@T["FleetOverviewSubtitle"]</p>
+    </div>
+
+    @if (_denial is not null)
+    {
+        <AuthorizationDeniedPanel Denial="_denial" Title="@T["AccessDenied"]" />
+    }
+    else if (_backendUnavailableMessage is not null)
+    {
+        <BackendUnavailablePanel Message="@_backendUnavailableMessage" Title="@T["BackendUnavailable"]" Hint="@T["BackendUnavailableHint"]" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="hid-alert hid-alert--danger">@_error</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_actionMessage))
+    {
+        <div class="hid-alert hid-alert--info">@_actionMessage</div>
+    }
+
+    @if (_denial is not null || _backendUnavailableMessage is not null || !string.IsNullOrWhiteSpace(_error))
+    {
+    }
+    else if (_inventory is null || _sessions is null)
+    {
+        <div class="hid-card-soft hid-empty-state">@T["LoadingDashboardData"]</div>
+    }
+    else
+    {
+        var inventory = _inventory!;
+        var sessions = _sessions!;
+        var availableEndpoint = inventory.Endpoints.FirstOrDefault(endpoint => string.IsNullOrWhiteSpace(endpoint.ActiveSessionId));
+        var activeSession = sessions.Items
+            .OrderByDescending(session => session.UpdatedAtUtc)
+            .FirstOrDefault();
+
+        <div class="hid-card-soft">
+            <div class="hid-panel-toolbar">
+                <div>
+                    <h3 class="hid-card-title">@T["FleetQuickStartTitle"]</h3>
+                    <p class="hid-card-subtitle">@T["FleetQuickStartSubtitle"]</p>
+                </div>
+            </div>
+            <div class="hid-inline-meta">
+                <span>1. @T["FleetQuickStartStep1"]</span>
+                <span>2. @T["FleetQuickStartStep2"]</span>
+                <span>3. @T["FleetQuickStartStep3"]</span>
+                <span>4. @T["FleetQuickStartStep4"]</span>
+            </div>
+            <div class="hid-meta-grid">
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["ReadyEndpoint"]</div>
+                    @if (availableEndpoint is null)
+                    {
+                        <div class="hid-detail-value">@T["NoAvailableEndpoint"]</div>
+                    }
+                    else
+                    {
+                        <div class="hid-detail-value">@availableEndpoint.EndpointId</div>
+                        <div class="hid-meta-note">@availableEndpoint.AgentId</div>
+                        <button class="hid-button-primary hid-button-sm"
+                                disabled="@(_busyEndpointId == availableEndpoint.EndpointId)"
+                                @onclick="() => StartSessionAsync(availableEndpoint)">
+                            @(_busyEndpointId == availableEndpoint.EndpointId ? T["StartingSession"] : T["LaunchRoom"])
+                        </button>
+                    }
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["LatestRoom"]</div>
+                    @if (activeSession is null)
+                    {
+                        <div class="hid-detail-value">@T["NoRecentRooms"]</div>
+                    }
+                    else
+                    {
+                        <div class="hid-detail-value">@activeSession.SessionId</div>
+                        <div class="hid-meta-note">@activeSession.AgentId · @activeSession.EndpointId</div>
+                        <a class="hid-button-secondary hid-button-sm" href="/sessions/@activeSession.SessionId">@T["ResumeRoom"]</a>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="hid-stat-grid">
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["Agents"]</div>
+                <div class="hid-stat-value">@inventory.TotalAgents</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["Endpoints"]</div>
+                <div class="hid-stat-value">@inventory.TotalEndpoints</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["ActiveSessions"]</div>
+                <div class="hid-stat-value hid-accent-positive">@inventory.ActiveSessions</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["FailedSessions"]</div>
+                <div class="hid-stat-value hid-accent-danger">@inventory.FailedSessions</div>
+            </div>
+        </div>
+
+        <div class="hid-page-grid hid-page-grid--fleet">
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["Endpoints"]</h3>
+                    <span class="hid-section-toolbar-meta">@T["Updated"] @inventory.GeneratedAtUtc.ToLocalTime().ToString("HH:mm:ss")</span>
+                </div>
+                <div class="hid-table-wrap">
+                    <table class="hid-table">
+                        <thead>
+                            <tr>
+                                <th>@T["Endpoint"]</th>
+                                <th>@T["Status"]</th>
+                                <th>@T["ActiveSession"]</th>
+                                <th>@T["Controller"]</th>
+                                <th>@T["Actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var endpoint in inventory.Endpoints)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="hid-list-title">@endpoint.EndpointId</div>
+                                        <div class="hid-list-subtitle">@endpoint.AgentId</div>
+                                    </td>
+                                    <td>@endpoint.Status</td>
+                                    <td>
+                                        @if (string.IsNullOrWhiteSpace(endpoint.ActiveSessionId))
+                                        {
+                                            <span class="text-hid-muted">@T["None"]</span>
+                                        }
+                                        else
+                                        {
+                                            <a class="hid-table-link" href="/sessions/@endpoint.ActiveSessionId">@endpoint.ActiveSessionId</a>
+                                        }
+                                    </td>
+                                    <td>@(!string.IsNullOrWhiteSpace(endpoint.ActiveControllerPrincipalId) ? endpoint.ActiveControllerPrincipalId : "—")</td>
+                                    <td>
+                                        <div class="hid-candidate-actions">
+                                            @if (!string.IsNullOrWhiteSpace(endpoint.ActiveSessionId))
+                                            {
+                                                <a class="hid-button-secondary hid-button-sm" href="/sessions/@endpoint.ActiveSessionId">@T["OpenRoom"]</a>
+                                            }
+                                            else
+                                            {
+                                                <button class="hid-button-primary hid-button-sm"
+                                                        disabled="@(_busyEndpointId == endpoint.EndpointId)"
+                                                        @onclick="() => StartSessionAsync(endpoint)">
+                                                    @(_busyEndpointId == endpoint.EndpointId ? T["StartingSession"] : T["StartSession"])
+                                                </button>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <h3 class="hid-card-title">@T["RecentSessions"]</h3>
+                <div class="hid-list-stack">
+                    @foreach (var session in sessions.Items.Take(6))
+                    {
+                        <a class="hid-list-card" href="/sessions/@session.SessionId">
+                            <div class="hid-list-card-header">
+                                <div>
+                                    <div class="hid-list-title">@session.SessionId</div>
+                                    <div class="hid-list-subtitle">@session.AgentId · @session.EndpointId</div>
+                                </div>
+                                <div class="hid-list-side">
+                                    <div class="hid-list-title">@session.State</div>
+                                    <div class="hid-list-subtitle">@session.Profile</div>
+                                </div>
+                            </div>
+                            <div class="hid-inline-meta">
+                                <span>@T["Participants"]: @session.ParticipantCount</span>
+                                <span>@T["AcceptedShares"]: @session.AcceptedShareCount</span>
+                                <span>@T["Controller"]: @(session.ActiveControllerPrincipalId ?? "—")</span>
+                            </div>
+                        </a>
+                    }
+                </div>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    private InventoryDashboardViewModel? _inventory;
+    private ProjectionPageViewModel<SessionProjectionItemViewModel>? _sessions;
+    private string? _error;
+    private string? _actionMessage;
+    private AuthorizationDeniedViewModel? _denial;
+    private string? _backendUnavailableMessage;
+    private string? _busyEndpointId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _inventory = await ApiClient.GetInventoryDashboardAsync();
+            _sessions = await ApiClient.GetSessionProjectionAsync(20);
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = $"{T["FleetOverviewTitle"]}: {exception.Message}";
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = $"{T["FleetOverviewTitle"]}: {exception.Message}";
+        }
+    }
+
+    private async Task StartSessionAsync(InventoryEndpointCardViewModel endpoint)
+    {
+        try
+        {
+            _busyEndpointId = endpoint.EndpointId;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+
+            var sessionId = BuildSessionId(endpoint.EndpointId);
+            var opened = await ApiClient.OpenSessionAsync(new SessionOpenRequestViewModel
+            {
+                SessionId = sessionId,
+                Profile = "Balanced",
+                RequestedBy = Identity.PrincipalId,
+                TargetAgentId = endpoint.AgentId ?? string.Empty,
+                TargetEndpointId = endpoint.EndpointId,
+                ShareMode = "Owner",
+                TenantId = Identity.TenantId,
+                OrganizationId = Identity.OrganizationId,
+                OperatorRoles = Identity.OperatorRoles,
+            });
+
+            if (opened is null)
+            {
+                _error = T["SessionStartFailed"];
+                return;
+            }
+
+            _actionMessage = string.Format(T["SessionStartedMessage"], opened.SessionId);
+            Navigation.NavigateTo($"/sessions/{Uri.EscapeDataString(opened.SessionId)}");
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busyEndpointId = null;
+        }
+    }
+
+    private static string BuildSessionId(string endpointId)
+    {
+        var endpointSegment = endpointId
+            .Replace("_", "-", StringComparison.Ordinal)
+            .Replace(" ", "-", StringComparison.Ordinal)
+            .ToLowerInvariant();
+        var sessionId = $"room-{endpointSegment}-{Guid.NewGuid():N}";
+        return sessionId.Length <= 64 ? sessionId : sessionId[..64];
+    }
+}

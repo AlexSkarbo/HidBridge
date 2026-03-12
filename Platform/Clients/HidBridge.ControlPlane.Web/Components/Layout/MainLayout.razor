@@ -1,0 +1,73 @@
+@inherits LayoutComponentBase
+@inject OperatorText T
+@inject OperatorAuthDescriptor Auth
+@inject OperatorIdentityContext Identity
+
+<div class="hid-shell">
+    <div class="hid-shell-frame">
+        <aside class="hid-shell-sidebar">
+            <NavMenu />
+        </aside>
+
+        <main class="hid-shell-main">
+            <header class="hid-header-panel hid-card">
+                <div class="hid-header-top">
+                    <div>
+                        <p class="hid-section-kicker">@T["HidBridgeOperatorConsole"]</p>
+                        <h1 class="hid-logo hid-header-logo">HIDBRIDGE</h1>
+                        <p class="hid-header-subtitle">@T["ControlPlaneWeb"]</p>
+                    </div>
+                    <div class="hid-header-meta-grid">
+                        <div class="hid-header-meta hid-card-soft">
+                            <div class="hid-header-meta-label">@T["UiStack"]</div>
+                            <div class="hid-header-meta-value">@T["ThinOperatorShell"]</div>
+                        </div>
+                        <div class="hid-header-meta hid-card-soft">
+                            <div class="hid-header-meta-label">@T["DataSource"]</div>
+                            <div class="hid-header-meta-value">@T["DashboardProjections"]</div>
+                        </div>
+                        <div class="hid-header-meta hid-card-soft">
+                            <div class="hid-header-meta-label">IDENTITY</div>
+                            <div class="hid-header-meta-value">@Identity.DisplayName</div>
+                            <div class="hid-meta-note">@Identity.TenantId / @Identity.OrganizationId</div>
+                            <div class="hid-meta-note">@Identity.RoleSummary</div>
+                        </div>
+                        <div class="hid-header-meta hid-card-soft">
+                            <div class="hid-header-meta-label">AUTH</div>
+                            <div class="hid-header-meta-value">@Auth.ProviderDisplayName</div>
+                            <div class="hid-meta-note">@Auth.Mode</div>
+                            <div class="hid-meta-note">@Identity.AuthenticationMode</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hid-header-footer">
+                    <div>
+                        @T["CurrentCulture"]: <span class="hid-list-title">@T.CurrentCultureCode</span>
+                    </div>
+                    <div class="hid-action-row">
+                        <a class="hid-button-secondary hid-button-sm" href="/settings">@T["OpenSettings"]</a>
+                        @if (Identity.IsAuthenticated)
+                        {
+                            <a class="hid-button-ghost hid-button-sm" href="@Auth.LogoutPath">@T["SignOut"]</a>
+                        }
+                        else
+                        {
+                            <a class="hid-button-ghost hid-button-sm" href="@Auth.LoginPath">@T["SignIn"]</a>
+                        }
+                    </div>
+                </div>
+            </header>
+
+            <article class="hid-content-panel hid-card">
+                @Body
+            </article>
+        </main>
+    </div>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

@@ -1,0 +1,23 @@
+{
+  "alias": "google",
+  "providerId": "oidc",
+  "enabled": true,
+  "trustEmail": true,
+  "storeToken": false,
+  "addReadTokenRoleOnCreate": false,
+  "authenticateByDefault": false,
+  "linkOnly": false,
+  "firstBrokerLoginFlowAlias": "first broker login",
+  "config": {
+    "clientId": "GOOGLE_CLIENT_ID",
+    "clientSecret": "GOOGLE_CLIENT_SECRET",
+    "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenUrl": "https://oauth2.googleapis.com/token",
+    "userInfoUrl": "https://openidconnect.googleapis.com/v1/userinfo",
+    "issuer": "https://accounts.google.com",
+    "jwksUrl": "https://www.googleapis.com/oauth2/v3/certs",
+    "defaultScope": "openid email profile",
+    "useJwksUrl": "true",
+    "syncMode": "IMPORT"
+  }
+}

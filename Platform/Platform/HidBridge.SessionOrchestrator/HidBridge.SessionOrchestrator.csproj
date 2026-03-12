@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HidBridge.SessionOrchestrator</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\HidBridge.Application\HidBridge.Application.csproj" />
+    <ProjectReference Include="..\..\Core\HidBridge.Domain\HidBridge.Domain.csproj" />
+    <ProjectReference Include="..\..\Shared\HidBridge.Contracts\HidBridge.Contracts.csproj" />
+    <ProjectReference Include="..\..\Shared\HidBridge.Abstractions\HidBridge.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.4" />
+  </ItemGroup>
+</Project>

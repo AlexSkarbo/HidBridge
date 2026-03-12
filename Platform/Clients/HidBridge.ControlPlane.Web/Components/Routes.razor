@@ -1,0 +1,24 @@
+﻿@inject OperatorText T
+@inject OperatorAuthDescriptor Auth
+
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <section class="hid-page">
+                        <div class="hid-page-heading">
+                            <p class="hid-section-kicker">AUTHORIZATION</p>
+                            <h2 class="hid-section-title">@T["SignIn"]</h2>
+                            <p class="hid-section-subtitle">@Auth.ProviderDisplayName · @Auth.Mode</p>
+                        </div>
+                        <div class="hid-action-row">
+                            <a class="hid-button-primary" href="/auth/login?returnUrl=/">@T["SignIn"]</a>
+                        </div>
+                    </section>
+                </LayoutView>
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

@@ -1,0 +1,24 @@
+@inject OperatorText T
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="hid-card-soft">
+        <h3 class="hid-card-title">@Title</h3>
+        <div class="hid-subtle-copy">@Message</div>
+        @if (!string.IsNullOrWhiteSpace(Hint))
+        {
+            <div class="hid-subtle-copy">@Hint</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Hint { get; set; }
+}

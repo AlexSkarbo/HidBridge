@@ -1,0 +1,29 @@
+@inject OperatorText T
+
+@if (Denial is not null)
+{
+    <div class="hid-card-soft">
+        <h3 class="hid-card-title">@Title</h3>
+        <div class="hid-meta-grid">
+            <div class="hid-detail-card"><div class="hid-detail-label">@T["DenialCode"]</div><div class="hid-detail-value">@Denial.Code</div></div>
+            <div class="hid-detail-card"><div class="hid-detail-label">@T["RequiredRoles"]</div><div class="hid-detail-value">@FormatRoles(Denial.RequiredRoles)</div></div>
+            <div class="hid-detail-card"><div class="hid-detail-label">@T["RequiredScope"]</div><div class="hid-detail-value">@FormatScope(Denial.RequiredTenantId, Denial.RequiredOrganizationId)</div></div>
+            <div class="hid-detail-card"><div class="hid-detail-label">@T["CallerScope"]</div><div class="hid-detail-value">@FormatScope(Denial.Caller.TenantId, Denial.Caller.OrganizationId)</div></div>
+        </div>
+        <div class="hid-subtle-copy">@Denial.Message</div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public AuthorizationDeniedViewModel Denial { get; set; } = null!;
+
+    [Parameter]
+    public string? Title { get; set; }
+
+    private string FormatRoles(IReadOnlyList<string>? roles)
+        => roles is { Count: > 0 } ? string.Join(", ", roles) : "—";
+
+    private static string FormatScope(string? tenantId, string? organizationId)
+        => $"tenant={tenantId ?? "any"}, org={organizationId ?? "any"}";
+}

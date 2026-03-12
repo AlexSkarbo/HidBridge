@@ -1,0 +1,397 @@
+{
+  "realm": "hidbridge-dev",
+  "enabled": true,
+  "displayName": "HidBridge Dev",
+  "registrationAllowed": false,
+  "rememberMe": true,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "en",
+    "uk"
+  ],
+  "defaultLocale": "en",
+  "roles": {
+    "realm": [
+      { "name": "operator.viewer", "description": "Can view operator dashboards and session details." },
+      { "name": "operator.moderator", "description": "Can moderate invitations and control arbitration." },
+      { "name": "operator.admin", "description": "Can administer the platform." }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "hidbridge-operator",
+      "description": "Shared claims for HidBridge operator applications.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "org_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "org_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "org_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "principal_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "principal_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "principal_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "role",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "name": "hidbridge-caller-context-v2",
+      "description": "Explicit caller-context claims for bearer-first operator flows.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "preferred_username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "createdTimestamp",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "createdTimestamp",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "createdTimestamp",
+            "jsonType.label": "long"
+          }
+        },
+        {
+          "name": "tenant_id_v2",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "org_id_v2",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "org_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "org_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "principal_id_v2",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "principal_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "principal_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "role_v2",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "role",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "controlplane-web",
+      "name": "HidBridge ControlPlane Web",
+      "description": "OIDC confidential client for the Blazor operator shell.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "hidbridge-web-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "http://localhost:18110/signin-oidc",
+        "http://localhost:18110/signout-callback-oidc",
+        "https://localhost:18111/signin-oidc",
+        "https://localhost:18111/signout-callback-oidc",
+        "http://127.0.0.1:18110/signin-oidc",
+        "http://127.0.0.1:18110/signout-callback-oidc",
+        "https://127.0.0.1:18111/signin-oidc",
+        "https://127.0.0.1:18111/signout-callback-oidc"
+      ],
+      "webOrigins": [
+        "http://localhost:18110",
+        "https://localhost:18111",
+        "http://127.0.0.1:18110",
+        "https://127.0.0.1:18111"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email",
+        "hidbridge-operator",
+        "hidbridge-caller-context-v2"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    },
+    {
+      "clientId": "controlplane-api",
+      "name": "HidBridge ControlPlane API",
+      "description": "OIDC bearer client for platform APIs.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "defaultClientScopes": [
+        "roles",
+        "email",
+        "hidbridge-operator"
+      ]
+    },
+    {
+      "clientId": "controlplane-smoke",
+      "name": "HidBridge Smoke Client",
+      "description": "OIDC direct-grant client for bearer-only smoke tests.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "defaultClientScopes": [
+        "profile",
+        "roles",
+        "email",
+        "hidbridge-operator",
+        "hidbridge-caller-context-v2"
+      ],
+      "optionalClientScopes": [
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "aud-controlplane-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "included.client.audience": "controlplane-api"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "operator.admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Operator",
+      "email": "operator.admin@hidbridge.local",
+      "attributes": {
+        "tenant_id": [ "local-tenant" ],
+        "org_id": [ "local-org" ],
+        "principal_id": [ "operator.admin" ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "operator.viewer",
+        "operator.moderator",
+        "operator.admin"
+      ]
+    },
+    {
+      "username": "operator.smoke.admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Smoke",
+      "lastName": "Admin",
+      "email": "operator.smoke.admin@hidbridge.local",
+      "attributes": {
+        "tenant_id": [ "local-tenant" ],
+        "org_id": [ "local-org" ],
+        "principal_id": [ "smoke-runner" ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "operator.viewer",
+        "operator.moderator",
+        "operator.admin"
+      ]
+    },
+    {
+      "username": "operator.smoke.viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Smoke",
+      "lastName": "Viewer",
+      "email": "operator.smoke.viewer@hidbridge.local",
+      "attributes": {
+        "tenant_id": [ "local-tenant" ],
+        "org_id": [ "local-org" ],
+        "principal_id": [ "controller-user" ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "operator.viewer"
+      ]
+    },
+    {
+      "username": "operator.smoke.foreign",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Smoke",
+      "lastName": "Foreign",
+      "email": "operator.smoke.foreign@hidbridge.local",
+      "attributes": {
+        "tenant_id": [ "foreign-tenant" ],
+        "org_id": [ "foreign-org" ],
+        "principal_id": [ "foreign-user" ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "operator.viewer"
+      ]
+    }
+  ],
+  "identityProviders": []
+}

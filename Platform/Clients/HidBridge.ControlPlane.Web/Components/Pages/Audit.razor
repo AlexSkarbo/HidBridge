@@ -1,0 +1,109 @@
+@page "/audit"
+@attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
+@inject OperatorText T
+
+<PageTitle>@T["NavAuditDashboard"]</PageTitle>
+
+<section class="hid-page">
+    <div class="hid-page-heading">
+        <p class="hid-section-kicker">@T["AuditDashboardTitle"]</p>
+        <h2 class="hid-section-title">@T["AuditDashboardTitle"]</h2>
+        <p class="hid-section-subtitle">@T["AuditDashboardSubtitle"]</p>
+    </div>
+
+    @if (_denial is not null)
+    {
+        <AuthorizationDeniedPanel Denial="_denial" Title="@T["AccessDenied"]" />
+    }
+    else if (_backendUnavailableMessage is not null)
+    {
+        <BackendUnavailablePanel Message="@_backendUnavailableMessage" Title="@T["BackendUnavailable"]" Hint="@T["BackendUnavailableHint"]" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="hid-alert hid-alert--danger">@_error</div>
+    }
+    else if (_backendUnavailableMessage is null && _dashboard is null)
+    {
+        <div class="hid-card-soft hid-empty-state">@T["LoadingAuditDashboard"]</div>
+    }
+    else
+    {
+        var dashboard = _dashboard!;
+
+        <div class="hid-stat-grid">
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["Total"]</div><div class="hid-stat-value">@dashboard.TotalEvents</div></div>
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["SessionScoped"]</div><div class="hid-stat-value">@dashboard.SessionScopedEvents</div></div>
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["Global"]</div><div class="hid-stat-value">@dashboard.GlobalEvents</div></div>
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["Latest"]</div><div class="hid-detail-value">@FormatTime(dashboard.LatestEventAtUtc)</div></div>
+        </div>
+
+        <div class="hid-page-grid hid-page-grid--diagnostics">
+            <section class="hid-section-block">
+                <h3 class="hid-card-title">@T["Categories"]</h3>
+                <div class="hid-list-stack">
+                    @foreach (var category in dashboard.Categories)
+                    {
+                        <div class="hid-list-card hid-list-card-header">
+                            <span class="hid-list-title">@category.Category</span>
+                            <span class="hid-list-side">@category.Count</span>
+                        </div>
+                    }
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <h3 class="hid-card-title">@T["RecentEntries"]</h3>
+                <div class="hid-list-stack">
+                    @foreach (var entry in dashboard.RecentEntries)
+                    {
+                        <div class="hid-list-card">
+                            <div class="hid-list-card-header">
+                                <div>
+                                    <div class="hid-list-title">@entry.Message</div>
+                                    <div class="hid-list-subtitle">@entry.Category · @(entry.SessionId ?? T["GlobalScope"])</div>
+                                </div>
+                                <div class="hid-list-timestamp">@entry.OccurredAtUtc.ToLocalTime().ToString("HH:mm:ss")</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    private AuditDashboardViewModel? _dashboard;
+    private string? _error;
+    private AuthorizationDeniedViewModel? _denial;
+    private string? _backendUnavailableMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _dashboard = await ApiClient.GetAuditDashboardAsync(30);
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = $"{T["AuditDashboardTitle"]}: {exception.Message}";
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = $"{T["AuditDashboardTitle"]}: {exception.Message}";
+        }
+    }
+
+    private static string FormatTime(DateTimeOffset? value)
+        => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—";
+}

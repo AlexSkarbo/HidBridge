@@ -1,0 +1,353 @@
+@page "/ops-status"
+@attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
+@inject HidBridge.ControlPlane.Web.Services.OperationalArtifactService ArtifactService
+@inject OperatorText T
+@inject OperatorAuthDescriptor Auth
+@inject OperatorIdentityContext Identity
+
+<PageTitle>@T["NavOpsStatus"]</PageTitle>
+
+<section class="hid-page">
+    <div class="hid-page-heading">
+        <p class="hid-section-kicker">@T["NavOpsStatus"]</p>
+        <h2 class="hid-section-title">@T["OpsStatusTitle"]</h2>
+        <p class="hid-section-subtitle">@T["OpsStatusSubtitle"]</p>
+    </div>
+
+    @if (_denial is not null)
+    {
+        <AuthorizationDeniedPanel Denial="_denial" Title="@T["AccessDenied"]" />
+    }
+    else if (_backendUnavailableMessage is not null)
+    {
+        <BackendUnavailablePanel Message="@_backendUnavailableMessage" Title="@T["BackendUnavailable"]" Hint="@T["BackendUnavailableHint"]" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="hid-alert hid-alert--danger">@_error</div>
+    }
+    else if (_backendUnavailableMessage is null && (_health is null || _runtime is null || _inventory is null || _policy is null))
+    {
+        <div class="hid-card-soft hid-empty-state">@T["LoadingOpsStatus"]</div>
+    }
+    else
+    {
+        var health = _health!;
+        var runtime = _runtime!;
+        var inventory = _inventory!;
+        var policy = _policy!;
+
+        <div class="hid-stat-grid">
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["ApiHealth"]</div>
+                <div class="hid-stat-value">@health.Status</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["PersistenceProvider"]</div>
+                <div class="hid-stat-value">@runtime.PersistenceProvider</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["ActiveSessions"]</div>
+                <div class="hid-stat-value">@inventory.ActiveSessions</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["PolicyRevisions"]</div>
+                <div class="hid-stat-value">@policy.TotalRevisions</div>
+            </div>
+        </div>
+
+        <section class="hid-section-block">
+            <div class="hid-section-toolbar">
+                <h3 class="hid-card-title">@T["ReadinessStatus"]</h3>
+            </div>
+            <div class="hid-meta-grid">
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["ApiReachability"]</div>
+                    <div class="hid-inline-meta">
+                        <span class="@GetBadgeClass(health.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))">@GetBadgeText(health.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))</span>
+                    </div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["AuthPosture"]</div>
+                    <div class="hid-inline-meta">
+                        <span class="@GetBadgeClass(runtime.Authentication.Enabled)">@(runtime.Authentication.Enabled ? T["HealthyLabel"] : T["AttentionLabel"])</span>
+                        <span class="hid-pill">@(runtime.Authentication.Enabled ? "bearer-on" : "auth-off")</span>
+                    </div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["FallbackExposure"]</div>
+                    <div class="hid-inline-meta">
+                        <span class="@GetFallbackBadgeClass()">@GetFallbackBadgeText()</span>
+                    </div>
+                    <div class="hid-list-subtitle">@GetFallbackMessage()</div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["BearerOnlyCoverage"]</div>
+                    <div class="hid-detail-value">@FormatList(runtime.Authentication.BearerOnlyPrefixes)</div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["CallerContextCoverage"]</div>
+                    <div class="hid-detail-value">@FormatList(runtime.Authentication.CallerContextRequiredPrefixes)</div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["HeaderFallbackDisabledCoverage"]</div>
+                    <div class="hid-detail-value">@FormatList(runtime.Authentication.HeaderFallbackDisabledPatterns)</div>
+                </div>
+            </div>
+        </section>
+
+        <div class="hid-page-grid hid-page-grid--fleet">
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["ApiRuntimeStatus"]</h3>
+                    <span class="hid-section-toolbar-meta">@T["Updated"] @health.Utc.ToLocalTime().ToString("HH:mm:ss")</span>
+                </div>
+                <div class="hid-meta-grid">
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["ApiService"]</div><div class="hid-detail-value">@health.Service</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["Agent"]</div><div class="hid-detail-value">@runtime.AgentId</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["Endpoint"]</div><div class="hid-detail-value">@runtime.EndpointId</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["UartPort"]</div><div class="hid-detail-value">@runtime.Port / @runtime.BaudRate</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["SqlSchemaLabel"]</div><div class="hid-detail-value">@runtime.SqlSchema</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["DataRootLabel"]</div><div class="hid-detail-value">@runtime.DataRoot</div></div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["ApiAuthenticationStatus"]</h3>
+                </div>
+                <div class="hid-list-stack">
+                    <div class="hid-list-card">
+                        <div class="hid-list-card-header">
+                            <div>
+                                <div class="hid-list-title">@T["IdentityProvider"]</div>
+                                <div class="hid-list-subtitle">@Auth.ProviderDisplayName / @Auth.Mode</div>
+                            </div>
+                            <div class="hid-list-side">
+                                <div class="hid-list-title">@T["AuthenticationMode"]</div>
+                                <div class="hid-list-subtitle">@Identity.AuthenticationMode</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hid-list-card">
+                        <div class="hid-list-title">@T["BearerOnlyPrefixes"]</div>
+                        <div class="hid-list-subtitle">@FormatList(runtime.Authentication.BearerOnlyPrefixes)</div>
+                    </div>
+                    <div class="hid-list-card">
+                        <div class="hid-list-title">@T["CallerContextCoverage"]</div>
+                        <div class="hid-list-subtitle">@FormatList(runtime.Authentication.CallerContextRequiredPrefixes)</div>
+                    </div>
+                    <div class="hid-list-card">
+                        <div class="hid-list-title">@T["HeaderFallbackDisabledCoverage"]</div>
+                        <div class="hid-list-subtitle">@FormatList(runtime.Authentication.HeaderFallbackDisabledPatterns)</div>
+                    </div>
+                    <div class="hid-list-card">
+                        <div class="hid-list-title">@T["HeaderFallback"]</div>
+                        <div class="hid-list-subtitle">@(runtime.Authentication.AllowHeaderFallback ? T["EnabledLabel"] : T["DisabledLabel"])</div>
+                    </div>
+                    <div class="hid-list-card">
+                        <div class="hid-list-title">@T["AuthorityLabel"]</div>
+                        <div class="hid-list-subtitle">@(runtime.Authentication.Authority ?? "—")</div>
+                    </div>
+                    <div class="hid-list-card">
+                        <div class="hid-list-title">@T["AudienceLabel"]</div>
+                        <div class="hid-list-subtitle">@(runtime.Authentication.Audience ?? "—")</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["PolicyGovernanceSummary"]</h3>
+                </div>
+                <div class="hid-meta-grid">
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["PolicyScopes"]</div><div class="hid-detail-value">@policy.VisibleScopeCount</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["PolicyAssignments"]</div><div class="hid-detail-value">@policy.VisibleAssignmentCount</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["PruneCandidates"]</div><div class="hid-detail-value">@policy.PruneCandidateCount</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["RetentionDays"]</div><div class="hid-detail-value">@policy.RetentionDays</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["MaxRevisionsPerEntity"]</div><div class="hid-detail-value">@policy.MaxRevisionsPerEntity</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["PolicyBootstrapScope"]</div><div class="hid-detail-value">@runtime.PolicyBootstrap.ScopeId</div></div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["FleetOverviewTitle"]</h3>
+                </div>
+                <div class="hid-meta-grid">
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["Agents"]</div><div class="hid-detail-value">@inventory.TotalAgents</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["Endpoints"]</div><div class="hid-detail-value">@inventory.TotalEndpoints</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["ActiveSessions"]</div><div class="hid-detail-value">@inventory.ActiveSessions</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["FailedSessions"]</div><div class="hid-detail-value">@inventory.FailedSessions</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["ActiveControlLeases"]</div><div class="hid-detail-value">@inventory.ActiveControlLeases</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["ConnectorTypesLabel"]</div><div class="hid-detail-value">@FormatConnectorTypes(inventory.ConnectorTypes)</div></div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["OperationalPlaybook"]</h3>
+                </div>
+                <div class="hid-list-stack">
+                    <div class="hid-command-card">
+                        <div class="hid-list-title">@T["RunDoctorCommand"]</div>
+                        <pre class="hid-command-block">powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi</pre>
+                    </div>
+                    <div class="hid-command-card">
+                        <div class="hid-list-title">@T["RunFullCommand"]</div>
+                        <pre class="hid-command-block">powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full</pre>
+                    </div>
+                    <div class="hid-command-card">
+                        <div class="hid-list-title">@T["RunTokenDebugCommand"]</div>
+                        <pre class="hid-command-block">powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task token-debug</pre>
+                    </div>
+                    <div class="hid-candidate-actions">
+                        <a class="hid-button-secondary hid-button-sm" href="/policy-governance">@T["OpenPolicyGovernance"]</a>
+                        <a class="hid-button-secondary hid-button-sm" href="/settings">@T["OpenSettingsLink"]</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["OperationalArtifacts"]</h3>
+                    <span class="hid-section-toolbar-meta">@(_artifacts?.PlatformRoot ?? "—")</span>
+                </div>
+                <div class="hid-list-stack">
+                    @foreach (var group in EnumerateArtifactGroups())
+                    {
+                        <div class="hid-list-card">
+                            <div class="hid-list-card-header">
+                                <div>
+                                    <div class="hid-list-title">@group.DisplayName</div>
+                                    <div class="hid-list-subtitle">@group.RunId · @group.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                                </div>
+                                <div class="hid-list-side">
+                                    <div class="hid-list-title">@T["ArtifactsCount"]</div>
+                                    <div class="hid-list-subtitle">@group.Links.Count</div>
+                                </div>
+                            </div>
+                            @if (group.PreferredLink is not null)
+                            {
+                                <div class="hid-candidate-actions">
+                                    <a class="hid-button-secondary hid-button-sm" href="@BuildArtifactHref(group.PreferredLink.RelativePath)" target="_blank" rel="noopener noreferrer">@T["OpenLatestLog"]</a>
+                                </div>
+                            }
+                            <div class="hid-list-stack">
+                                @foreach (var artifact in group.Links.Take(3))
+                                {
+                                    <div class="hid-list-card">
+                                        <div class="hid-list-card-header">
+                                            <div>
+                                                <div class="hid-list-title">@artifact.Name</div>
+                                                <div class="hid-list-subtitle">@artifact.UpdatedAtUtc.ToLocalTime().ToString("HH:mm:ss") · @FormatSize(artifact.SizeBytes)</div>
+                                            </div>
+                                            <div class="hid-candidate-actions">
+                                                <a class="hid-button-secondary hid-button-sm" href="@BuildArtifactHref(artifact.RelativePath)" target="_blank" rel="noopener noreferrer">@T["OpenArtifact"]</a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    private ApiHealthViewModel? _health;
+    private ApiRuntimeViewModel? _runtime;
+    private InventoryDashboardViewModel? _inventory;
+    private PolicyDiagnosticsSummaryViewModel? _policy;
+    private OperationalArtifactSummaryViewModel? _artifacts;
+    private AuthorizationDeniedViewModel? _denial;
+    private string? _error;
+    private string? _backendUnavailableMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _artifacts = ArtifactService.GetSummary();
+            _health = await ApiClient.GetHealthAsync();
+            _runtime = await ApiClient.GetRuntimeAsync();
+            _inventory = await ApiClient.GetInventoryDashboardAsync();
+            _policy = await ApiClient.GetPolicyDiagnosticsSummaryAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private static string FormatList(IReadOnlyList<string>? values)
+        => values is null || values.Count == 0 ? "—" : string.Join(", ", values);
+
+    private static string FormatConnectorTypes(IReadOnlyList<ConnectorTypeSummaryViewModel>? values)
+        => values is null || values.Count == 0 ? "—" : string.Join(", ", values.Select(x => $"{x.ConnectorType}:{x.Count}"));
+
+    private IEnumerable<OperationalArtifactGroupViewModel> EnumerateArtifactGroups()
+        => new[]
+        {
+            _artifacts?.Doctor,
+            _artifacts?.Checks,
+            _artifacts?.Full,
+            _artifacts?.TokenDebug,
+            _artifacts?.BearerRollout,
+            _artifacts?.IdentityReset,
+        }.Where(static x => x is not null)!;
+
+    private static string BuildArtifactHref(string relativePath)
+        => $"/ops-artifacts/file?path={Uri.EscapeDataString(relativePath)}";
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        if (bytes < 1024 * 1024)
+        {
+            return $"{bytes / 1024.0:F1} KB";
+        }
+
+        return $"{bytes / 1024.0 / 1024.0:F1} MB";
+    }
+
+    private string GetBadgeClass(bool passed)
+        => passed ? "hid-badge hid-badge--positive" : "hid-badge hid-badge--danger";
+
+    private string GetBadgeText(bool passed)
+        => passed ? T["HealthyLabel"] : T["UnavailableLabel"];
+
+    private string GetFallbackBadgeClass()
+        => _runtime?.Authentication.AllowHeaderFallback == true
+            ? "hid-badge hid-badge--warning"
+            : "hid-badge hid-badge--positive";
+
+    private string GetFallbackBadgeText()
+        => _runtime?.Authentication.AllowHeaderFallback == true
+            ? T["AttentionLabel"]
+            : T["HealthyLabel"];
+
+    private string GetFallbackMessage()
+        => _runtime?.Authentication.AllowHeaderFallback == true
+            ? T["FallbackEnabledWarning"]
+            : T["FallbackDisabledReady"];
+}

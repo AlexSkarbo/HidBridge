@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HidBridge.Hid</AssemblyName>
+  </PropertyGroup>
+</Project>

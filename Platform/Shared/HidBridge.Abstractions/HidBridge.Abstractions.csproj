@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HidBridge.Abstractions</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HidBridge.Contracts\HidBridge.Contracts.csproj" />
+  </ItemGroup>
+</Project>

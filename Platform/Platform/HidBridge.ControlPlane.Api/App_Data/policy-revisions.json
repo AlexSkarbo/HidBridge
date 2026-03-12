@@ -1,0 +1,35 @@
+[
+  {
+    "revisionId": "scope:scope-local-default:v3",
+    "entityType": "scope",
+    "entityId": "scope-local-default",
+    "scopeId": "scope-local-default",
+    "principalId": null,
+    "version": 3,
+    "snapshotJson": "{\u0022scopeId\u0022:\u0022scope-local-default\u0022,\u0022tenantId\u0022:\u0022local-tenant\u0022,\u0022organizationId\u0022:\u0022local-org\u0022,\u0022viewerRoleRequired\u0022:true,\u0022moderatorOverrideEnabled\u0022:true,\u0022adminOverrideEnabled\u0022:true,\u0022updatedAtUtc\u0022:\u00222026-03-04T06:10:18.361454\u002B00:00\u0022}",
+    "createdAtUtc": "2026-03-04T06:10:18.361454+00:00",
+    "source": "policy-bootstrap"
+  },
+  {
+    "revisionId": "scope:scope-local-default:v2",
+    "entityType": "scope",
+    "entityId": "scope-local-default",
+    "scopeId": "scope-local-default",
+    "principalId": null,
+    "version": 2,
+    "snapshotJson": "{\u0022scopeId\u0022:\u0022scope-local-default\u0022,\u0022tenantId\u0022:\u0022local-tenant\u0022,\u0022organizationId\u0022:\u0022local-org\u0022,\u0022viewerRoleRequired\u0022:true,\u0022moderatorOverrideEnabled\u0022:true,\u0022adminOverrideEnabled\u0022:true,\u0022updatedAtUtc\u0022:\u00222026-03-04T02:25:58.8958256\u002B00:00\u0022}",
+    "createdAtUtc": "2026-03-04T02:25:58.8958256+00:00",
+    "source": "policy-bootstrap"
+  },
+  {
+    "revisionId": "scope:scope-local-default:v1",
+    "entityType": "scope",
+    "entityId": "scope-local-default",
+    "scopeId": "scope-local-default",
+    "principalId": null,
+    "version": 1,
+    "snapshotJson": "{\u0022scopeId\u0022:\u0022scope-local-default\u0022,\u0022tenantId\u0022:\u0022local-tenant\u0022,\u0022organizationId\u0022:\u0022local-org\u0022,\u0022viewerRoleRequired\u0022:true,\u0022moderatorOverrideEnabled\u0022:true,\u0022adminOverrideEnabled\u0022:true,\u0022updatedAtUtc\u0022:\u00222026-03-04T02:14:08.8084862\u002B00:00\u0022}",
+    "createdAtUtc": "2026-03-04T02:14:08.8084862+00:00",
+    "source": "policy-bootstrap"
+  }
+]

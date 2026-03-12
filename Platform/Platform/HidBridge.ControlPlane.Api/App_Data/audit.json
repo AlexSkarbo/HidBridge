@@ -1,0 +1,207 @@
+[
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": null
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": "2026-03-02T14:09:08.6522138+00:00"
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": "2026-03-02T16:05:42.1812627+00:00"
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": "2026-03-02T16:26:20.9764235+00:00"
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": "2026-03-04T02:14:08.7623352+00:00"
+  },
+  {
+    "category": "policy",
+    "message": "Policy scope scope-local-default upserted",
+    "sessionId": null,
+    "data": {
+      "scopeId": "scope-local-default",
+      "tenantId": "local-tenant",
+      "organizationId": "local-org",
+      "viewerRoleRequired": true,
+      "moderatorOverrideEnabled": true,
+      "adminOverrideEnabled": true,
+      "source": "policy-bootstrap"
+    },
+    "createdAtUtc": "2026-03-04T02:14:08.8084862+00:00"
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": "2026-03-04T02:25:58.8580405+00:00"
+  },
+  {
+    "category": "policy",
+    "message": "Policy scope scope-local-default upserted",
+    "sessionId": null,
+    "data": {
+      "scopeId": "scope-local-default",
+      "tenantId": "local-tenant",
+      "organizationId": "local-org",
+      "viewerRoleRequired": true,
+      "moderatorOverrideEnabled": true,
+      "adminOverrideEnabled": true,
+      "source": "policy-bootstrap"
+    },
+    "createdAtUtc": "2026-03-04T02:25:58.8958256+00:00"
+  },
+  {
+    "category": "system",
+    "message": "Agent agent_hidbridge_uart_local registered",
+    "sessionId": null,
+    "data": {
+      "endpointId": "endpoint_local_demo",
+      "connectorType": "HidBridge"
+    },
+    "createdAtUtc": "2026-03-04T06:10:18.3107568+00:00"
+  },
+  {
+    "category": "policy",
+    "message": "Policy scope scope-local-default upserted",
+    "sessionId": null,
+    "data": {
+      "scopeId": "scope-local-default",
+      "tenantId": "local-tenant",
+      "organizationId": "local-org",
+      "viewerRoleRequired": true,
+      "moderatorOverrideEnabled": true,
+      "adminOverrideEnabled": true,
+      "source": "policy-bootstrap"
+    },
+    "createdAtUtc": "2026-03-04T06:10:18.361454+00:00"
+  }
+]

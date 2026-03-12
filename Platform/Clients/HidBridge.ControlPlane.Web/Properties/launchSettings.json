@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:18110",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:18111;http://localhost:18110",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "keycloak-http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "",
+      "applicationUrl": "http://localhost:18110",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Identity__Enabled": "true",
+        "Identity__ProviderDisplayName": "Keycloak",
+        "Identity__Authority": "http://127.0.0.1:18096/realms/hidbridge-dev",
+        "Identity__ClientId": "controlplane-web",
+        "Identity__ClientSecret": "hidbridge-web-dev-secret",
+        "Identity__RequireHttpsMetadata": "false",
+        "Identity__DisablePushedAuthorization": "true",
+        "Identity__PrincipalClaimType": "principal_id",
+        "Identity__TenantClaimType": "tenant_id",
+        "Identity__OrganizationClaimType": "org_id",
+        "Identity__RoleClaimType": "role"
+      }
+    }
+  }
+}

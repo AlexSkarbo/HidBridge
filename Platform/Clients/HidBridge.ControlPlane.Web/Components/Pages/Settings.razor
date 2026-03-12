@@ -1,0 +1,144 @@
+@page "/settings"
+@attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@inject OperatorText T
+@inject OperatorAuthDescriptor Auth
+@inject OperatorIdentityContext Identity
+@inject Microsoft.Extensions.Options.IOptions<HidBridge.ControlPlane.Web.Configuration.ControlPlaneApiOptions> ApiOptions
+@inject IHttpContextAccessor HttpContextAccessor
+@inject NavigationManager Navigation
+
+<PageTitle>@T["NavSettings"]</PageTitle>
+
+<section class="hid-page">
+    <div class="hid-page-heading">
+        <p class="hid-section-kicker">@T["NavSettings"]</p>
+        <h2 class="hid-section-title">@T["SettingsTitle"]</h2>
+        <p class="hid-section-subtitle">@T["SettingsSubtitle"]</p>
+    </div>
+
+    <div class="hid-settings-grid">
+        <section class="hid-settings-section">
+            <div>
+                <h3 class="hid-card-title">@T["LanguagePreference"]</h3>
+                <p class="hid-card-subtitle">@T["LanguagePreferenceHelp"]</p>
+            </div>
+
+            <div class="hid-choice-grid">
+                @foreach (var option in T.SupportedCultures)
+                {
+                    var isActive = string.Equals(option.Code, T.CurrentCultureCode, StringComparison.OrdinalIgnoreCase);
+                    <a class="hid-choice-card @(isActive ? "hid-choice-card--active" : null)"
+                       href="@BuildCultureUrl(option.Code)">
+                        <div class="hid-choice-card-head">
+                            <div>
+                                <div class="hid-choice-title">@option.DisplayName</div>
+                                <div class="hid-choice-card-note">@option.Code</div>
+                            </div>
+                            @if (isActive)
+                            {
+                                <span class="hid-badge hid-badge--positive">@T["Active"]</span>
+                            }
+                        </div>
+                    </a>
+                }
+
+                <a class="hid-choice-card" href="@BuildClearCultureUrl()">
+                    <div class="hid-choice-title">@T["UseBrowserLanguage"]</div>
+                    <div class="hid-choice-card-note">@T["DetectedFromBrowser"]</div>
+                </a>
+            </div>
+
+            <div class="hid-subtle-copy">@T["SavePreferenceHelp"]</div>
+        </section>
+
+        <section class="hid-settings-section">
+            <div>
+                <h3 class="hid-card-title">@T["ThemePreference"]</h3>
+                <p class="hid-card-subtitle">@T["ThemePreferenceHelp"]</p>
+            </div>
+
+            <div class="hid-choice-grid">
+                @foreach (var option in ThemeOptions)
+                {
+                    var isActive = string.Equals(option.Code, _themePreference, StringComparison.OrdinalIgnoreCase);
+                    <a class="hid-choice-card @(isActive ? "hid-choice-card--active" : null)"
+                       href="@BuildThemeUrl(option.Code)">
+                        <div class="hid-choice-card-head">
+                            <div>
+                                <div class="hid-choice-title">@option.Title</div>
+                                <div class="hid-choice-card-note">@option.Description</div>
+                            </div>
+                            @if (isActive)
+                            {
+                                <span class="hid-badge hid-badge--positive">@T["Active"]</span>
+                            }
+                        </div>
+                    </a>
+                }
+            </div>
+
+            <div class="hid-theme-indicator">
+                <span class="hid-theme-swatch" aria-hidden="true"></span>
+                <span>@T["CurrentTheme"]: @_themePreference</span>
+            </div>
+        </section>
+    </div>
+
+    <section class="hid-settings-grid">
+        <div class="hid-detail-card">
+            <div class="hid-detail-label">@T["CurrentCulture"]</div>
+            <div class="hid-detail-value">@T.CurrentCultureCode</div>
+        </div>
+        <div class="hid-detail-card">
+            <div class="hid-detail-label">@T["ApiBaseUrl"]</div>
+            <div class="hid-detail-value">@ApiOptions.Value.BaseUrl</div>
+            <div class="hid-meta-note">@T["OperatorPrincipalSetting"]: @ApiOptions.Value.OperatorPrincipalId</div>
+        </div>
+        <div class="hid-detail-card">
+            <div class="hid-detail-label">@T["IdentityAccessPanel"]</div>
+            <div class="hid-detail-value">@Identity.DisplayName</div>
+            <div class="hid-meta-note">@T["CurrentOperator"]: @Identity.PrincipalId</div>
+            <div class="hid-meta-note">@T["UserId"]: @Identity.SubjectId</div>
+            <div class="hid-meta-note">@T["UserAddedAt"]: @FormatUserCreatedAt(Identity.UserCreatedAtUtc)</div>
+            <div class="hid-meta-note">@T["Tenant"]: @Identity.TenantId</div>
+            <div class="hid-meta-note">@T["Organization"]: @Identity.OrganizationId</div>
+            <div class="hid-meta-note">@T["Roles"]: @Identity.RoleSummary</div>
+            <div class="hid-meta-note">@T["AuthenticationMode"]: @Auth.Mode / @Identity.AuthenticationMode</div>
+            <div class="hid-meta-note">@T["IdentityProvider"]: @Auth.ProviderDisplayName</div>
+            <div class="hid-meta-note">@T["LoginPath"]: @Auth.LoginPath</div>
+            <div class="hid-meta-note">@T["LogoutPath"]: @Auth.LogoutPath</div>
+            <div class="hid-meta-note">@T["CallbackPath"]: @Auth.CallbackPath</div>
+            <div class="hid-meta-note">@T["ThemeSwitchIssueDeferred"]</div>
+        </div>
+    </section>
+</section>
+
+@code {
+    private string _themePreference = "auto";
+
+    private IReadOnlyList<ThemeOption> ThemeOptions =>
+    [
+        new("auto", T["ThemeAuto"], T["ThemeAutoHelp"]),
+        new("light", T["ThemeLight"], T["ThemeLightHelp"]),
+        new("dark", T["ThemeDark"], T["ThemeDarkHelp"]),
+    ];
+
+    protected override void OnInitialized()
+    {
+        _themePreference = HttpContextAccessor.HttpContext?.Request.Cookies["hidbridge_theme"] ?? "auto";
+    }
+
+    private string BuildCultureUrl(string culture)
+        => $"/culture/set?culture={Uri.EscapeDataString(culture)}&redirectUri={Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri) is { Length: > 0 } relative ? "/" + relative : "/settings")}";
+
+    private string BuildClearCultureUrl()
+        => $"/culture/clear?redirectUri={Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri) is { Length: > 0 } relative ? "/" + relative : "/settings")}";
+
+    private string BuildThemeUrl(string theme)
+        => $"/theme/set?theme={Uri.EscapeDataString(theme)}&redirectUri={Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri) is { Length: > 0 } relative ? "/" + relative : "/settings")}";
+
+    private string FormatUserCreatedAt(DateTimeOffset? value)
+        => value?.ToString("yyyy-MM-dd HH:mm:ss zzz") ?? T["NotAvailable"];
+
+    private sealed record ThemeOption(string Code, string Title, string Description);
+}

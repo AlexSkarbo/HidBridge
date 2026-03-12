@@ -1,0 +1,41 @@
+@using System.Globalization
+<!DOCTYPE html>
+<html lang="@CultureInfo.CurrentUICulture.TwoLetterISOLanguageName">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <base href="/" />
+    <ResourcePreloader />
+    <script src="@Assets["theme.js"]"></script>
+    <script>
+        (function () {
+            const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+            const ua = (navigator.userAgent || "").toLowerCase();
+            const isApple =
+                platform.includes("mac") || platform.includes("iphone") || platform.includes("ipad") || platform.includes("ipod") ||
+                ua.includes("mac os") || ua.includes("iphone") || ua.includes("ipad");
+            const isWin = platform.includes("win") || ua.includes("windows");
+            const isLinux = platform.includes("linux") || ua.includes("linux");
+            document.documentElement.dataset.platform = isApple ? "apple" : (isWin ? "win" : (isLinux ? "linux" : "other"));
+            if (window.hidBridgeTheme) {
+                window.hidBridgeTheme.apply(window.hidBridgeTheme.getPreference());
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["HidBridge.ControlPlane.Web.styles.css"]" />
+    <script src="https://cdn.jsdelivr.net/npm/@@tailwindcss/browser@4"></script>
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body class="hid-app-shell">
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+</body>
+
+</html>

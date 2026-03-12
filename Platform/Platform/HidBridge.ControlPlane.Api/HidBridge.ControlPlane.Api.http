@@ -1,0 +1,328 @@
+@accessToken = 
+
+@baseUrl = http://localhost:18093
+@sessionId = session-local-001
+
+GET {{baseUrl}}/health
+
+###
+
+GET {{baseUrl}}/api/v1/runtime/uart
+Authorization: Bearer {{accessToken}}
+
+###
+
+GET {{baseUrl}}/api/v1/agents
+
+###
+
+GET {{baseUrl}}/api/v1/endpoints
+
+###
+
+POST {{baseUrl}}/api/v1/sessions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "profile": "UltraLowLatency",
+  "requestedBy": "dev-local",
+  "targetAgentId": "agent_hidbridge_uart_local",
+  "targetEndpointId": "endpoint_local_demo",
+  "shareMode": "Controller"
+}
+
+###
+
+GET {{baseUrl}}/api/v1/sessions
+
+###
+
+GET {{baseUrl}}/api/v1/sessions/{{sessionId}}/participants
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/participants
+Content-Type: application/json
+
+{
+  "participantId": "participant-observer-001",
+  "principalId": "observer-user",
+  "role": "Observer",
+  "addedBy": "dev-local"
+}
+
+###
+
+DELETE {{baseUrl}}/api/v1/sessions/{{sessionId}}/participants/participant-observer-001?removedBy=dev-local&reason=cleanup
+
+###
+
+GET {{baseUrl}}/api/v1/sessions/{{sessionId}}/shares
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/shares
+Content-Type: application/json
+
+{
+  "shareId": "share-observer-001",
+  "principalId": "observer-user",
+  "grantedBy": "dev-local",
+  "role": "Observer"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/shares/share-observer-001/accept
+Content-Type: application/json
+
+{
+  "shareId": "share-observer-001",
+  "actedBy": "observer-user",
+  "reason": "accepted locally"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/shares/share-observer-001/revoke
+Content-Type: application/json
+
+{
+  "shareId": "share-observer-001",
+  "actedBy": "dev-local",
+  "reason": "session finished"
+}
+
+###
+
+GET {{baseUrl}}/api/v1/sessions/{{sessionId}}/invitations
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/invitations/requests
+Content-Type: application/json
+
+{
+  "shareId": "invite-observer-001",
+  "principalId": "observer-user",
+  "requestedBy": "observer-user",
+  "requestedRole": "Observer",
+  "message": "Need temporary observation access"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/invitations/invite-observer-001/approve
+Content-Type: application/json
+
+{
+  "shareId": "invite-observer-001",
+  "actedBy": "dev-local",
+  "grantedRole": "Observer",
+  "reason": "approved for review"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/invitations/invite-observer-001/decline
+Content-Type: application/json
+
+{
+  "shareId": "invite-observer-001",
+  "actedBy": "dev-local",
+  "reason": "capacity full"
+}
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/lobby
+
+###
+
+GET {{baseUrl}}/api/v1/sessions/{{sessionId}}/control
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/control/request
+Content-Type: application/json
+
+{
+  "participantId": "owner:dev-local",
+  "requestedBy": "dev-local",
+  "leaseSeconds": 30,
+  "reason": "take active control"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/control/grant
+Content-Type: application/json
+
+{
+  "participantId": "participant-observer-001",
+  "grantedBy": "dev-local",
+  "leaseSeconds": 30,
+  "reason": "temporary assistance"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/control/force-takeover
+Content-Type: application/json
+
+{
+  "participantId": "owner:dev-local",
+  "grantedBy": "dev-local",
+  "leaseSeconds": 30,
+  "reason": "owner override"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/control/release
+Content-Type: application/json
+
+{
+  "participantId": "owner:dev-local",
+  "actedBy": "dev-local",
+  "reason": "stop controlling"
+}
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/summary
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/dashboard
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/shares/dashboard
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/participants/activity
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/operators/timeline?principalId=observer-user&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/collaboration/sessions/{{sessionId}}/control/dashboard
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/commands
+Content-Type: application/json
+
+{
+  "commandId": "cmd-mouse-move-001",
+  "sessionId": "{{sessionId}}",
+  "channel": "Hid",
+  "action": "mouse.move",
+  "args": {
+    "dx": 32,
+    "dy": 0
+  },
+  "timeoutMs": 300,
+  "idempotencyKey": "mouse-move-001"
+}
+
+###
+
+POST {{baseUrl}}/api/v1/sessions/{{sessionId}}/commands
+Content-Type: application/json
+
+{
+  "commandId": "cmd-keyboard-text-001",
+  "sessionId": "{{sessionId}}",
+  "channel": "Hid",
+  "action": "keyboard.text",
+  "args": {
+    "text": "hello from Platform"
+  },
+  "timeoutMs": 500,
+  "idempotencyKey": "keyboard-text-001"
+}
+
+###
+
+GET {{baseUrl}}/api/v1/sessions/{{sessionId}}/commands/journal
+
+###
+
+GET {{baseUrl}}/api/v1/commands?sessionId={{sessionId}}
+
+###
+
+GET {{baseUrl}}/api/v1/events/audit
+
+###
+
+GET {{baseUrl}}/api/v1/events/telemetry
+
+###
+
+GET {{baseUrl}}/api/v1/events/timeline/{{sessionId}}?take=20
+
+###
+
+GET {{baseUrl}}/api/v1/dashboards/inventory
+
+###
+
+GET {{baseUrl}}/api/v1/dashboards/audit?take=20
+
+###
+
+GET {{baseUrl}}/api/v1/dashboards/telemetry?take=20
+
+###
+
+GET {{baseUrl}}/api/v1/projections/sessions?state=Active&principalId=dev-local&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/projections/endpoints?status=Active&activeOnly=true&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/projections/audit?sessionId={{sessionId}}&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/projections/telemetry?sessionId={{sessionId}}&scope=command&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/diagnostics/replay/sessions/{{sessionId}}?take=20
+
+###
+
+GET {{baseUrl}}/api/v1/diagnostics/archive/summary?sessionId={{sessionId}}
+
+###
+
+GET {{baseUrl}}/api/v1/diagnostics/archive/audit?sessionId={{sessionId}}&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/diagnostics/archive/telemetry?sessionId={{sessionId}}&scope=command&take=20
+
+###
+
+GET {{baseUrl}}/api/v1/diagnostics/archive/commands?sessionId={{sessionId}}&take=20
+
+
+### Policy diagnostics summary
+GET {{baseUrl}}/api/v1/diagnostics/policies/summary
+Authorization: Bearer {{accessToken}}
+
+### Manual policy prune
+POST {{baseUrl}}/api/v1/diagnostics/policies/prune
+Authorization: Bearer {{accessToken}}
+

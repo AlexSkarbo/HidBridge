@@ -1,0 +1,42 @@
+@inject OperatorText T
+
+<nav class="hid-nav-panel">
+    <div class="hid-nav-header">
+        <div class="hid-section-kicker">@T["Navigation"]</div>
+        <div class="hid-card-title">@T["OperatorViews"]</div>
+    </div>
+
+    <div class="hid-nav-links">
+        <NavLink class="hid-nav-link"
+                 href=""
+                 Match="NavLinkMatch.All">
+            @T["NavFleetOverview"]
+        </NavLink>
+        <NavLink class="hid-nav-link"
+                 href="audit">
+            @T["NavAuditDashboard"]
+        </NavLink>
+        <NavLink class="hid-nav-link"
+                 href="telemetry">
+            @T["NavTelemetryDashboard"]
+        </NavLink>
+        <NavLink class="hid-nav-link"
+                 href="ops-status">
+            @T["NavOpsStatus"]
+        </NavLink>
+        <NavLink class="hid-nav-link"
+                 href="policy-governance">
+            @T["NavPolicyGovernance"]
+        </NavLink>
+        <NavLink class="hid-nav-link"
+                 href="settings">
+            @T["NavSettings"]
+        </NavLink>
+    </div>
+
+    <div class="hid-nav-stack hid-card-soft">
+        <div class="hid-header-meta-label">@T["UiStack"]</div>
+        <div class="hid-header-meta-value">Blazor Web App</div>
+        <div class="hid-meta-note">Tailwind browser baseline</div>
+    </div>
+</nav>

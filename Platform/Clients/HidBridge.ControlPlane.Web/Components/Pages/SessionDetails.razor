@@ -1,0 +1,651 @@
+@page "/sessions/{SessionId}"
+@attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
+@inject OperatorIdentityContext Identity
+@inject OperatorText T
+@inject NavigationManager Navigation
+
+<PageTitle>@T["SessionRoomTitle"]</PageTitle>
+
+<section class="hid-page">
+    <div class="hid-page-heading">
+        <p class="hid-section-kicker">@T["SessionRoomTitle"]</p>
+        <h2 class="hid-section-title">@SessionId</h2>
+        @if (_dashboard is not null)
+        {
+            <p class="hid-section-subtitle">@_dashboard.AgentId · @_dashboard.EndpointId · @_dashboard.State</p>
+        }
+    </div>
+
+    @if (_denial is not null)
+    {
+        <AuthorizationDeniedPanel Denial="_denial" Title="@T["AccessDenied"]" />
+    }
+    else if (_backendUnavailableMessage is not null)
+    {
+        <BackendUnavailablePanel Message="@_backendUnavailableMessage" Title="@T["BackendUnavailable"]" Hint="@T["BackendUnavailableHint"]" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="hid-alert hid-alert--danger">@_error</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_actionMessage))
+    {
+        <div class="hid-alert hid-alert--info">@_actionMessage</div>
+    }
+
+    @if (_backendUnavailableMessage is not null || !string.IsNullOrWhiteSpace(_error) || _denial is not null)
+    {
+    }
+    else if (_dashboard is null || _control is null || _lobby is null || _participants is null || _timeline is null)
+    {
+        <div class="hid-card-soft hid-empty-state">@T["LoadingSessionDetails"]</div>
+    }
+    else
+    {
+        var participants = _participants!;
+        var timeline = _timeline!;
+
+        <div class="hid-card-soft">
+            <div class="hid-panel-toolbar">
+                <div>
+                    <h3 class="hid-card-title">@T["RoomFlowTitle"]</h3>
+                    <p class="hid-card-subtitle">@T["RoomFlowSubtitle"]</p>
+                </div>
+                <div class="hid-candidate-actions">
+                    <a class="hid-button-secondary hid-button-sm" href="/">@T["BackToFleet"]</a>
+                    <button class="hid-button-secondary hid-button-sm" @onclick="RefreshAsync">@T["Refresh"]</button>
+                </div>
+            </div>
+            <div class="hid-inline-meta">
+                <span>@T["RequestedInvitations"]: @_lobby.Requested.Count</span>
+                <span>@T["PendingInvitations"]: @_lobby.Pending.Count</span>
+                <span>@T["AcceptedInvitations"]: @_lobby.Accepted.Count</span>
+                <span>@T["CurrentController"]: @(_dashboard.ActiveControllerPrincipalId ?? "—")</span>
+            </div>
+            <div class="hid-subtle-copy">@string.Format(T["RoomFlowHint"], SessionId)</div>
+            <div class="hid-meta-grid">
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["RoomReadyTitle"]</div>
+                    <div class="hid-detail-value">@NextRecommendedAction</div>
+                    <div class="hid-meta-note">@T["RoomReadyHint"]</div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["RoomShareLink"]</div>
+                    <input class="hid-input" readonly value="@SessionRoomUrl" />
+                    <div class="hid-meta-note">@T["RoomShareHint"]</div>
+                </div>
+                <div class="hid-detail-card">
+                    <div class="hid-detail-label">@T["DemoChecklist"]</div>
+                    <div class="hid-inline-meta">
+                        <span>1. @T["DemoChecklistStep1"]</span>
+                        <span>2. @T["DemoChecklistStep2"]</span>
+                        <span>3. @T["DemoChecklistStep3"]</span>
+                        <span>4. @T["DemoChecklistStep4"]</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="hid-stat-grid">
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["State"]</div>
+                <div class="hid-stat-value">@_dashboard.State</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["Participants"]</div>
+                <div class="hid-stat-value">@_dashboard.ParticipantCount</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["FailedCommands"]</div>
+                <div class="hid-stat-value hid-accent-warning">@_dashboard.FailedCommandCount</div>
+            </div>
+            <div class="hid-stat-card">
+                <div class="hid-stat-label">@T["Controller"]</div>
+                <div class="hid-stat-value">@(_dashboard.ActiveControllerPrincipalId ?? "—")</div>
+            </div>
+        </div>
+
+        <div class="hid-page-grid hid-page-grid--session">
+            <section class="hid-section-block">
+                <div>
+                    <h3 class="hid-card-title">@T["SessionSnapshot"]</h3>
+                    <div class="hid-meta-grid">
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["Agent"]</div><div class="hid-detail-value">@_dashboard.AgentId</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["Endpoint"]</div><div class="hid-detail-value">@_dashboard.EndpointId</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["Profile"]</div><div class="hid-detail-value">@_dashboard.Profile</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["OwnerRole"]</div><div class="hid-detail-value">@_dashboard.OwnerRole</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["RequestedBy"]</div><div class="hid-detail-value">@_dashboard.RequestedBy</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["RoomId"]</div><div class="hid-detail-value">@SessionId</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["LeaseExpires"]</div><div class="hid-detail-value">@FormatTime(_dashboard.LeaseExpiresAtUtc)</div></div>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="hid-card-title">@T["IdentityAccessPanel"]</h3>
+                    <div class="hid-meta-grid">
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["CurrentOperator"]</div><div class="hid-detail-value">@Identity.DisplayName</div><div class="hid-meta-note">@CurrentOperatorPrincipalId</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["Tenant"]</div><div class="hid-detail-value">@Identity.TenantId</div><div class="hid-meta-note">@T["Organization"]: @Identity.OrganizationId</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["Roles"]</div><div class="hid-detail-value">@Identity.RoleSummary</div></div>
+                    </div>
+                    <div class="hid-subtle-copy">@ModerationAccessMessage</div>
+                </div>
+
+                <div>
+                    <div class="hid-panel-toolbar">
+                        <div>
+                            <h3 class="hid-card-title">@T["ControlOperationsPanel"]</h3>
+                            <p class="hid-card-subtitle">@T["ControlArbitration"]</p>
+                            <p class="hid-meta-note">@T["OperatorPrincipal"]: @CurrentOperatorPrincipalId</p>
+                        </div>
+                        <button class="hid-button-secondary" @onclick="RefreshAsync">@T["Refresh"]</button>
+                    </div>
+
+                    @if (_control.ActiveLease is null)
+                    {
+                        <div class="hid-empty-state">@T["NoActiveControlLease"]</div>
+                    }
+                    else
+                    {
+                        <div class="hid-lease-card">
+                            <div class="hid-detail-label">@T["CurrentLease"]</div>
+                            <div class="hid-detail-value">@_control.ActiveLease.PrincipalId</div>
+                            <div class="hid-meta-note">@T["Participant"]: @_control.ActiveLease.ParticipantId</div>
+                            <div class="hid-meta-note">@T["GrantedBy"]: @_control.ActiveLease.GrantedBy</div>
+                            <div class="hid-meta-note">@T["LeaseExpires"]: @FormatTime(_control.ActiveLease.ExpiresAtUtc)</div>
+                        </div>
+                    }
+
+                    <div class="hid-subtle-copy">@T["ControlRequestHelp"]</div>
+
+                    <div class="hid-candidate-stack">
+                        @foreach (var candidate in _control.Candidates)
+                        {
+                            <div class="hid-candidate-card">
+                                <div class="hid-candidate-card-header">
+                                    <div>
+                                        <div class="hid-candidate-title">@candidate.PrincipalId</div>
+                                        <div class="hid-list-subtitle">@candidate.ParticipantId · @candidate.Role</div>
+                                    </div>
+                                    <div class="hid-candidate-actions">
+                                        <button class="hid-button-secondary hid-button-sm"
+                                                disabled="@(!candidate.IsEligible || _busy)"
+                                                @onclick="() => RequestControlAsync(candidate)">
+                                            @T["RequestControl"]
+                                        </button>
+                                        <button class="hid-button-secondary hid-button-sm"
+                                                disabled="@(_busy || !candidate.IsCurrentController || !CanRelease(candidate))"
+                                                @onclick="() => ReleaseControlAsync(candidate)">
+                                            @T["Release"]
+                                        </button>
+                                        <button class="hid-button-danger hid-button-sm"
+                                                disabled="@(_busy || !_canModerate)"
+                                                @onclick="() => ForceTakeoverAsync(candidate)">
+                                            @T["ForceTakeover"]
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div>
+                    <h3 class="hid-card-title">@T["InvitationModerationPanel"]</h3>
+                    <p class="hid-card-subtitle">@T["InvitationLobby"]</p>
+                    <p class="hid-meta-note">@T["InvitationLobbyHelp"]</p>
+                </div>
+
+                <div class="hid-card-soft">
+                    <div class="hid-panel-toolbar">
+                        <div>
+                            <h3 class="hid-card-title">@T["InviteParticipantTitle"]</h3>
+                            <p class="hid-card-subtitle">@T["InviteParticipantHelp"]</p>
+                        </div>
+                    </div>
+                    <div class="hid-form-grid">
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["Principal"]</span>
+                            <input class="hid-input" @bind="_shareRequest.PrincipalId" placeholder="operator@example.com" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["Role"]</span>
+                            <select class="hid-input" @bind="_shareRequest.Role">
+                                @foreach (var role in SessionRoles)
+                                {
+                                    <option value="@role">@role</option>
+                                }
+                            </select>
+                        </label>
+                    </div>
+                    <div class="hid-candidate-actions">
+                        <button class="hid-button-primary hid-button-sm"
+                                disabled="@(_busy || string.IsNullOrWhiteSpace(_shareRequest.PrincipalId))"
+                                @onclick="GrantShareAsync">
+                            @T["GrantInvite"]
+                        </button>
+                        <button class="hid-button-secondary hid-button-sm"
+                                disabled="@(_busy || string.IsNullOrWhiteSpace(_shareRequest.PrincipalId))"
+                                @onclick="RequestInvitationAsync">
+                            @T["RequestInvite"]
+                        </button>
+                    </div>
+                    <div class="hid-subtle-copy">@T["InviteParticipantNote"]</div>
+                </div>
+
+                <div class="hid-candidate-stack">
+                    @if (_lobby.Requested.Count == 0)
+                    {
+                        <div class="hid-empty-state">@T["NoRequestedInvitations"]</div>
+                    }
+                    else
+                    {
+                        @foreach (var invitation in _lobby.Requested)
+                        {
+                            <div class="hid-candidate-card">
+                                <div class="hid-candidate-card-header">
+                                    <div>
+                                        <div class="hid-candidate-title">@invitation.PrincipalId</div>
+                                        <div class="hid-list-subtitle">@invitation.ShareId · @T["Requested"] @invitation.Role</div>
+                                    </div>
+                                    <div class="hid-candidate-actions">
+                                        <button class="hid-button-primary hid-button-sm"
+                                                disabled="@(!_canModerate || _busy)"
+                                                @onclick="() => ApproveInvitationAsync(invitation)">
+                                            @T["Approve"]
+                                        </button>
+                                        <button class="hid-button-danger hid-button-sm"
+                                                disabled="@(!_canModerate || _busy)"
+                                                @onclick="() => DeclineInvitationAsync(invitation)">
+                                            @T["Decline"]
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div>
+                    <h3 class="hid-card-title">@T["PendingAccepted"]</h3>
+                    <div class="hid-list-stack">
+                        @foreach (var invitation in _lobby.Pending.Concat(_lobby.Accepted).Take(8))
+                        {
+                            <div class="hid-list-card">
+                                <div class="hid-list-card-header">
+                                    <div>
+                                        <div class="hid-list-title">@invitation.PrincipalId</div>
+                                        <div class="hid-list-subtitle">@invitation.Status · @invitation.Role</div>
+                                    </div>
+                                    <div class="hid-candidate-actions">
+                                        @if (CanAcceptInvitation(invitation))
+                                        {
+                                            <button class="hid-button-primary hid-button-sm"
+                                                    disabled="@_busy"
+                                                    @onclick="() => AcceptShareAsync(invitation)">
+                                                @T["Accept"]
+                                            </button>
+                                            <button class="hid-button-secondary hid-button-sm"
+                                                    disabled="@_busy"
+                                                    @onclick="() => RejectShareAsync(invitation)">
+                                                @T["Reject"]
+                                            </button>
+                                        }
+                                        @if (CanRevokeInvitation(invitation))
+                                        {
+                                            <button class="hid-button-danger hid-button-sm"
+                                                    disabled="@_busy"
+                                                    @onclick="() => RevokeShareAsync(invitation)">
+                                                @T["Revoke"]
+                                            </button>
+                                        }
+                                        <div class="hid-list-timestamp">@FormatTime(invitation.UpdatedAtUtc)</div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div>
+                    <h3 class="hid-card-title">@T["SessionRoomParticipants"]</h3>
+                    <p class="hid-card-subtitle">@T["SessionRoomParticipantsHelp"]</p>
+                </div>
+
+                <div class="hid-list-stack">
+                    @if (participants.Count == 0)
+                    {
+                        <div class="hid-empty-state">@T["NoParticipantsYet"]</div>
+                    }
+                    else
+                    {
+                        @foreach (var participant in participants)
+                        {
+                            <div class="hid-list-card">
+                                <div class="hid-list-card-header">
+                                    <div>
+                                        <div class="hid-list-title">@participant.PrincipalId</div>
+                                        <div class="hid-list-subtitle">@participant.ParticipantId · @participant.Role</div>
+                                    </div>
+                                    <div class="hid-list-side">
+                                        <div class="hid-list-title">@participant.CommandCount @T["Commands"]</div>
+                                        <div class="hid-list-subtitle">@T["FailedCommands"]: @participant.FailedCommandCount</div>
+                                    </div>
+                                </div>
+                                <div class="hid-inline-meta">
+                                    <span>@T["JoinedAt"]: @FormatTime(participant.JoinedAtUtc)</span>
+                                    <span>@T["LastCommand"]: @FormatTime(participant.LastCommandAtUtc)</span>
+                                    <span>@T["CurrentController"]: @(participant.IsCurrentController ? T["Yes"] : T["No"])</span>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div>
+                    <div class="hid-panel-toolbar">
+                        <div>
+                            <h3 class="hid-card-title">@T["SessionTimeline"]</h3>
+                            <p class="hid-card-subtitle">@T["SessionTimelineHelp"]</p>
+                        </div>
+                        <div class="hid-meta-note">@T["Events"]: @timeline.TotalEntries</div>
+                    </div>
+
+                    <div class="hid-list-stack">
+                        @if (timeline.Entries.Count == 0)
+                        {
+                            <div class="hid-empty-state">@T["NoTimelineEntries"]</div>
+                        }
+                        else
+                        {
+                            @foreach (var entry in timeline.Entries.Take(12))
+                            {
+                                <div class="hid-list-card">
+                                    <div class="hid-list-card-header">
+                                        <div>
+                                            <div class="hid-list-title">@entry.Title</div>
+                                            <div class="hid-list-subtitle">@entry.Kind</div>
+                                        </div>
+                                        <div class="hid-list-timestamp">@FormatTime(entry.OccurredAtUtc)</div>
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter]
+    public string SessionId { get; set; } = string.Empty;
+
+    private SessionDashboardViewModel? _dashboard;
+    private ControlDashboardViewModel? _control;
+    private SessionLobbyViewModel? _lobby;
+    private IReadOnlyList<ParticipantActivityViewModel>? _participants;
+    private OperatorTimelineViewModel? _timeline;
+    private string? _error;
+    private string? _actionMessage;
+    private AuthorizationDeniedViewModel? _denial;
+    private string? _backendUnavailableMessage;
+    private bool _busy;
+    private SessionShareGrantRequestViewModel _shareRequest = new();
+    private static readonly string[] SessionRoles = ["Observer", "Controller", "Presenter"];
+
+    private string CurrentOperatorPrincipalId => Identity.PrincipalId;
+    private string SessionRoomUrl => Navigation.ToAbsoluteUri($"/sessions/{Uri.EscapeDataString(SessionId)}").ToString();
+
+    private bool _canModerate => Identity.IsModerator
+        || Identity.IsAdmin
+        || string.Equals(CurrentOperatorPrincipalId, _dashboard?.RequestedBy, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(CurrentOperatorPrincipalId, _dashboard?.ActiveControllerPrincipalId, StringComparison.OrdinalIgnoreCase);
+
+    private string NextRecommendedAction
+    {
+        get
+        {
+            if (_lobby is null || _dashboard is null)
+            {
+                return T["RoomNextObserve"];
+            }
+
+            if (_lobby.Requested.Count == 0 && _lobby.Pending.Count == 0 && _lobby.Accepted.Count == 0)
+            {
+                return T["RoomNextInvite"];
+            }
+
+            if (_canModerate && _lobby.Requested.Count > 0)
+            {
+                return T["RoomNextApprove"];
+            }
+
+            if (_lobby.Pending.Any(invitation => CanAcceptInvitation(invitation)))
+            {
+                return T["RoomNextAccept"];
+            }
+
+            if (_dashboard.ActiveControllers == 0 || _control?.ActiveLease is null)
+            {
+                return T["RoomNextControl"];
+            }
+
+            return T["RoomNextObserve"];
+        }
+    }
+
+    private string ModerationAccessMessage => _canModerate
+        ? T["ModerationAccessGranted"]
+        : T["ModerationAccessDenied"];
+
+    protected override async Task OnParametersSetAsync()
+        => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _dashboard = await ApiClient.GetSessionDashboardAsync(SessionId);
+            _control = await ApiClient.GetControlDashboardAsync(SessionId);
+            _lobby = await ApiClient.GetLobbyAsync(SessionId);
+            _participants = await ApiClient.GetParticipantActivityAsync(SessionId);
+            _timeline = await ApiClient.GetOperatorTimelineAsync(SessionId, 20);
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+            ResetDrafts();
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = $"{T["SessionDetailsTitle"]}: {exception.Message}";
+            _backendUnavailableMessage = null;
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = $"{T["SessionDetailsTitle"]}: {exception.Message}";
+            _backendUnavailableMessage = null;
+        }
+    }
+
+    private async Task RequestControlAsync(ControlCandidateViewModel candidate)
+        => await RunActionAsync(
+            $"{T["ControlRequestedMessage"]} {candidate.PrincipalId}.",
+            () => ApiClient.RequestControlAsync(SessionId, candidate.ParticipantId, candidate.PrincipalId, 30, "operator requested control"));
+
+    private async Task ReleaseControlAsync(ControlCandidateViewModel candidate)
+        => await RunActionAsync(
+            $"{T["ControlReleasedMessage"]} {candidate.PrincipalId}.",
+            () => ApiClient.ReleaseControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, "operator released control"));
+
+    private async Task ForceTakeoverAsync(ControlCandidateViewModel candidate)
+        => await RunActionAsync(
+            $"{T["ControlTakeoverMessage"]} {candidate.PrincipalId}.",
+            () => ApiClient.ForceTakeoverControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, 30, "operator takeover"));
+
+    private async Task ApproveInvitationAsync(SessionShareViewModel invitation)
+        => await RunActionAsync(
+            $"{T["InvitationApprovedMessage"]} {invitation.ShareId}.",
+            () => ApiClient.ApproveInvitationAsync(SessionId, invitation.ShareId, CurrentOperatorPrincipalId, invitation.Role, "approved in operator shell"));
+
+    private async Task DeclineInvitationAsync(SessionShareViewModel invitation)
+        => await RunActionAsync(
+            $"{T["InvitationDeclinedMessage"]} {invitation.ShareId}.",
+            () => ApiClient.DeclineInvitationAsync(SessionId, invitation.ShareId, CurrentOperatorPrincipalId, "declined in operator shell"));
+
+    private async Task GrantShareAsync()
+        => await RunActionAsync(
+            string.Format(T["InviteGrantedMessage"], _shareRequest.PrincipalId),
+            () => ApiClient.CreateShareAsync(
+                SessionId,
+                BuildShareRequest()));
+
+    private async Task RequestInvitationAsync()
+        => await RunActionAsync(
+            string.Format(T["InviteRequestedMessage"], _shareRequest.PrincipalId),
+            () => ApiClient.RequestInvitationAsync(
+                SessionId,
+                BuildInvitationRequest()));
+
+    private async Task AcceptShareAsync(SessionShareViewModel invitation)
+        => await RunActionAsync(
+            $"{T["InvitationAcceptedMessage"]} {invitation.ShareId}.",
+            () => ApiClient.AcceptShareAsync(
+                SessionId,
+                invitation.ShareId,
+                CurrentOperatorPrincipalId,
+                "accepted in session room",
+                Identity.TenantId,
+                Identity.OrganizationId,
+                Identity.OperatorRoles));
+
+    private async Task RejectShareAsync(SessionShareViewModel invitation)
+        => await RunActionAsync(
+            $"{T["InvitationRejectedMessage"]} {invitation.ShareId}.",
+            () => ApiClient.RejectShareAsync(
+                SessionId,
+                invitation.ShareId,
+                CurrentOperatorPrincipalId,
+                "rejected in session room",
+                Identity.TenantId,
+                Identity.OrganizationId,
+                Identity.OperatorRoles));
+
+    private async Task RevokeShareAsync(SessionShareViewModel invitation)
+        => await RunActionAsync(
+            $"{T["InvitationRevokedMessage"]} {invitation.ShareId}.",
+            () => ApiClient.RevokeShareAsync(
+                SessionId,
+                invitation.ShareId,
+                CurrentOperatorPrincipalId,
+                "revoked in session room",
+                Identity.TenantId,
+                Identity.OrganizationId,
+                Identity.OperatorRoles));
+
+    private async Task RunActionAsync(string successMessage, Func<Task> action)
+    {
+        try
+        {
+            _busy = true;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+            await action();
+            _actionMessage = successMessage;
+            await RefreshAsync();
+            ResetDrafts();
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private bool CanRelease(ControlCandidateViewModel candidate)
+        => string.Equals(candidate.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase) || _canModerate;
+
+    private bool CanAcceptInvitation(SessionShareViewModel invitation)
+        => string.Equals(invitation.Status, "Pending", StringComparison.OrdinalIgnoreCase)
+           && string.Equals(invitation.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase);
+
+    private bool CanRevokeInvitation(SessionShareViewModel invitation)
+        => _canModerate
+           && (string.Equals(invitation.Status, "Pending", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(invitation.Status, "Accepted", StringComparison.OrdinalIgnoreCase));
+
+    private SessionShareGrantRequestViewModel BuildShareRequest()
+        => new()
+        {
+            ShareId = BuildShareId("share"),
+            PrincipalId = _shareRequest.PrincipalId.Trim(),
+            GrantedBy = CurrentOperatorPrincipalId,
+            Role = _shareRequest.Role,
+            TenantId = Identity.TenantId,
+            OrganizationId = Identity.OrganizationId,
+            OperatorRoles = Identity.OperatorRoles,
+        };
+
+    private SessionInvitationRequestViewModel BuildInvitationRequest()
+        => new()
+        {
+            ShareId = BuildShareId("invite"),
+            PrincipalId = _shareRequest.PrincipalId.Trim(),
+            RequestedBy = CurrentOperatorPrincipalId,
+            RequestedRole = _shareRequest.Role,
+            Message = "requested in session room",
+            TenantId = Identity.TenantId,
+            OrganizationId = Identity.OrganizationId,
+            OperatorRoles = Identity.OperatorRoles,
+        };
+
+    private void ResetDrafts()
+    {
+        _shareRequest = new SessionShareGrantRequestViewModel
+        {
+            Role = "Observer",
+        };
+    }
+
+    private static string BuildShareId(string prefix)
+    {
+        var shareId = $"{prefix}-{Guid.NewGuid():N}";
+        return shareId.Length <= 48 ? shareId : shareId[..48];
+    }
+
+    private static string FormatTime(DateTimeOffset? value)
+        => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—";
+}

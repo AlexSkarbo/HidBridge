@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HidBridge.Connectors.HidBridgeUart</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\HidBridge.Contracts\HidBridge.Contracts.csproj" />
+    <ProjectReference Include="..\..\Shared\HidBridge.Abstractions\HidBridge.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Shared\HidBridge.Transport.Uart\HidBridge.Transport.Uart.csproj" />
+  </ItemGroup>
+</Project>

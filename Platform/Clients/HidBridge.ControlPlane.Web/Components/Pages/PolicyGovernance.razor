@@ -1,0 +1,595 @@
+@page "/policy-governance"
+@attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
+@inject HidBridge.ControlPlane.Web.Identity.OperatorIdentityContext Identity
+@inject OperatorText T
+@inject NavigationManager Navigation
+
+<PageTitle>@T["NavPolicyGovernance"]</PageTitle>
+
+<section class="hid-page">
+    <div class="hid-page-heading">
+        <p class="hid-section-kicker">@T["PolicyGovernanceTitle"]</p>
+        <h2 class="hid-section-title">@T["PolicyGovernanceTitle"]</h2>
+        <p class="hid-section-subtitle">@T["PolicyGovernanceSubtitle"]</p>
+    </div>
+
+    @if (_denial is not null)
+    {
+        <AuthorizationDeniedPanel Denial="_denial" Title="@T["AccessDenied"]" />
+    }
+    else if (_backendUnavailableMessage is not null)
+    {
+        <BackendUnavailablePanel Message="@_backendUnavailableMessage" Title="@T["BackendUnavailable"]" Hint="@T["BackendUnavailableHint"]" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="hid-alert hid-alert--danger">@_error</div>
+    }
+    else if (_backendUnavailableMessage is null && _summary is null)
+    {
+        <div class="hid-card-soft hid-empty-state">@T["LoadingPolicyGovernance"]</div>
+    }
+    else
+    {
+        var summary = _summary!;
+
+        @if (!string.IsNullOrWhiteSpace(_actionMessage))
+        {
+            <div class="hid-alert hid-alert--info">@_actionMessage</div>
+        }
+
+        <div class="hid-stat-grid">
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["PolicyScopes"]</div><div class="hid-stat-value">@summary.VisibleScopeCount</div></div>
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["PolicyAssignments"]</div><div class="hid-stat-value">@summary.VisibleAssignmentCount</div></div>
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["PolicyRevisions"]</div><div class="hid-stat-value">@summary.TotalRevisions</div></div>
+            <div class="hid-stat-card"><div class="hid-stat-label">@T["PruneCandidates"]</div><div class="hid-stat-value hid-accent-warning">@summary.PruneCandidateCount</div></div>
+        </div>
+
+        <div class="hid-page-grid hid-page-grid--fleet">
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["PolicyGovernanceSummary"]</h3>
+                    <span class="hid-section-toolbar-meta">@T["Updated"] @summary.GeneratedAtUtc.ToLocalTime().ToString("HH:mm:ss")</span>
+                </div>
+                <div class="hid-meta-grid">
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["RetentionDays"]</div><div class="hid-detail-value">@summary.RetentionDays</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["MaxRevisionsPerEntity"]</div><div class="hid-detail-value">@summary.MaxRevisionsPerEntity</div></div>
+                    <div class="hid-detail-card"><div class="hid-detail-label">@T["Latest"]</div><div class="hid-detail-value">@FormatTime(summary.LatestRevisionAtUtc)</div></div>
+                </div>
+                <div class="hid-list-stack">
+                    @foreach (var scope in summary.Scopes.Take(8))
+                    {
+                        <div class="hid-list-card">
+                            <div class="hid-list-card-header">
+                                <div>
+                                    <div class="hid-list-title">@scope.ScopeId</div>
+                                    <div class="hid-list-subtitle">@scope.TenantId / @scope.OrganizationId</div>
+                                </div>
+                                <div class="hid-list-side">
+                                    <div class="hid-list-title">@scope.RevisionCount @T["PolicyRevisions"]</div>
+                                    <div class="hid-list-subtitle">@scope.AssignmentCount @T["PolicyAssignments"]</div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["PolicyRevisionFilters"]</h3>
+                    <div class="hid-candidate-actions">
+                        <a class="hid-button-secondary hid-button-sm" href="@BuildExportHref()">@T["ExportJson"]</a>
+                        <button class="hid-button-danger hid-button-sm" disabled="@(!_canPrune || _busy)" @onclick="PruneAsync">@T["PruneRevisions"]</button>
+                    </div>
+                </div>
+                <div class="hid-filter-grid">
+                    <label class="hid-field-label">@T["ScopeId"]<input class="hid-input" @bind="_scopeId" /></label>
+                    <label class="hid-field-label">@T["EntityType"]<input class="hid-input" @bind="_entityType" /></label>
+                    <label class="hid-field-label">@T["Principal"]<input class="hid-input" @bind="_principalId" /></label>
+                    <label class="hid-field-label">@T["Take"]<input class="hid-input" type="number" min="1" max="500" @bind="_take" /></label>
+                </div>
+                <div class="hid-candidate-actions">
+                    <button class="hid-button-primary hid-button-sm" disabled="@_busy" @onclick="LoadRevisionsAsync">@T["ApplyFilters"]</button>
+                    <button class="hid-button-secondary hid-button-sm" disabled="@_busy" @onclick="ResetFilters">@T["ResetFilters"]</button>
+                </div>
+                <div class="hid-table-wrap">
+                    <table class="hid-table">
+                        <thead>
+                            <tr>
+                                <th>@T["RevisionId"]</th>
+                                <th>@T["EntityType"]</th>
+                                <th>@T["ScopeId"]</th>
+                                <th>@T["Principal"]</th>
+                                <th>@T["Version"]</th>
+                                <th>@T["Latest"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var revision in _revisions)
+                            {
+                                <tr>
+                                    <td><div class="hid-list-title">@revision.RevisionId</div><div class="hid-list-subtitle">@revision.EntityId</div></td>
+                                    <td>@revision.EntityType</td>
+                                    <td>@revision.ScopeId</td>
+                                    <td>@(revision.PrincipalId ?? "—")</td>
+                                    <td>@revision.Version</td>
+                                    <td>@FormatTime(revision.CreatedAtUtc)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <div class="hid-page-grid hid-page-grid--fleet">
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["PolicyScopeEditor"]</h3>
+                    <span class="hid-section-toolbar-meta">@(_canEdit ? T["PolicyEditEnabled"] : T["PolicyEditAdminOnly"])</span>
+                </div>
+                <div class="hid-filter-grid">
+                    <label class="hid-field-label">@T["ScopeId"]<input class="hid-input" @bind="_scopeForm.ScopeId" /></label>
+                    <label class="hid-field-label">@T["Tenant"]<input class="hid-input" @bind="_scopeForm.TenantId" /></label>
+                    <label class="hid-field-label">@T["Organization"]<input class="hid-input" @bind="_scopeForm.OrganizationId" /></label>
+                </div>
+                <div class="hid-filter-grid">
+                    <label class="hid-checkbox-label"><input type="checkbox" @bind="_scopeForm.ViewerRoleRequired" /> @T["ViewerRoleRequired"]</label>
+                    <label class="hid-checkbox-label"><input type="checkbox" @bind="_scopeForm.ModeratorOverrideEnabled" /> @T["ModeratorOverrideEnabled"]</label>
+                    <label class="hid-checkbox-label"><input type="checkbox" @bind="_scopeForm.AdminOverrideEnabled" /> @T["AdminOverrideEnabled"]</label>
+                    <label class="hid-checkbox-label"><input type="checkbox" @bind="_scopeForm.IsActive" /> @T["Active"]</label>
+                </div>
+                <div class="hid-candidate-actions">
+                    <button class="hid-button-primary hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="SaveScopeAsync">@T["SaveScope"]</button>
+                    <button class="hid-button-secondary hid-button-sm" disabled="@_busy" @onclick="ResetScopeForm">@T["ClearForm"]</button>
+                </div>
+                @if (!_canEdit)
+                {
+                    <div class="hid-alert hid-alert--info">@T["PolicyEditHint"]</div>
+                }
+                <div class="hid-table-wrap">
+                    <table class="hid-table">
+                        <thead>
+                            <tr>
+                                <th>@T["ScopeId"]</th>
+                                <th>@T["Tenant"]</th>
+                                <th>@T["Organization"]</th>
+                                <th>@T["PolicyAssignments"]</th>
+                                <th>@T["Status"]</th>
+                                <th>@T["Latest"]</th>
+                                <th>@T["Actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var scope in _scopes)
+                            {
+                                <tr>
+                                    <td>@scope.ScopeId</td>
+                                    <td>@(scope.TenantId ?? "—")</td>
+                                    <td>@(scope.OrganizationId ?? "—")</td>
+                                    <td>@($"{(scope.ViewerRoleRequired ? "V" : "-")}/{(scope.ModeratorOverrideEnabled ? "M" : "-")}/{(scope.AdminOverrideEnabled ? "A" : "-")}")</td>
+                                    <td>@(scope.IsActive ? T["Active"] : T["Inactive"])</td>
+                                    <td>@FormatTime(scope.UpdatedAtUtc)</td>
+                                    <td>
+                                        <button class="hid-button-secondary hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="@(() => LoadScopeIntoForm(scope))">@T["EditScope"]</button>
+                                        <button class="hid-button-secondary hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="@(() => ToggleScopeActivationAsync(scope))">@(scope.IsActive ? T["Deactivate"] : T["Activate"])</button>
+                                        <button class="hid-button-danger hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="@(() => DeleteScopeAsync(scope))">@T["DeleteScope"]</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="hid-section-block">
+                <div class="hid-section-toolbar">
+                    <h3 class="hid-card-title">@T["PolicyAssignmentEditor"]</h3>
+                    <span class="hid-section-toolbar-meta">@(_canEdit ? T["PolicyEditEnabled"] : T["PolicyEditAdminOnly"])</span>
+                </div>
+                <div class="hid-filter-grid">
+                    <label class="hid-field-label">@T["AssignmentId"]<input class="hid-input" @bind="_assignmentForm.AssignmentId" /></label>
+                    <label class="hid-field-label">@T["ScopeId"]<input class="hid-input" @bind="_assignmentForm.ScopeId" /></label>
+                    <label class="hid-field-label">@T["Principal"]<input class="hid-input" @bind="_assignmentForm.PrincipalId" /></label>
+                    <label class="hid-field-label">@T["PolicyRolesCsv"]<input class="hid-input" @bind="_assignmentRolesCsv" /></label>
+                </div>
+                <div class="hid-filter-grid">
+                    <label class="hid-field-label">@T["Source"]<input class="hid-input" @bind="_assignmentForm.Source" /></label>
+                </div>
+                <div class="hid-filter-grid">
+                    <label class="hid-checkbox-label"><input type="checkbox" @bind="_assignmentForm.IsActive" /> @T["Active"]</label>
+                </div>
+                <div class="hid-candidate-actions">
+                    <button class="hid-button-primary hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="SaveAssignmentAsync">@T["SaveAssignment"]</button>
+                    <button class="hid-button-secondary hid-button-sm" disabled="@_busy" @onclick="ResetAssignmentForm">@T["ClearForm"]</button>
+                </div>
+                @if (!_canEdit)
+                {
+                    <div class="hid-alert hid-alert--info">@T["PolicyEditHint"]</div>
+                }
+                <div class="hid-table-wrap">
+                    <table class="hid-table">
+                        <thead>
+                            <tr>
+                                <th>@T["AssignmentId"]</th>
+                                <th>@T["ScopeId"]</th>
+                                <th>@T["Principal"]</th>
+                                <th>@T["Roles"]</th>
+                                <th>@T["Status"]</th>
+                                <th>@T["Latest"]</th>
+                                <th>@T["Actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var assignment in _assignments)
+                            {
+                                <tr>
+                                    <td>@assignment.AssignmentId</td>
+                                    <td>@assignment.ScopeId</td>
+                                    <td>@assignment.PrincipalId</td>
+                                    <td>@string.Join(", ", assignment.Roles)</td>
+                                    <td>@(assignment.IsActive ? T["Active"] : T["Inactive"])</td>
+                                    <td>@FormatTime(assignment.UpdatedAtUtc)</td>
+                                    <td>
+                                        <button class="hid-button-secondary hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="@(() => LoadAssignmentIntoForm(assignment))">@T["EditAssignment"]</button>
+                                        <button class="hid-button-secondary hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="@(() => ToggleAssignmentActivationAsync(assignment))">@(assignment.IsActive ? T["Deactivate"] : T["Activate"])</button>
+                                        <button class="hid-button-danger hid-button-sm" disabled="@(!_canEdit || _busy)" @onclick="@(() => DeleteAssignmentAsync(assignment))">@T["DeleteAssignment"]</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    private PolicyDiagnosticsSummaryViewModel? _summary;
+    private IReadOnlyList<PolicyRevisionSnapshotViewModel> _revisions = [];
+    private AuthorizationDeniedViewModel? _denial;
+    private string? _error;
+    private string? _backendUnavailableMessage;
+    private string? _actionMessage;
+    private bool _busy;
+    private bool _canPrune;
+    private bool _canEdit;
+    private string? _scopeId;
+    private string? _entityType;
+    private string? _principalId;
+    private int _take = 100;
+    private PolicyScopeUpsertRequestViewModel _scopeForm = new("", "", "", true, true, true, true);
+    private PolicyAssignmentUpsertRequestViewModel _assignmentForm = new("", "", "", [], "policy-governance", true);
+    private string _assignmentRolesCsv = "operator.viewer";
+    private IReadOnlyList<PolicyScopeViewModel> _scopes = [];
+    private IReadOnlyList<PolicyAssignmentViewModel> _assignments = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        _denial = null;
+        _backendUnavailableMessage = null;
+        _actionMessage = null;
+        try
+        {
+            _summary = await ApiClient.GetPolicyDiagnosticsSummaryAsync();
+            _revisions = await ApiClient.GetPolicyRevisionsAsync(_scopeId, _entityType, _principalId, _take) ?? [];
+            _scopes = await ApiClient.GetPolicyScopesAsync() ?? [];
+            _assignments = await ApiClient.GetPolicyAssignmentsAsync() ?? [];
+            _canPrune = true; // final authority still enforced by backend
+            _canEdit = Identity.IsAdmin;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+            _canPrune = false;
+            _canEdit = false;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+            _canPrune = false;
+            _canEdit = false;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            _canPrune = false;
+            _canEdit = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveScopeAsync()
+    {
+        _busy = true;
+        _actionMessage = null;
+        _error = null;
+        try
+        {
+            await ApiClient.UpsertPolicyScopeAsync(_scopeForm);
+            _actionMessage = T["PolicyScopeSaved"];
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAssignmentAsync()
+    {
+        _busy = true;
+        _actionMessage = null;
+        _error = null;
+        try
+        {
+            var roles = _assignmentRolesCsv
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(static role => !string.IsNullOrWhiteSpace(role))
+                .ToArray();
+            _assignmentForm.Roles = roles;
+            await ApiClient.UpsertPolicyAssignmentAsync(_assignmentForm);
+            _actionMessage = T["PolicyAssignmentSaved"];
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadRevisionsAsync() => await LoadAsync();
+
+    private void ResetFilters()
+    {
+        _scopeId = null;
+        _entityType = null;
+        _principalId = null;
+        _take = 100;
+    }
+
+    private void ResetScopeForm()
+    {
+        _scopeForm = new PolicyScopeUpsertRequestViewModel("", "", "", true, true, true, true);
+    }
+
+    private void ResetAssignmentForm()
+    {
+        _assignmentForm = new PolicyAssignmentUpsertRequestViewModel("", "", "", [], "policy-governance", true);
+        _assignmentRolesCsv = "operator.viewer";
+    }
+
+    private void LoadScopeIntoForm(PolicyScopeViewModel scope)
+    {
+        _scopeForm = new PolicyScopeUpsertRequestViewModel(
+            scope.ScopeId,
+            scope.TenantId,
+            scope.OrganizationId,
+            scope.ViewerRoleRequired,
+            scope.ModeratorOverrideEnabled,
+            scope.AdminOverrideEnabled,
+            scope.IsActive);
+        _actionMessage = string.Format(T["PolicyScopeLoaded"], scope.ScopeId);
+    }
+
+    private async Task ToggleScopeActivationAsync(PolicyScopeViewModel scope)
+    {
+        _busy = true;
+        _actionMessage = null;
+        _error = null;
+        try
+        {
+            if (scope.IsActive)
+            {
+                await ApiClient.DeactivatePolicyScopeAsync(scope.ScopeId);
+                _actionMessage = string.Format(T["PolicyScopeDeactivated"], scope.ScopeId);
+            }
+            else
+            {
+                await ApiClient.ActivatePolicyScopeAsync(scope.ScopeId);
+                _actionMessage = string.Format(T["PolicyScopeActivated"], scope.ScopeId);
+            }
+
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteScopeAsync(PolicyScopeViewModel scope)
+    {
+        _busy = true;
+        _actionMessage = null;
+        _error = null;
+        try
+        {
+            await ApiClient.DeletePolicyScopeAsync(scope.ScopeId);
+            _actionMessage = string.Format(T["PolicyScopeDeleted"], scope.ScopeId);
+            if (string.Equals(_scopeForm.ScopeId, scope.ScopeId, StringComparison.OrdinalIgnoreCase))
+            {
+                ResetScopeForm();
+            }
+
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void LoadAssignmentIntoForm(PolicyAssignmentViewModel assignment)
+    {
+        _assignmentForm = new PolicyAssignmentUpsertRequestViewModel(
+            assignment.AssignmentId,
+            assignment.ScopeId,
+            assignment.PrincipalId,
+            assignment.Roles,
+            assignment.Source,
+            assignment.IsActive);
+        _assignmentRolesCsv = string.Join(", ", assignment.Roles);
+        _actionMessage = string.Format(T["PolicyAssignmentLoaded"], assignment.AssignmentId);
+    }
+
+    private async Task ToggleAssignmentActivationAsync(PolicyAssignmentViewModel assignment)
+    {
+        _busy = true;
+        _actionMessage = null;
+        _error = null;
+        try
+        {
+            if (assignment.IsActive)
+            {
+                await ApiClient.DeactivatePolicyAssignmentAsync(assignment.AssignmentId);
+                _actionMessage = string.Format(T["PolicyAssignmentDeactivated"], assignment.AssignmentId);
+            }
+            else
+            {
+                await ApiClient.ActivatePolicyAssignmentAsync(assignment.AssignmentId);
+                _actionMessage = string.Format(T["PolicyAssignmentActivated"], assignment.AssignmentId);
+            }
+
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAssignmentAsync(PolicyAssignmentViewModel assignment)
+    {
+        _busy = true;
+        _actionMessage = null;
+        _error = null;
+        try
+        {
+            await ApiClient.DeletePolicyAssignmentAsync(assignment.AssignmentId);
+            _actionMessage = string.Format(T["PolicyAssignmentDeleted"], assignment.AssignmentId);
+            if (string.Equals(_assignmentForm.AssignmentId, assignment.AssignmentId, StringComparison.OrdinalIgnoreCase))
+            {
+                ResetAssignmentForm();
+            }
+
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PruneAsync()
+    {
+        _busy = true;
+        _actionMessage = null;
+        try
+        {
+            var result = await ApiClient.PrunePolicyRevisionsAsync();
+            _actionMessage = result is null
+                ? T["PruneCompleted"]
+                : string.Format(T["PruneCompletedWithCount"], result.DeletedRevisionCount);
+            await LoadAsync();
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string BuildExportHref()
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_scopeId)) query.Add($"scopeId={Uri.EscapeDataString(_scopeId)}");
+        if (!string.IsNullOrWhiteSpace(_entityType)) query.Add($"entityType={Uri.EscapeDataString(_entityType)}");
+        if (!string.IsNullOrWhiteSpace(_principalId)) query.Add($"principalId={Uri.EscapeDataString(_principalId)}");
+        query.Add($"take={_take}");
+        return query.Count == 0 ? "/exports/policies/revisions" : $"/exports/policies/revisions?{string.Join("&", query)}";
+    }
+
+    private static string FormatTime(DateTimeOffset? value)
+        => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—";
+}

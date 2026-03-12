@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HidBridge.Transport.Uart</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HidBridge.Hid\HidBridge.Hid.csproj" />
+    <ProjectReference Include="..\HidBridge.Contracts\HidBridge.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="10.0.4" />
+  </ItemGroup>
+</Project>

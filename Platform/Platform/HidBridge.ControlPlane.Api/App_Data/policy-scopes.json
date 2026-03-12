@@ -1,0 +1,11 @@
+[
+  {
+    "scopeId": "scope-local-default",
+    "tenantId": "local-tenant",
+    "organizationId": "local-org",
+    "viewerRoleRequired": true,
+    "moderatorOverrideEnabled": true,
+    "adminOverrideEnabled": true,
+    "updatedAtUtc": "2026-03-04T06:10:18.361454+00:00"
+  }
+]

@@ -1,0 +1,5 @@
+::deep a.active {
+    border-color: rgba(92, 168, 255, 0.45);
+    background: rgba(92, 168, 255, 0.12);
+    color: var(--hid-foreground-strong);
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "agentId": "agent_hidbridge_uart_local",
+    "endpointId": "endpoint_local_demo",
+    "connectorType": "HidBridge",
+    "capabilities": [
+      {
+        "name": "hid.mouse.v1",
+        "version": "1.0",
+        "meta": null
+      },
+      {
+        "name": "hid.keyboard.v1",
+        "version": "1.0",
+        "meta": null
+      },
+      {
+        "name": "diag.telemetry.v1",
+        "version": "1.0",
+        "meta": null
+      }
+    ]
+  }
+]

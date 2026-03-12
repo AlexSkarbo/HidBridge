@@ -1,0 +1,40 @@
+{
+  "profiles": {
+    "HidBridge.ControlPlane.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "scalar",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "HIDBRIDGE_UART_PORT": "COM6",
+        "HIDBRIDGE_UART_BAUD": "3000000",
+        "HIDBRIDGE_UART_HMAC_KEY": "changeme",
+        "HIDBRIDGE_UART_MOUSE_SELECTOR": "255",
+        "HIDBRIDGE_UART_KEYBOARD_SELECTOR": "254",
+        "HIDBRIDGE_AGENT_ID": "agent_hidbridge_uart_local",
+        "HIDBRIDGE_ENDPOINT_ID": "endpoint_local_demo"
+      },
+      "applicationUrl": "http://localhost:18093"
+    },
+    "HidBridge.ControlPlane.Api (SqlLocal)": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "scalar",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "HIDBRIDGE_PERSISTENCE_PROVIDER": "Sql",
+        "HIDBRIDGE_SQL_CONNECTION": "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge",
+        "HIDBRIDGE_SQL_SCHEMA": "hidbridge",
+        "HIDBRIDGE_SQL_APPLY_MIGRATIONS": "true",
+        "HIDBRIDGE_UART_PORT": "COM6",
+        "HIDBRIDGE_UART_BAUD": "3000000",
+        "HIDBRIDGE_UART_HMAC_KEY": "changeme",
+        "HIDBRIDGE_UART_MOUSE_SELECTOR": "255",
+        "HIDBRIDGE_UART_KEYBOARD_SELECTOR": "254",
+        "HIDBRIDGE_AGENT_ID": "agent_hidbridge_uart_local",
+        "HIDBRIDGE_ENDPOINT_ID": "endpoint_local_demo"
+      },
+      "applicationUrl": "http://localhost:18093"
+    }
+  }
+}
