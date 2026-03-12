@@ -1,0 +1,559 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hidbridge.local/schemas/agent-contract/v1/message.schema.json",
+  "title": "HidBridge Agent Contract v1 Message",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "kind",
+    "messageId",
+    "traceId",
+    "ts",
+    "tenantId",
+    "endpointId",
+    "agentId",
+    "body"
+  ],
+  "properties": {
+    "v": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "agent.register",
+        "agent.heartbeat",
+        "session.open",
+        "session.close",
+        "command.request",
+        "command.ack",
+        "event.telemetry",
+        "event.audit"
+      ]
+    },
+    "messageId": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 128
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 128
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 128
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "endpointId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "body": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "agent.register"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/AgentRegisterBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "agent.heartbeat"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/AgentHeartbeatBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session.open"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/SessionOpenBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session.close"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/SessionCloseBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command.request"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/CommandRequestBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command.ack"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "correlationId"
+        ],
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/CommandAckBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "event.telemetry"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/EventTelemetryBody"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "event.audit"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/EventAuditBody"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "ErrorObject": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "AUTH",
+            "AGENT",
+            "SESSION",
+            "COMMAND",
+            "MEDIA",
+            "HID",
+            "UART",
+            "TRANSPORT",
+            "SYSTEM"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 96
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "Capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "meta": {
+          "type": "object"
+        }
+      }
+    },
+    "AgentRegisterBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connectorType",
+        "capabilities",
+        "agentVersion"
+      ],
+      "properties": {
+        "connectorType": {
+          "type": "string",
+          "enum": [
+            "installed",
+            "agentless",
+            "hid_bridge",
+            "media_gateway"
+          ]
+        },
+        "agentVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "health": {
+          "type": "object"
+        }
+      }
+    },
+    "AgentHeartbeatBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "online",
+            "degraded",
+            "offline"
+          ]
+        },
+        "uptimeMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "load": {
+          "type": "object"
+        }
+      }
+    },
+    "SessionOpenBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "profile",
+        "requestedBy"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "ultra-low-latency",
+            "balanced",
+            "quality-first"
+          ]
+        },
+        "requestedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "shareMode": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "observer",
+            "controller"
+          ]
+        }
+      }
+    },
+    "SessionCloseBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "reason"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "CommandRequestBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandId",
+        "sessionId",
+        "channel",
+        "action",
+        "args",
+        "timeoutMs",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "commandId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "channel": {
+          "type": "string",
+          "enum": [
+            "hid",
+            "datachannel",
+            "websocket",
+            "agent_rpc"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "mouse.move",
+            "mouse.button",
+            "mouse.wheel",
+            "keyboard.press",
+            "keyboard.text",
+            "keyboard.shortcut",
+            "keyboard.reset",
+            "session.recover",
+            "session.stop"
+          ]
+        },
+        "args": {
+          "type": "object"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120000
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "CommandAckBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandId",
+        "status"
+      ],
+      "properties": {
+        "commandId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "applied",
+            "rejected",
+            "timeout"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorObject"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "agentQueueMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "deviceAckMs": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "EventTelemetryBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "metrics"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "session",
+            "agent",
+            "endpoint",
+            "media",
+            "hid",
+            "uart"
+          ]
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "metrics": {
+          "type": "object"
+        }
+      }
+    },
+    "EventAuditBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "message"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "auth",
+            "session",
+            "command",
+            "share",
+            "policy",
+            "system"
+          ]
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}
