@@ -364,6 +364,100 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the policy-scopes route.
+    /// </summary>
+    [Fact]
+    public async Task GetPolicyScopesAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new[]
+        {
+            new PolicyScopeViewModel("scope-local", "local-tenant", "local-org", true, true, true, DateTimeOffset.UtcNow, true),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetPolicyScopesAsync(cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/diagnostics/policies/scopes", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the policy-scope upsert route and payload.
+    /// </summary>
+    [Fact]
+    public async Task UpsertPolicyScopeAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new PolicyScopeUpsertRequestViewModel("scope-local", "local-tenant", "local-org", true, true, true, true);
+        var handler = new RecordingHandler(new PolicyScopeViewModel("scope-local", "local-tenant", "local-org", true, true, true, DateTimeOffset.UtcNow, true));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.UpsertPolicyScopeAsync(request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/diagnostics/policies/scopes", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("scope-local", payload!["scopeId"]?.ToString());
+        Assert.Equal("local-tenant", payload["tenantId"]?.ToString());
+        Assert.Equal("True", payload["isActive"]?.ToString());
+    }
+
+    /// <summary>
+    /// Verifies the policy-scope deactivate route.
+    /// </summary>
+    [Fact]
+    public async Task DeactivatePolicyScopeAsync_SendsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new PolicyScopeViewModel("scope-local", "local-tenant", "local-org", true, true, true, DateTimeOffset.UtcNow, false));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.DeactivatePolicyScopeAsync("scope-local", cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/diagnostics/policies/scopes/scope-local/deactivate", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the policy-scope activate route.
+    /// </summary>
+    [Fact]
+    public async Task ActivatePolicyScopeAsync_SendsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new PolicyScopeViewModel("scope-local", "local-tenant", "local-org", true, true, true, DateTimeOffset.UtcNow, true));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.ActivatePolicyScopeAsync("scope-local", cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/diagnostics/policies/scopes/scope-local/activate", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the policy-scope delete route.
+    /// </summary>
+    [Fact]
+    public async Task DeletePolicyScopeAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new { });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        await apiClient.DeletePolicyScopeAsync("scope-local", cancellationToken);
+
+        Assert.Equal(HttpMethod.Delete, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/diagnostics/policies/scopes/scope-local", handler.LastRequestUri);
+    }
+
+    /// <summary>
     /// Verifies the release-control action route and payload.
     /// </summary>
     [Fact]
