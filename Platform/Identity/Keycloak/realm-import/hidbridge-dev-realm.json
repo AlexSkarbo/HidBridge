@@ -39,6 +39,7 @@
           "config": {
             "userinfo.token.claim": "true",
             "user.attribute": "tenant_id",
+            "aggregate.attrs": "true",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "tenant_id",
@@ -53,6 +54,7 @@
           "config": {
             "userinfo.token.claim": "true",
             "user.attribute": "org_id",
+            "aggregate.attrs": "true",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "org_id",
@@ -148,6 +150,7 @@
           "config": {
             "userinfo.token.claim": "true",
             "user.attribute": "tenant_id",
+            "aggregate.attrs": "true",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "tenant_id",
@@ -162,6 +165,7 @@
           "config": {
             "userinfo.token.claim": "true",
             "user.attribute": "org_id",
+            "aggregate.attrs": "true",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "org_id",
@@ -294,6 +298,35 @@
         }
       ]
     }
+  ],
+  "groups": [
+    {
+      "name": "hidbridge-operators",
+      "path": "/hidbridge-operators",
+      "realmRoles": [
+        "operator.viewer"
+      ],
+      "attributes": {
+        "tenant_id": [ "local-tenant" ],
+        "org_id": [ "local-org" ]
+      }
+    },
+    {
+      "name": "hidbridge-admins",
+      "path": "/hidbridge-admins",
+      "realmRoles": [
+        "operator.viewer",
+        "operator.moderator",
+        "operator.admin"
+      ],
+      "attributes": {
+        "tenant_id": [ "local-tenant" ],
+        "org_id": [ "local-org" ]
+      }
+    }
+  ],
+  "defaultGroups": [
+    "/hidbridge-operators"
   ],
   "users": [
     {

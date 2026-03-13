@@ -27,7 +27,11 @@ public static class ApiAuthenticationGuardExtensions
             var allowHeaderFallbackForRequest = options.AllowHeaderFallback
                 && (!isUnsafeMethod || !options.HeaderFallbackDisabledPatterns.Any(pattern =>
                     PathMatchesPattern(httpContext.Request.Path, pattern)));
-            var caller = ApiCallerContext.FromHttpContext(httpContext, allowHeaderFallbackForRequest);
+            var caller = ApiCallerContext.FromHttpContext(
+                httpContext,
+                allowHeaderFallbackForRequest,
+                options.DefaultTenantId,
+                options.DefaultOrganizationId);
             httpContext.Items[ApiCallerContext.ItemKey] = caller;
 
             if (isAuthenticated || (!requiresBearerOnly && allowHeaderFallbackForRequest && caller.IsPresent))

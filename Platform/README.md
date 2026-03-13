@@ -159,8 +159,12 @@ Useful environment variables:
 - `HIDBRIDGE_UART_PORT`
 - `HIDBRIDGE_UART_BAUD`
 - `HIDBRIDGE_UART_HMAC_KEY`
+- `HIDBRIDGE_UART_MASTER_SECRET`
 - `HIDBRIDGE_UART_MOUSE_SELECTOR`
 - `HIDBRIDGE_UART_KEYBOARD_SELECTOR`
+- `HIDBRIDGE_UART_COMMAND_TIMEOUT_MS`
+- `HIDBRIDGE_UART_INJECT_TIMEOUT_MS`
+- `HIDBRIDGE_UART_INJECT_RETRIES`
 - `HIDBRIDGE_AGENT_ID`
 - `HIDBRIDGE_ENDPOINT_ID`
 - `HIDBRIDGE_DATA_ROOT`
@@ -176,6 +180,11 @@ Useful environment variables:
 - `HIDBRIDGE_POLICY_REVISION_MAINTENANCE_INTERVAL_SECONDS`
 - `HIDBRIDGE_POLICY_REVISION_RETENTION_DAYS`
 - `HIDBRIDGE_POLICY_REVISION_MAX_PER_ENTITY`
+
+UART key-mode notes:
+- If `HIDBRIDGE_UART_HMAC_KEY` is not set but `HIDBRIDGE_UART_MASTER_SECRET` is set, bootstrap HMAC key defaults to `HIDBRIDGE_UART_MASTER_SECRET`.
+- The connector tries derived key mode when `HIDBRIDGE_UART_MASTER_SECRET` is configured.
+- If derived mode fails to receive ACK, transport automatically falls back to bootstrap key mode (same behavior as in `Tools/HidControlServer`).
 
 Caller-scope integration headers:
 - `X-HidBridge-UserId`

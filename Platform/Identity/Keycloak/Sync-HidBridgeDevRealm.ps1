@@ -9,6 +9,8 @@ param(
     [switch]$IncludeUsersInBackup,
     [switch]$SkipUsers,
     [switch]$SkipGroups,
+    [string]$DefaultOperatorTenantId = "local-tenant",
+    [string]$DefaultOperatorOrganizationId = "local-org",
     [string[]]$ExternalProviderConfigPaths = @()
 )
 
@@ -305,7 +307,19 @@ function Ensure-ClientScope {
             }
         }
         else {
-            Write-Activity "Client scope mapper already exists, keeping current mapper: $($Scope.name)/$($mapper.name)"
+            try {
+                $mapperBody["id"] = $existingMapper.id
+                Invoke-KeycloakNoContent -Method Put -Path "/admin/realms/$RealmName/client-scopes/$($existing.id)/protocol-mappers/models/$($existingMapper.id)" -Body $mapperBody
+                Write-Activity "Updated client scope mapper: $($Scope.name)/$($mapper.name)"
+            }
+            catch {
+                if ($_.Exception.Message -match "\(409\)") {
+                    Write-Activity "Client scope mapper update conflict, keeping existing mapper: $($Scope.name)/$($mapper.name)"
+                }
+                else {
+                    throw
+                }
+            }
         }
     }
 
@@ -731,7 +745,8 @@ function Get-GroupByName {
 function Ensure-Group {
     param(
         [string]$Name,
-        [string[]]$RealmRoles
+        [string[]]$RealmRoles,
+        [hashtable]$Attributes = @{}
     )
 
     $existing = Get-GroupByName -Name $Name
@@ -742,6 +757,15 @@ function Ensure-Group {
     }
     else {
         Write-Activity "Group already exists: $Name"
+    }
+
+    if ($Attributes.Count -gt 0) {
+        $groupUpdateBody = @{
+            name = $Name
+            attributes = $Attributes
+        }
+        Invoke-KeycloakNoContent -Method Put -Path "/admin/realms/$RealmName/groups/$($existing.id)" -Body $groupUpdateBody
+        Write-Activity "Normalized group attributes: $Name"
     }
 
     $existingRoles = @(Invoke-Keycloak -Method Get -Path "/admin/realms/$RealmName/groups/$($existing.id)/role-mappings/realm")
@@ -769,6 +793,147 @@ function Ensure-Group {
         })
         Invoke-KeycloakNoContent -Method Post -Path "/admin/realms/$RealmName/groups/$($existing.id)/role-mappings/realm" -Body $body
         Write-Activity "Assigned realm roles to group '$Name': $($RealmRoles -join ', ')"
+    }
+}
+
+function Ensure-DefaultGroup {
+    param([string]$GroupName)
+
+    $group = Get-GroupByName -Name $GroupName
+    if ($null -eq $group) {
+        throw "Cannot set default group '$GroupName': group not found."
+    }
+
+    $defaultGroups = @(Invoke-Keycloak -Method Get -Path "/admin/realms/$RealmName/default-groups")
+    $alreadyDefault = @($defaultGroups | Where-Object {
+        $null -ne $_ -and
+        $null -ne $_.PSObject.Properties["id"] -and
+        $_.id -eq $group.id
+    }).Count -gt 0
+    if ($alreadyDefault) {
+        Write-Activity "Default group already configured: $GroupName"
+        return
+    }
+
+    Invoke-KeycloakNoContent -Method Put -Path "/admin/realms/$RealmName/default-groups/$($group.id)"
+    Write-Activity "Configured default group: $GroupName"
+}
+
+function Ensure-UsersInGroup {
+    param([string]$GroupName)
+
+    $group = Get-GroupByName -Name $GroupName
+    if ($null -eq $group) {
+        throw "Cannot assign users to group '$GroupName': group not found."
+    }
+
+    $users = @(Invoke-Keycloak -Method Get -Path "/admin/realms/$RealmName/users?max=500")
+    foreach ($user in $users) {
+        if ($null -eq $user -or $null -eq $user.PSObject.Properties["id"] -or [string]::IsNullOrWhiteSpace([string]$user.id)) {
+            continue
+        }
+
+        if ($null -ne $user.PSObject.Properties["username"] -and [string]$user.username -like "service-account-*") {
+            continue
+        }
+
+        $currentGroups = @(Invoke-Keycloak -Method Get -Path "/admin/realms/$RealmName/users/$($user.id)/groups")
+        $alreadyAssigned = @($currentGroups | Where-Object {
+            $null -ne $_ -and
+            $null -ne $_.PSObject.Properties["id"] -and
+            $_.id -eq $group.id
+        }).Count -gt 0
+        if ($alreadyAssigned) {
+            continue
+        }
+
+        Invoke-KeycloakNoContent -Method Put -Path "/admin/realms/$RealmName/users/$($user.id)/groups/$($group.id)"
+        Write-Activity "Assigned user $($user.username) to default operator group '$GroupName'"
+    }
+}
+
+function Get-GroupMembersByName {
+    param([string]$GroupName)
+
+    $group = Get-GroupByName -Name $GroupName
+    if ($null -eq $group) {
+        return @()
+    }
+
+    return @(Invoke-Keycloak -Method Get -Path "/admin/realms/$RealmName/groups/$($group.id)/members?max=500")
+}
+
+function Get-UserById {
+    param([string]$UserId)
+
+    return Invoke-Keycloak -Method Get -Path "/admin/realms/$RealmName/users/$UserId"
+}
+
+function Ensure-OperatorScopeDefaultsForUser {
+    param([string]$UserId)
+
+    $user = Get-UserById -UserId $UserId
+    if ($null -eq $user) {
+        return
+    }
+
+    $attributes = ConvertTo-Hashtable $user.attributes
+    if ($null -eq $attributes) {
+        $attributes = @{}
+    }
+
+    $changed = $false
+    $tenantValues = @($attributes["tenant_id"])
+    if ($tenantValues.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$tenantValues[0])) {
+        $attributes["tenant_id"] = @($DefaultOperatorTenantId)
+        $changed = $true
+    }
+
+    $organizationValues = @($attributes["org_id"])
+    if ($organizationValues.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$organizationValues[0])) {
+        $attributes["org_id"] = @($DefaultOperatorOrganizationId)
+        $changed = $true
+    }
+
+    $principalValues = @($attributes["principal_id"])
+    if ($principalValues.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$principalValues[0])) {
+        $principal = if (-not [string]::IsNullOrWhiteSpace($user.username)) { [string]$user.username } else { [string]$user.email }
+        if (-not [string]::IsNullOrWhiteSpace($principal)) {
+            $attributes["principal_id"] = @($principal)
+            $changed = $true
+        }
+    }
+
+    if (-not $changed) {
+        return
+    }
+
+    $body = @{
+        id = $user.id
+        username = $user.username
+        enabled = $user.enabled
+        emailVerified = $user.emailVerified
+        firstName = $user.firstName
+        lastName = $user.lastName
+        email = $user.email
+        attributes = $attributes
+    }
+
+    Invoke-KeycloakNoContent -Method Put -Path "/admin/realms/$RealmName/users/$($user.id)" -Body $body
+    Write-Activity "Normalized operator defaults for user: $($user.username)"
+}
+
+function Ensure-OperatorOnboardingDefaults {
+    $operatorMembers = @(Get-GroupMembersByName -GroupName "hidbridge-operators")
+    $adminMembers = @(Get-GroupMembersByName -GroupName "hidbridge-admins")
+    $candidateIds = @(($operatorMembers + $adminMembers) | Where-Object {
+        $null -ne $_ -and
+        $null -ne $_.PSObject.Properties["id"] -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.id)
+    } | ForEach-Object { [string]$_.id } | Sort-Object -Unique)
+
+    foreach ($userId in $candidateIds) {
+        Ensure-OperatorScopeDefaultsForUser -UserId $userId
     }
 }
 
@@ -801,8 +966,16 @@ foreach ($providerConfigPath in @(Resolve-ExternalProviderConfigPaths)) {
     Ensure-IdentityProviderFromConfig -ConfigPath $providerConfigPath
 }
 
-Ensure-Group -Name "hidbridge-operators" -RealmRoles @("operator.viewer")
-Ensure-Group -Name "hidbridge-admins" -RealmRoles @("operator.viewer", "operator.moderator", "operator.admin")
+Ensure-Group -Name "hidbridge-operators" -RealmRoles @("operator.viewer") -Attributes @{
+    tenant_id = @($DefaultOperatorTenantId)
+    org_id = @($DefaultOperatorOrganizationId)
+}
+Ensure-Group -Name "hidbridge-admins" -RealmRoles @("operator.viewer", "operator.moderator", "operator.admin") -Attributes @{
+    tenant_id = @($DefaultOperatorTenantId)
+    org_id = @($DefaultOperatorOrganizationId)
+}
+Ensure-DefaultGroup -GroupName "hidbridge-operators"
+Ensure-UsersInGroup -GroupName "hidbridge-operators"
 
 if (-not $SkipUsers) {
     foreach ($user in @($desiredRealm.users)) {
@@ -811,9 +984,17 @@ if (-not $SkipUsers) {
 }
 
 if (-not $SkipGroups) {
-    Ensure-Group -Name "hidbridge-operators" -RealmRoles @("operator.viewer")
-    Ensure-Group -Name "hidbridge-admins" -RealmRoles @("operator.viewer", "operator.moderator", "operator.admin")
+    Ensure-Group -Name "hidbridge-operators" -RealmRoles @("operator.viewer") -Attributes @{
+        tenant_id = @($DefaultOperatorTenantId)
+        org_id = @($DefaultOperatorOrganizationId)
+    }
+    Ensure-Group -Name "hidbridge-admins" -RealmRoles @("operator.viewer", "operator.moderator", "operator.admin") -Attributes @{
+        tenant_id = @($DefaultOperatorTenantId)
+        org_id = @($DefaultOperatorOrganizationId)
+    }
 }
+
+Ensure-OperatorOnboardingDefaults
 
 $activity | Set-Content -Path $activityLogPath -Encoding UTF8
 

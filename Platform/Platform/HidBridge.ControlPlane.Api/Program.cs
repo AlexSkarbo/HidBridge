@@ -60,6 +60,8 @@ var apiAuthenticationOptions = new ApiAuthenticationOptions
     BearerOnlyPrefixes = ParsePrefixes(builder.Configuration["HIDBRIDGE_AUTH_BEARER_ONLY_PREFIXES"]),
     CallerContextRequiredPrefixes = ParsePrefixes(builder.Configuration["HIDBRIDGE_AUTH_CALLER_CONTEXT_REQUIRED_PREFIXES"]),
     HeaderFallbackDisabledPatterns = ParsePrefixes(builder.Configuration["HIDBRIDGE_AUTH_HEADER_FALLBACK_DISABLED_PATTERNS"]),
+    DefaultTenantId = builder.Configuration["HIDBRIDGE_AUTH_DEFAULT_TENANT_ID"] ?? "local-tenant",
+    DefaultOrganizationId = builder.Configuration["HIDBRIDGE_AUTH_DEFAULT_ORGANIZATION_ID"] ?? "local-org",
 };
 var policyRevisionLifecycleOptions = new PolicyRevisionLifecycleOptions
 {
@@ -116,7 +118,11 @@ builder.Services.AddSingleton<PolicyGovernanceDiagnosticsService>();
 builder.Services.AddSingleton<PolicyGovernanceManagementService>();
 
 var uartPort = builder.Configuration["HIDBRIDGE_UART_PORT"] ?? "COM6";
-var uartHmacKey = builder.Configuration["HIDBRIDGE_UART_HMAC_KEY"] ?? "changeme";
+var uartMasterSecret = builder.Configuration["HIDBRIDGE_UART_MASTER_SECRET"] ?? string.Empty;
+var configuredUartHmacKey = builder.Configuration["HIDBRIDGE_UART_HMAC_KEY"];
+var uartHmacKey = !string.IsNullOrWhiteSpace(configuredUartHmacKey)
+    ? configuredUartHmacKey
+    : (!string.IsNullOrWhiteSpace(uartMasterSecret) ? uartMasterSecret : "changeme");
 var uartBaud = int.TryParse(builder.Configuration["HIDBRIDGE_UART_BAUD"], out var parsedBaud) ? parsedBaud : 3000000;
 var mouseSelector = byte.TryParse(builder.Configuration["HIDBRIDGE_UART_MOUSE_SELECTOR"], out var parsedMouseSelector)
     ? parsedMouseSelector
@@ -124,14 +130,27 @@ var mouseSelector = byte.TryParse(builder.Configuration["HIDBRIDGE_UART_MOUSE_SE
 var keyboardSelector = byte.TryParse(builder.Configuration["HIDBRIDGE_UART_KEYBOARD_SELECTOR"], out var parsedKeyboardSelector)
     ? parsedKeyboardSelector
     : (byte)0xFE;
+var uartCommandTimeoutMs = int.TryParse(builder.Configuration["HIDBRIDGE_UART_COMMAND_TIMEOUT_MS"], out var parsedUartCommandTimeoutMs)
+    ? parsedUartCommandTimeoutMs
+    : 300;
+var uartInjectTimeoutMs = int.TryParse(builder.Configuration["HIDBRIDGE_UART_INJECT_TIMEOUT_MS"], out var parsedUartInjectTimeoutMs)
+    ? parsedUartInjectTimeoutMs
+    : 200;
+var uartInjectRetries = int.TryParse(builder.Configuration["HIDBRIDGE_UART_INJECT_RETRIES"], out var parsedUartInjectRetries)
+    ? parsedUartInjectRetries
+    : 2;
 var agentId = builder.Configuration["HIDBRIDGE_AGENT_ID"] ?? "agent_hidbridge_uart_local";
 var endpointId = builder.Configuration["HIDBRIDGE_ENDPOINT_ID"] ?? "endpoint_local_demo";
 var uartOptions = new HidBridgeUartClientOptions(
     uartPort,
     uartBaud,
     uartHmacKey,
+    uartMasterSecret,
     mouseSelector,
-    keyboardSelector);
+    keyboardSelector,
+    uartCommandTimeoutMs,
+    uartInjectTimeoutMs,
+    uartInjectRetries);
 
 builder.Services.AddSingleton(new ApiRuntimeSettings
 {
@@ -143,6 +162,10 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     UartBaudRate = uartBaud,
     MouseSelector = mouseSelector,
     KeyboardSelector = keyboardSelector,
+    UartCommandTimeoutMs = uartCommandTimeoutMs,
+    UartInjectTimeoutMs = uartInjectTimeoutMs,
+    UartInjectRetries = uartInjectRetries,
+    UartUsesMasterSecret = !string.IsNullOrWhiteSpace(uartMasterSecret),
     AgentId = agentId,
     EndpointId = endpointId,
     Maintenance = maintenanceOptions,

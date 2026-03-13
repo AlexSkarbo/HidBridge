@@ -45,4 +45,14 @@ public sealed class ApiAuthenticationOptions
     /// Supports <c>*</c> as a single path-segment wildcard.
     /// </summary>
     public IReadOnlyList<string> HeaderFallbackDisabledPatterns { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets one default tenant scope that is applied to authenticated callers when no tenant claim/header was provided.
+    /// </summary>
+    public string? DefaultTenantId { get; set; }
+
+    /// <summary>
+    /// Gets or sets one default organization scope that is applied to authenticated callers when no organization claim/header was provided.
+    /// </summary>
+    public string? DefaultOrganizationId { get; set; }
 }

@@ -35,6 +35,11 @@
         <div class="hid-alert hid-alert--info">@_actionMessage</div>
     }
 
+    @if (_dashboard is not null && string.Equals(_dashboard.State, "Failed", StringComparison.OrdinalIgnoreCase))
+    {
+        <div class="hid-alert hid-alert--warning">@GetSessionFailedHint()</div>
+    }
+
     @if (_backendUnavailableMessage is not null || !string.IsNullOrWhiteSpace(_error) || _denial is not null)
     {
     }
@@ -570,6 +575,26 @@
     private string ModerationAccessMessage => _canModerate
         ? T["ModerationAccessGranted"]
         : T["ModerationAccessDenied"];
+
+    private string GetSessionFailedHint()
+    {
+        if (_dashboard is null)
+        {
+            return T["SessionFailedHint"];
+        }
+
+        if (_dashboard.FailedCommandCount > 0)
+        {
+            return string.Format(T["SessionFailedHintWithCommands"], _dashboard.FailedCommandCount);
+        }
+
+        if (_dashboard.LeaseExpiresAtUtc.HasValue)
+        {
+            return string.Format(T["SessionFailedHintWithLease"], FormatTime(_dashboard.LeaseExpiresAtUtc));
+        }
+
+        return T["SessionFailedHint"];
+    }
 
     protected override async Task OnParametersSetAsync()
         => await RefreshAsync();

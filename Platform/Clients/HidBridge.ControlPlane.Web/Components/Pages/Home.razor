@@ -55,10 +55,10 @@
                     <h3 class="hid-card-title">@T["FleetQuickStartTitle"]</h3>
                     <p class="hid-card-subtitle">@T["FleetQuickStartSubtitle"]</p>
                 </div>
-                <button class="hid-button-primary hid-button-sm"
-                        disabled="@(!CanQuickStart(availableEndpoint, activeSession) || !string.IsNullOrWhiteSpace(_busyEndpointId))"
-                        @onclick="() => StartOrResumeDemoAsync(availableEndpoint, activeSession)">
-                    @GetQuickStartActionLabel(availableEndpoint, activeSession)
+                <button class="hid-button-secondary hid-button-sm"
+                        disabled="@(_closingFailedRooms || !HasFailedSessionsForCleanup())"
+                        @onclick="CloseFailedRoomsAsync">
+                    @(_closingFailedRooms ? T["ClosingFailedRooms"] : T["CloseFailedRooms"])
                 </button>
             </div>
             <div class="hid-inline-meta">
@@ -217,13 +217,20 @@
     private AuthorizationDeniedViewModel? _denial;
     private string? _backendUnavailableMessage;
     private string? _busyEndpointId;
+    private bool _closingFailedRooms;
 
     protected override async Task OnInitializedAsync()
+        => await LoadDashboardAsync();
+
+    private async Task LoadDashboardAsync()
     {
         try
         {
             _inventory = await ApiClient.GetInventoryDashboardAsync();
             _sessions = await ApiClient.GetSessionProjectionAsync(20);
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
         }
         catch (ControlPlaneApiException exception)
         {
@@ -253,6 +260,18 @@
             _denial = null;
             _backendUnavailableMessage = null;
 
+            if (!string.IsNullOrWhiteSpace(endpoint.ActiveSessionId) && IsTerminalSessionState(endpoint.ActiveSessionState))
+            {
+                try
+                {
+                    await ApiClient.CloseSessionAsync(endpoint.ActiveSessionId, $"terminal room cleanup before open by {Identity.PrincipalId}");
+                }
+                catch (ControlPlaneApiException exception) when ((int)exception.StatusCode == 404)
+                {
+                    // Ignore stale endpoint links that reference a missing terminal session.
+                }
+            }
+
             var sessionId = BuildSessionId(endpoint.EndpointId);
             var opened = await ApiClient.OpenSessionAsync(new SessionOpenRequestViewModel
             {
@@ -273,6 +292,7 @@
                 return;
             }
 
+            await LoadDashboardAsync();
             _actionMessage = string.Format(T["SessionStartedMessage"], opened.SessionId);
             Navigation.NavigateTo($"/sessions/{Uri.EscapeDataString(opened.SessionId)}");
         }
@@ -295,39 +315,62 @@
         }
     }
 
-    private bool CanQuickStart(InventoryEndpointCardViewModel? availableEndpoint, SessionProjectionItemViewModel? activeSession)
-        => availableEndpoint is not null || activeSession is not null;
-
-    private string GetQuickStartActionLabel(InventoryEndpointCardViewModel? availableEndpoint, SessionProjectionItemViewModel? activeSession)
+    private async Task CloseFailedRoomsAsync()
     {
-        if (availableEndpoint is not null)
+        try
         {
-            return _busyEndpointId == availableEndpoint.EndpointId ? T["StartingSession"] : T["LaunchRoom"];
-        }
+            _closingFailedRooms = true;
+            _busyEndpointId = null;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
 
-        if (activeSession is not null)
+            var sessionIds = GetFailedSessionIdsForCleanup();
+            if (sessionIds.Count == 0)
+            {
+                _actionMessage = T["NoFailedRoomsToClose"];
+                return;
+            }
+
+            var closed = 0;
+            var failed = 0;
+            foreach (var sessionId in sessionIds)
+            {
+                try
+                {
+                    await ApiClient.CloseSessionAsync(sessionId, $"bulk failed-room cleanup by {Identity.PrincipalId}");
+                    closed++;
+                }
+                catch
+                {
+                    failed++;
+                }
+            }
+
+            await LoadDashboardAsync();
+            _actionMessage = string.Format(T["FailedRoomsClosedMessage"], closed, failed);
+        }
+        catch (ControlPlaneApiUnavailableException exception)
         {
-            return T["ResumeRoom"];
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
         }
-
-        return T["NoAvailableEndpoint"];
-    }
-
-    private Task StartOrResumeDemoAsync(InventoryEndpointCardViewModel? availableEndpoint, SessionProjectionItemViewModel? activeSession)
-    {
-        if (availableEndpoint is not null)
+        catch (ControlPlaneApiException exception)
         {
-            return StartSessionAsync(availableEndpoint);
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
         }
-
-        if (activeSession is not null)
+        catch (Exception exception)
         {
-            Navigation.NavigateTo($"/sessions/{Uri.EscapeDataString(activeSession.SessionId)}");
-            return Task.CompletedTask;
+            _denial = null;
+            _error = exception.Message;
         }
-
-        _actionMessage = T["NoAvailableEndpoint"];
-        return Task.CompletedTask;
+        finally
+        {
+            _closingFailedRooms = false;
+        }
     }
 
     private static string BuildSessionId(string endpointId)
@@ -350,4 +393,37 @@
     private static bool IsTerminalSessionState(string? state)
         => string.Equals(state, "Failed", StringComparison.OrdinalIgnoreCase)
            || string.Equals(state, "Ended", StringComparison.OrdinalIgnoreCase);
+
+    private bool HasFailedSessionsForCleanup()
+        => GetFailedSessionIdsForCleanup().Count > 0;
+
+    private List<string> GetFailedSessionIdsForCleanup()
+    {
+        var sessionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (_sessions?.Items is not null)
+        {
+            foreach (var session in _sessions.Items)
+            {
+                if (string.Equals(session.State, "Failed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(session.SessionId))
+                {
+                    sessionIds.Add(session.SessionId);
+                }
+            }
+        }
+
+        if (_inventory?.Endpoints is not null)
+        {
+            foreach (var endpoint in _inventory.Endpoints)
+            {
+                if (!string.IsNullOrWhiteSpace(endpoint.ActiveSessionId)
+                    && string.Equals(endpoint.ActiveSessionState, "Failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    sessionIds.Add(endpoint.ActiveSessionId!);
+                }
+            }
+        }
+
+        return sessionIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList();
+    }
 }

@@ -7,11 +7,12 @@ public sealed record HidBridgeUartClientOptions(
     string PortName,
     int BaudRate,
     string HmacKey,
+    string MasterSecret = "",
     byte MouseInterfaceSelector = 0xFF,
     byte KeyboardInterfaceSelector = 0xFE,
     int CommandTimeoutMs = 300,
     int InjectTimeoutMs = 200,
-    int InjectRetries = 1);
+    int InjectRetries = 2);
 
 /// <summary>
 /// Captures a lightweight runtime health snapshot of the UART transport.

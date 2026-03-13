@@ -12,6 +12,9 @@ public sealed class HidBridgeUartConnector : IConnector
 {
     private readonly HidBridgeUartClientOptions _options;
     private readonly Lazy<HidBridgeUartClient> _client;
+    private readonly SemaphoreSlim _keyInitLock = new(1, 1);
+    private bool _keyInitAttempted;
+    private DateTimeOffset _nextKeyInitAttemptUtc = DateTimeOffset.MinValue;
 
     /// <summary>
     /// Creates a UART-backed HID connector for one logical endpoint.
@@ -57,6 +60,7 @@ public sealed class HidBridgeUartConnector : IConnector
     /// </summary>
     public async Task<AgentRegisterBody> RegisterAsync(CancellationToken cancellationToken)
     {
+        await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
         var healthSnapshot = await Client.GetHealthAsync(cancellationToken);
         var health = new Dictionary<string, object?>
         {
@@ -69,6 +73,7 @@ public sealed class HidBridgeUartConnector : IConnector
             ["resolvedKeyboardInterface"] = healthSnapshot.ResolvedKeyboardInterface,
             ["interfaceCount"] = healthSnapshot.InterfaceCount,
             ["isConnected"] = healthSnapshot.IsConnected,
+            ["usingDerivedKey"] = Client.IsUsingDerivedKey,
         };
 
         return new AgentRegisterBody(
@@ -83,6 +88,7 @@ public sealed class HidBridgeUartConnector : IConnector
     /// </summary>
     public async Task<AgentHeartbeatBody> HeartbeatAsync(CancellationToken cancellationToken)
     {
+        await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
         var health = await Client.GetHealthAsync(cancellationToken);
         return new AgentHeartbeatBody(
             health.IsConnected ? AgentStatus.Online : AgentStatus.Degraded,
@@ -145,6 +151,7 @@ public sealed class HidBridgeUartConnector : IConnector
 
     private async Task ExecuteCoreAsync(CommandRequestBody command, CancellationToken cancellationToken)
     {
+        await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
         var action = NormalizeAction(command.Action);
         switch (action)
         {
@@ -211,6 +218,47 @@ public sealed class HidBridgeUartConnector : IConnector
 
             default:
                 throw new InvalidOperationException($"Unsupported HID action '{command.Action}'.");
+        }
+    }
+
+    private async Task EnsureDerivedKeyIfConfiguredAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_options.MasterSecret) || _keyInitAttempted)
+        {
+            return;
+        }
+
+        if (DateTimeOffset.UtcNow < _nextKeyInitAttemptUtc)
+        {
+            return;
+        }
+
+        await _keyInitLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_keyInitAttempted)
+            {
+                return;
+            }
+
+            try
+            {
+                var applied = await Client.EnsureDerivedKeyAsync(_options.MasterSecret, cancellationToken);
+                _keyInitAttempted = applied;
+                if (!applied)
+                {
+                    _nextKeyInitAttemptUtc = DateTimeOffset.UtcNow.AddSeconds(30);
+                }
+            }
+            catch
+            {
+                // Keep command path alive on key-derivation issues and retry later.
+                _nextKeyInitAttemptUtc = DateTimeOffset.UtcNow.AddSeconds(30);
+            }
+        }
+        finally
+        {
+            _keyInitLock.Release();
         }
     }
 

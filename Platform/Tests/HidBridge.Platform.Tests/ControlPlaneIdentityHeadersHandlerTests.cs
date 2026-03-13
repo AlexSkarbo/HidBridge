@@ -5,8 +5,10 @@ using HidBridge.ControlPlane.Web.Identity;
 using HidBridge.ControlPlane.Web.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -34,8 +36,23 @@ public sealed class ControlPlaneIdentityHeadersHandlerTests
         httpContext.RequestServices = services.BuildServiceProvider();
         var accessor = new HttpContextAccessor { HttpContext = httpContext };
         var options = Options.Create(new ControlPlaneApiOptions { PropagateAccessToken = true, PropagateIdentityHeaders = true });
+        var identityOptions = Options.Create(new IdentityOptions
+        {
+            Enabled = true,
+            Authority = "http://127.0.0.1:18096/realms/hidbridge-dev",
+            ClientId = "controlplane-web",
+            ClientSecret = "secret",
+        });
+        var oidcOptions = new StaticOptionsMonitor<OpenIdConnectOptions>(new OpenIdConnectOptions());
         var inner = new RecordingDelegatingHandler();
-        var handler = new ControlPlaneIdentityHeadersHandler(identity, accessor, options) { InnerHandler = inner };
+        var handler = new ControlPlaneIdentityHeadersHandler(
+            identity,
+            accessor,
+            options,
+            identityOptions,
+            oidcOptions,
+            NullLogger<ControlPlaneIdentityHeadersHandler>.Instance)
+        { InnerHandler = inner };
         using var invoker = new HttpMessageInvoker(handler);
 
         using var response = await invoker.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/test"), TestContext.Current.CancellationToken);
@@ -47,6 +64,45 @@ public sealed class ControlPlaneIdentityHeadersHandlerTests
         Assert.Equal("tenant-a", inner.Headers["X-HidBridge-TenantId"]);
         Assert.Equal("org-a", inner.Headers["X-HidBridge-OrganizationId"]);
         Assert.Equal("operator.viewer", inner.Headers["X-HidBridge-Role"]);
+    }
+
+    [Fact]
+    public async Task SendAsync_DoesNotPropagateUnassignedScopeHeaders()
+    {
+        var identity = new OperatorIdentityContext(
+            true,
+            "user-1",
+            "operator@example.com",
+            "Operator",
+            "unassigned",
+            "unassigned",
+            ["operator.viewer"],
+            "OIDC",
+            null);
+
+        var httpContext = new DefaultHttpContext();
+        var services = new ServiceCollection();
+        services.AddSingleton<IAuthenticationService>(new FakeAuthenticationService("access-token-123"));
+        httpContext.RequestServices = services.BuildServiceProvider();
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var options = Options.Create(new ControlPlaneApiOptions { PropagateAccessToken = false, PropagateIdentityHeaders = true });
+        var identityOptions = Options.Create(new IdentityOptions { Enabled = true, ClientId = "controlplane-web" });
+        var oidcOptions = new StaticOptionsMonitor<OpenIdConnectOptions>(new OpenIdConnectOptions());
+        var inner = new RecordingDelegatingHandler();
+        var handler = new ControlPlaneIdentityHeadersHandler(
+            identity,
+            accessor,
+            options,
+            identityOptions,
+            oidcOptions,
+            NullLogger<ControlPlaneIdentityHeadersHandler>.Instance)
+        { InnerHandler = inner };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        using var response = await invoker.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/test"), TestContext.Current.CancellationToken);
+
+        Assert.False(inner.Headers.ContainsKey("X-HidBridge-TenantId"));
+        Assert.False(inner.Headers.ContainsKey("X-HidBridge-OrganizationId"));
     }
 
     private sealed class FakeAuthenticationService : IAuthenticationService
@@ -90,5 +146,21 @@ public sealed class ControlPlaneIdentityHeadersHandlerTests
             LastAuthorizationParameter = request.Headers.Authorization?.Parameter;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
         }
+    }
+
+    private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>
+    {
+        private readonly T _value;
+
+        public StaticOptionsMonitor(T value)
+        {
+            _value = value;
+        }
+
+        public T CurrentValue => _value;
+
+        public T Get(string? name) => _value;
+
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

@@ -61,6 +61,10 @@ public static class SystemEndpoints
             baudRate = runtimeSettings.UartBaudRate,
             runtimeSettings.MouseSelector,
             runtimeSettings.KeyboardSelector,
+            runtimeSettings.UartCommandTimeoutMs,
+            runtimeSettings.UartInjectTimeoutMs,
+            runtimeSettings.UartInjectRetries,
+            runtimeSettings.UartUsesMasterSecret,
             runtimeSettings.AgentId,
             runtimeSettings.EndpointId,
             runtimeSettings.PersistenceProvider,
@@ -87,6 +91,8 @@ public static class SystemEndpoints
                 runtimeSettings.Authentication.BearerOnlyPrefixes,
                 runtimeSettings.Authentication.CallerContextRequiredPrefixes,
                 runtimeSettings.Authentication.HeaderFallbackDisabledPatterns,
+                runtimeSettings.Authentication.DefaultTenantId,
+                runtimeSettings.Authentication.DefaultOrganizationId,
             },
             policyRevisionLifecycle = new
             {

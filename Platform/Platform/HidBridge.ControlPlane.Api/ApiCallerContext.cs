@@ -65,12 +65,16 @@ public sealed record ApiCallerContext(
     /// Creates a context from the current HTTP request.
     /// </summary>
     public static ApiCallerContext FromHttpContext(HttpContext httpContext)
-        => FromHttpContext(httpContext, allowHeaderFallback: true);
+        => FromHttpContext(httpContext, allowHeaderFallback: true, defaultTenantId: null, defaultOrganizationId: null);
 
     /// <summary>
     /// Creates a context from the current HTTP request while controlling whether legacy caller-scope headers may contribute fallback context.
     /// </summary>
-    public static ApiCallerContext FromHttpContext(HttpContext httpContext, bool allowHeaderFallback)
+    public static ApiCallerContext FromHttpContext(
+        HttpContext httpContext,
+        bool allowHeaderFallback,
+        string? defaultTenantId = null,
+        string? defaultOrganizationId = null)
     {
         if (httpContext.Items.TryGetValue(ItemKey, out var enriched)
             && enriched is ApiCallerContext callerContext)
@@ -79,6 +83,7 @@ public sealed record ApiCallerContext(
         }
 
         var user = httpContext.User;
+        var isAuthenticated = user.Identity?.IsAuthenticated == true;
         var roles = user.FindAll("role")
             .Concat(user.FindAll(System.Security.Claims.ClaimTypes.Role))
             .Select(static claim => claim.Value)
@@ -86,6 +91,17 @@ public sealed record ApiCallerContext(
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var tenantId = NormalizeScopeValue(FirstNonEmpty(
+            user.FindFirst("tenant_id")?.Value,
+            allowHeaderFallback ? ReadHeaderValue(httpContext.Request.Headers, TenantIdHeader) : null));
+        var organizationId = NormalizeScopeValue(FirstNonEmpty(
+            user.FindFirst("org_id")?.Value,
+            allowHeaderFallback ? ReadHeaderValue(httpContext.Request.Headers, OrganizationIdHeader) : null));
+        if (isAuthenticated)
+        {
+            tenantId ??= defaultTenantId;
+            organizationId ??= defaultOrganizationId;
+        }
 
         return new ApiCallerContext(
             FirstNonEmpty(
@@ -98,12 +114,8 @@ public sealed record ApiCallerContext(
                 user.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value,
                 user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value,
                 allowHeaderFallback ? ReadHeaderValue(httpContext.Request.Headers, PrincipalIdHeader) : null),
-            FirstNonEmpty(
-                user.FindFirst("tenant_id")?.Value,
-                allowHeaderFallback ? ReadHeaderValue(httpContext.Request.Headers, TenantIdHeader) : null),
-            FirstNonEmpty(
-                user.FindFirst("org_id")?.Value,
-                allowHeaderFallback ? ReadHeaderValue(httpContext.Request.Headers, OrganizationIdHeader) : null),
+            tenantId,
+            organizationId,
             roles);
     }
 
@@ -402,6 +414,18 @@ public sealed record ApiCallerContext(
 
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+
+    private static string? NormalizeScopeValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return string.Equals(value, "unassigned", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : value;
+    }
 
     private IReadOnlyList<string>? MergeOperatorRoles(IReadOnlyList<string>? requestRoles)
     {

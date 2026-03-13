@@ -1,5 +1,6 @@
 using HidBridge.ControlPlane.Api;
 using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 using Xunit;
 
 namespace HidBridge.Platform.Tests;
@@ -108,5 +109,49 @@ public sealed class ApiCallerContextTests
         Assert.Equal("tenant-a", request.TenantId);
         Assert.Equal("org-a", request.OrganizationId);
         Assert.Equal(["operator.viewer"], request.OperatorRoles);
+    }
+
+    [Fact]
+    public void FromHttpContext_UsesConfiguredScopeDefaultsForAuthenticatedCaller()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("sub", "user-1"),
+            new Claim("preferred_username", "operator@example.com"),
+            new Claim("role", "operator.viewer"),
+        ], "Bearer"));
+
+        var caller = ApiCallerContext.FromHttpContext(
+            httpContext,
+            allowHeaderFallback: false,
+            defaultTenantId: "local-tenant",
+            defaultOrganizationId: "local-org");
+
+        Assert.Equal("local-tenant", caller.TenantId);
+        Assert.Equal("local-org", caller.OrganizationId);
+    }
+
+    [Fact]
+    public void FromHttpContext_TreatsUnassignedScopeAsMissingAndAppliesDefaults()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("sub", "user-1"),
+            new Claim("preferred_username", "operator@example.com"),
+            new Claim("tenant_id", "unassigned"),
+            new Claim("org_id", "unassigned"),
+            new Claim("role", "operator.viewer"),
+        ], "Bearer"));
+
+        var caller = ApiCallerContext.FromHttpContext(
+            httpContext,
+            allowHeaderFallback: false,
+            defaultTenantId: "local-tenant",
+            defaultOrganizationId: "local-org");
+
+        Assert.Equal("local-tenant", caller.TenantId);
+        Assert.Equal("local-org", caller.OrganizationId);
     }
 }

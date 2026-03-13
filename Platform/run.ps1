@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "demo-flow", "demo-seed")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "demo-flow", "demo-seed", "close-failed-rooms")]
     [string]$Task = "checks",
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ForwardArgs
@@ -25,6 +25,7 @@ $scriptMap = @{
     "identity-reset" = "..\\run_identity_reset.ps1"
     "demo-flow"    = "run_demo_flow.ps1"
     "demo-seed"    = "run_demo_seed.ps1"
+    "close-failed-rooms" = "run_close_failed_rooms.ps1"
 }
 
 $scriptPath = Join-Path $PSScriptRoot (Join-Path "Scripts" $scriptMap[$Task])

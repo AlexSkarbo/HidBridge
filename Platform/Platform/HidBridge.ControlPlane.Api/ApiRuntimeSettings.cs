@@ -48,6 +48,26 @@ public sealed class ApiRuntimeSettings
     public required byte KeyboardSelector { get; init; }
 
     /// <summary>
+    /// Gets the UART command timeout used for non-inject control operations.
+    /// </summary>
+    public required int UartCommandTimeoutMs { get; init; }
+
+    /// <summary>
+    /// Gets the UART inject timeout used for HID report command acknowledgments.
+    /// </summary>
+    public required int UartInjectTimeoutMs { get; init; }
+
+    /// <summary>
+    /// Gets the number of retries used for UART inject commands.
+    /// </summary>
+    public required int UartInjectRetries { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether per-device derived key mode is configured.
+    /// </summary>
+    public required bool UartUsesMasterSecret { get; init; }
+
+    /// <summary>
     /// Gets the local agent identifier.
     /// </summary>
     public required string AgentId { get; init; }

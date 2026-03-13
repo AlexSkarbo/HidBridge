@@ -26,7 +26,10 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
     private readonly SerialPort _port;
     private readonly SemaphoreSlim _ioLock = new(1, 1);
     private readonly List<byte> _rxFrame = new(512);
-    private readonly byte[] _hmacKey;
+    private readonly byte[] _bootstrapHmacKey;
+    private byte[]? _derivedHmacKey;
+    private bool _forceBootstrapKey;
+    private bool _usingDerivedKey;
     private bool _rxEscaped;
     private int _seq;
     private byte _mouseButtons;
@@ -42,7 +45,7 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
     public HidBridgeUartClient(HidBridgeUartClientOptions options)
     {
         _options = options;
-        _hmacKey = Encoding.UTF8.GetBytes(string.IsNullOrWhiteSpace(options.HmacKey) ? "changeme" : options.HmacKey);
+        _bootstrapHmacKey = Encoding.UTF8.GetBytes(string.IsNullOrWhiteSpace(options.HmacKey) ? "changeme" : options.HmacKey);
         _port = new SerialPort(options.PortName, options.BaudRate, Parity.None, 8, StopBits.One)
         {
             Handshake = Handshake.None,
@@ -83,6 +86,45 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
             list?.Interfaces.Count ?? 0,
             _port.IsOpen,
             DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Gets whether the UART client currently signs requests with a derived device key.
+    /// </summary>
+    public bool IsUsingDerivedKey => _usingDerivedKey;
+
+    /// <summary>
+    /// Resolves the device identifier and switches to a derived HMAC key when a master secret is provided.
+    /// </summary>
+    /// <param name="masterSecret">The master secret used to derive per-device key material.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns><c>true</c> when the derived key has been applied; otherwise <c>false</c>.</returns>
+    public async Task<bool> EnsureDerivedKeyAsync(string? masterSecret, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(masterSecret) || _usingDerivedKey)
+        {
+            return _usingDerivedKey;
+        }
+
+        var deviceId = await RequestDeviceIdAsync(cancellationToken);
+        if (deviceId is null || deviceId.Length == 0)
+        {
+            return false;
+        }
+
+        _derivedHmacKey = ComputeDerivedKey(masterSecret, deviceId);
+        _forceBootstrapKey = false;
+        _usingDerivedKey = true;
+        return true;
+    }
+
+    /// <summary>
+    /// Forces subsequent UART commands to use the bootstrap HMAC key.
+    /// </summary>
+    public void UseBootstrapHmacKey()
+    {
+        _forceBootstrapKey = true;
+        _usingDerivedKey = false;
     }
 
     /// <summary>
@@ -300,14 +342,49 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         if (selector is not 0xFF and not 0xFE) return selector;
         if (list is null) return selector;
 
+        byte? firstActiveMounted = null;
         foreach (var item in list.Interfaces)
         {
             if (!item.Active || !item.Mounted) continue;
+            firstActiveMounted ??= item.Itf;
             if (preferMouse && (item.InferredType & 0x02) != 0) return item.Itf;
             if (!preferMouse && (item.InferredType & 0x01) != 0) return item.Itf;
         }
 
+        if (firstActiveMounted.HasValue)
+        {
+            return firstActiveMounted.Value;
+        }
+
         return selector;
+    }
+
+    private async Task<byte[]?> RequestDeviceIdAsync(CancellationToken cancellationToken)
+    {
+        var response = await SendCommandAsync(0x06, Array.Empty<byte>(), _options.CommandTimeoutMs, cancellationToken);
+        var payload = response?.Payload;
+        if (payload is null || payload.Length < 2)
+        {
+            return null;
+        }
+
+        var declaredLength = payload[0];
+        var availableLength = payload.Length - 1;
+        var actualLength = Math.Min(declaredLength, availableLength);
+        if (actualLength <= 0)
+        {
+            return null;
+        }
+
+        var deviceId = new byte[actualLength];
+        Buffer.BlockCopy(payload, 1, deviceId, 0, actualLength);
+        return deviceId;
+    }
+
+    private static byte[] ComputeDerivedKey(string masterSecret, byte[] deviceId)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(masterSecret));
+        return hmac.ComputeHash(deviceId);
     }
 
     private async Task<HidInterfaceList?> RequestInterfaceListAsync(CancellationToken cancellationToken)
@@ -399,6 +476,13 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
 
     private async Task SendInjectReportAsync(byte itfSel, byte[] report, CancellationToken cancellationToken)
     {
+        if (itfSel is 0xFF or 0xFE)
+        {
+            throw new InvalidOperationException(
+                $"UART interface selector could not be resolved (itf={itfSel}). " +
+                "Set HIDBRIDGE_UART_MOUSE_SELECTOR/HIDBRIDGE_UART_KEYBOARD_SELECTOR to a concrete interface id.");
+        }
+
         if (report.Length > 240)
         {
             throw new InvalidOperationException("HID report is too large.");
@@ -412,16 +496,27 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         var response = await SendCommandAsync(0x01, payload, _options.InjectTimeoutMs, cancellationToken, _options.InjectRetries);
         if (response is null)
         {
-            throw new TimeoutException("No UART ACK for inject report.");
+            throw new TimeoutException(
+                $"No UART ACK for inject report on {_options.PortName} " +
+                $"(baud={_options.BaudRate}, itf={itfSel}, timeoutMs={_options.InjectTimeoutMs}, retries={_options.InjectRetries}).");
         }
     }
 
-    private async Task<UartResponse?> SendCommandAsync(byte cmd, byte[] payload, int timeoutMs, CancellationToken cancellationToken, int retries = 0)
+    private async Task<UartResponse?> SendCommandAsync(
+        byte cmd,
+        byte[] payload,
+        int timeoutMs,
+        CancellationToken cancellationToken,
+        int retries = 0,
+        bool forceBootstrapKey = false,
+        bool allowBootstrapFallback = true)
     {
         for (var attempt = 0; attempt <= retries; attempt++)
         {
             var seq = unchecked((byte)Interlocked.Increment(ref _seq));
-            var frame = BuildFrame(seq, cmd, payload);
+            var requestKey = SelectRequestHmacKey(cmd, forceBootstrapKey);
+            var alternateResponseKey = SelectAlternateResponseHmacKey(requestKey);
+            var frame = BuildFrame(seq, cmd, payload, requestKey);
             var slip = Slip.Encode(frame);
 
             await _ioLock.WaitAsync(cancellationToken);
@@ -429,8 +524,16 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
             {
                 await _port.BaseStream.WriteAsync(slip.AsMemory(0, slip.Length), cancellationToken);
                 await _port.BaseStream.FlushAsync(cancellationToken);
-                var response = ReadMatchingResponse(seq, cmd, timeoutMs, cancellationToken);
-                if (response is not null) return response;
+                var response = ReadMatchingResponse(seq, cmd, timeoutMs, cancellationToken, requestKey, alternateResponseKey);
+                if (response is not null)
+                {
+                    if (response.UsedAlternateHmacKey && ReferenceEquals(alternateResponseKey, _bootstrapHmacKey))
+                    {
+                        UseBootstrapHmacKey();
+                    }
+
+                    return response;
+                }
             }
             finally
             {
@@ -438,10 +541,39 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
             }
         }
 
+        if (!forceBootstrapKey
+            && allowBootstrapFallback
+            && _derivedHmacKey is not null
+            && !_forceBootstrapKey
+            && cmd != 0x06)
+        {
+            var fallback = await SendCommandAsync(
+                cmd,
+                payload,
+                timeoutMs,
+                cancellationToken,
+                retries: 0,
+                forceBootstrapKey: true,
+                allowBootstrapFallback: false);
+
+            if (fallback is not null)
+            {
+                UseBootstrapHmacKey();
+            }
+
+            return fallback;
+        }
+
         return null;
     }
 
-    private UartResponse? ReadMatchingResponse(byte seq, byte cmd, int timeoutMs, CancellationToken cancellationToken)
+    private UartResponse? ReadMatchingResponse(
+        byte seq,
+        byte cmd,
+        int timeoutMs,
+        CancellationToken cancellationToken,
+        byte[] expectedHmacKey,
+        byte[]? alternateHmacKey)
     {
         var start = Environment.TickCount64;
         while ((Environment.TickCount64 - start) < timeoutMs)
@@ -449,7 +581,10 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var frame = TryReadSlipFrame();
             if (frame is null) continue;
-            if (!TryParseFrame(frame, out var response)) continue;
+            if (!TryParseFrame(frame, expectedHmacKey, alternateHmacKey, out var response, out var usedAlternateHmacKey))
+            {
+                continue;
+            }
 
             var isResponse = (response.Flags & FlagResponse) != 0 || (response.Flags & FlagResponseLegacy) != 0;
             if (!isResponse) continue;
@@ -462,6 +597,7 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
                 throw new HidBridgeUartDeviceException(errorCode);
             }
 
+            response.UsedAlternateHmacKey = usedAlternateHmacKey;
             return response;
         }
 
@@ -531,9 +667,15 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         }
     }
 
-    private bool TryParseFrame(ReadOnlySpan<byte> frame, out UartResponse response)
+    private bool TryParseFrame(
+        ReadOnlySpan<byte> frame,
+        byte[] expectedHmacKey,
+        byte[]? alternateHmacKey,
+        out UartResponse response,
+        out bool usedAlternateHmacKey)
     {
         response = null!;
+        usedAlternateHmacKey = false;
         if (frame.Length < HeaderLen + CrcLen + HmacLen) return false;
         if (frame[0] != Magic || frame[1] != Version) return false;
 
@@ -544,15 +686,21 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         var actualCrc = (ushort)(frame[6 + payloadLen] | (frame[7 + payloadLen] << 8));
         if (crc != actualCrc) return false;
 
-        using var hmac = new HMACSHA256(_hmacKey);
-        var hash = hmac.ComputeHash(frame[..(HeaderLen + payloadLen + CrcLen)].ToArray());
-        if (!hash.AsSpan(0, HmacLen).SequenceEqual(frame.Slice(8 + payloadLen, HmacLen))) return false;
+        if (!TryValidateHmac(frame, payloadLen, expectedHmacKey))
+        {
+            if (alternateHmacKey is null || !TryValidateHmac(frame, payloadLen, alternateHmacKey))
+            {
+                return false;
+            }
+
+            usedAlternateHmacKey = true;
+        }
 
         response = new UartResponse(frame[3], frame[4], frame[2], frame.Slice(6, payloadLen).ToArray());
         return true;
     }
 
-    private byte[] BuildFrame(byte seq, byte cmd, ReadOnlySpan<byte> payload)
+    private byte[] BuildFrame(byte seq, byte cmd, ReadOnlySpan<byte> payload, byte[] hmacKey)
     {
         var payloadLen = payload.Length;
         var frame = new byte[HeaderLen + payloadLen + CrcLen + HmacLen];
@@ -571,10 +719,38 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         frame[6 + payloadLen] = (byte)(crc & 0xFF);
         frame[7 + payloadLen] = (byte)(crc >> 8);
 
-        using var hmac = new HMACSHA256(_hmacKey);
+        using var hmac = new HMACSHA256(hmacKey);
         var hash = hmac.ComputeHash(frame.AsSpan(0, HeaderLen + payloadLen + CrcLen).ToArray());
         hash.AsSpan(0, HmacLen).CopyTo(frame.AsSpan(8 + payloadLen));
         return frame;
+    }
+
+    private byte[] SelectRequestHmacKey(byte cmd, bool forceBootstrapKey)
+    {
+        if (forceBootstrapKey || cmd == 0x06 || _forceBootstrapKey || _derivedHmacKey is null)
+        {
+            return _bootstrapHmacKey;
+        }
+
+        _usingDerivedKey = true;
+        return _derivedHmacKey;
+    }
+
+    private byte[]? SelectAlternateResponseHmacKey(byte[] requestKey)
+    {
+        if (ReferenceEquals(requestKey, _bootstrapHmacKey))
+        {
+            return _derivedHmacKey;
+        }
+
+        return _bootstrapHmacKey;
+    }
+
+    private static bool TryValidateHmac(ReadOnlySpan<byte> frame, int payloadLen, byte[] key)
+    {
+        using var hmac = new HMACSHA256(key);
+        var hash = hmac.ComputeHash(frame[..(HeaderLen + payloadLen + CrcLen)].ToArray());
+        return hash.AsSpan(0, HmacLen).SequenceEqual(frame.Slice(8 + payloadLen, HmacLen));
     }
 
     private static ushort Crc16Ccitt(ReadOnlySpan<byte> data)
@@ -630,6 +806,11 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         /// Gets the decoded payload bytes.
         /// </summary>
         public byte[] Payload { get; }
+
+        /// <summary>
+        /// Gets or sets whether the frame was validated with the alternate HMAC key.
+        /// </summary>
+        public bool UsedAlternateHmacKey { get; set; }
     }
 }
 
