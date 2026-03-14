@@ -1,5 +1,6 @@
 using HidBridge.Abstractions;
 using HidBridge.Contracts;
+using System.Text.Json;
 
 namespace HidBridge.ControlPlane.Api;
 
@@ -38,9 +39,11 @@ public sealed class CollaborationReadModelService
     {
         var snapshot = await RequireSessionAsync(sessionId, cancellationToken);
         var commands = await _commandJournalStore.ListBySessionAsync(sessionId, cancellationToken);
+        var auditEvents = await _eventStore.ListAuditAsync(cancellationToken);
         var timeline = await GetTimelineEntriesAsync(sessionId, 100, cancellationToken);
         var participants = snapshot.Participants ?? Array.Empty<SessionParticipantSnapshot>();
         var participantGroups = GroupParticipantsByPrincipal(participants);
+        var stateMetadata = ResolveStateMetadata(snapshot, commands, auditEvents);
 
         return new SessionDashboardReadModel(
             snapshot.SessionId,
@@ -69,7 +72,9 @@ public sealed class CollaborationReadModelService
             commands.OrderByDescending(x => x.CompletedAtUtc ?? x.CreatedAtUtc).Select(x => x.CompletedAtUtc ?? x.CreatedAtUtc).FirstOrDefault(),
             timeline.FirstOrDefault()?.OccurredAtUtc,
             snapshot.LastHeartbeatAtUtc,
-            snapshot.LeaseExpiresAtUtc);
+            snapshot.LeaseExpiresAtUtc,
+            stateMetadata.Reason,
+            stateMetadata.ChangedAtUtc);
     }
 
     /// <summary>
@@ -267,6 +272,119 @@ public sealed class CollaborationReadModelService
             .OrderByDescending(x => x.UpdatedAtUtc)
             .FirstOrDefault();
     }
+
+    private static SessionStateMetadata ResolveStateMetadata(
+        SessionSnapshot snapshot,
+        IReadOnlyList<CommandJournalEntryBody> commands,
+        IReadOnlyList<AuditEventBody> auditEvents)
+    {
+        var stateName = snapshot.State.ToString();
+        var matchingTransition = auditEvents
+            .Where(x => string.Equals(x.SessionId, snapshot.SessionId, StringComparison.OrdinalIgnoreCase) && IsStateTransitionEvent(x))
+            .OrderByDescending(x => x.CreatedAtUtc ?? DateTimeOffset.MinValue)
+            .FirstOrDefault(x => string.Equals(GetDataString(x.Data, "nextState"), stateName, StringComparison.OrdinalIgnoreCase));
+        if (matchingTransition is not null)
+        {
+            var transitionReason = ResolveTransitionReason(matchingTransition, stateName);
+            var transitionAtUtc = matchingTransition.CreatedAtUtc;
+            if (!string.IsNullOrWhiteSpace(transitionReason) || transitionAtUtc.HasValue)
+            {
+                return new SessionStateMetadata(transitionReason, transitionAtUtc);
+            }
+        }
+
+        if (snapshot.State is SessionState.Recovering or SessionState.Failed)
+        {
+            var latestFailure = commands
+                .Where(x => x.Status is CommandStatus.Timeout or CommandStatus.Rejected)
+                .OrderByDescending(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
+                .FirstOrDefault();
+            if (latestFailure is not null)
+            {
+                var reason = latestFailure.Status == CommandStatus.Timeout
+                    ? "command_timeout"
+                    : "command_rejected";
+                return new SessionStateMetadata(reason, latestFailure.CompletedAtUtc ?? latestFailure.CreatedAtUtc);
+            }
+
+            return new SessionStateMetadata(null, snapshot.UpdatedAtUtc);
+        }
+
+        return new SessionStateMetadata(null, null);
+    }
+
+    private static bool IsStateTransitionEvent(AuditEventBody auditEvent)
+        => string.Equals(auditEvent.Category, "session.reconcile", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(auditEvent.Category, "session.state", StringComparison.OrdinalIgnoreCase)
+           || (GetDataString(auditEvent.Data, "previousState") is not null && GetDataString(auditEvent.Data, "nextState") is not null);
+
+    private static string? ResolveTransitionReason(AuditEventBody auditEvent, string nextState)
+    {
+        var explicitReason = GetDataString(auditEvent.Data, "reason");
+        if (!string.IsNullOrWhiteSpace(explicitReason))
+        {
+            return explicitReason;
+        }
+
+        if (string.Equals(auditEvent.Category, "session.reconcile", StringComparison.OrdinalIgnoreCase))
+        {
+            var previousState = GetDataString(auditEvent.Data, "previousState");
+            if (string.Equals(previousState, SessionState.Active.ToString(), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(nextState, SessionState.Recovering.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "lease_expired";
+            }
+
+            if (string.Equals(previousState, SessionState.Recovering.ToString(), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(nextState, SessionState.Failed.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "lease_recovery_timeout";
+            }
+
+            return "state_reconciled";
+        }
+
+        if (string.Equals(auditEvent.Category, "session.state", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(nextState, SessionState.Recovering.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "command_path_unstable";
+            }
+
+            if (string.Equals(nextState, SessionState.Active.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "command_path_recovered";
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetDataString(IReadOnlyDictionary<string, object?>? data, string key)
+    {
+        if (data is null || !data.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string text => string.IsNullOrWhiteSpace(text) ? null : text.Trim(),
+            JsonElement element => element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Number => element.ToString(),
+                JsonValueKind.True => bool.TrueString,
+                JsonValueKind.False => bool.FalseString,
+                _ => null,
+            },
+            _ => value.ToString(),
+        };
+    }
+
+    private sealed record SessionStateMetadata(
+        string? Reason,
+        DateTimeOffset? ChangedAtUtc);
 
     private static Dictionary<string, List<SessionParticipantSnapshot>> GroupParticipantsByPrincipal(IReadOnlyList<SessionParticipantSnapshot> participants)
     {

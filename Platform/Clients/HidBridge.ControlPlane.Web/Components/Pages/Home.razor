@@ -55,11 +55,31 @@
                     <h3 class="hid-card-title">@T["FleetQuickStartTitle"]</h3>
                     <p class="hid-card-subtitle">@T["FleetQuickStartSubtitle"]</p>
                 </div>
-                <button class="hid-button-secondary hid-button-sm"
-                        disabled="@(_closingFailedRooms || !HasFailedSessionsForCleanup())"
-                        @onclick="CloseFailedRoomsAsync">
-                    @(_closingFailedRooms ? T["ClosingFailedRooms"] : T["CloseFailedRooms"])
-                </button>
+                <div class="hid-candidate-actions">
+                    <label class="hid-field-label">
+                        @T["StaleAfterMinutes"]
+                        <input class="hid-input"
+                               style="max-width: 7rem;"
+                               type="number"
+                               min="1"
+                               max="43200"
+                               @bind="_staleAfterMinutes" />
+                    </label>
+                    <label class="hid-field-label">
+                        @T["CleanupDryRun"]
+                        <input type="checkbox" @bind="_staleCleanupDryRun" />
+                    </label>
+                    <button class="hid-button-secondary hid-button-sm"
+                            disabled="@(_closingFailedRooms || _closingStaleRooms)"
+                            @onclick="CloseStaleRoomsAsync">
+                        @(_closingStaleRooms ? T["ClosingStaleRooms"] : T["CloseStaleRooms"])
+                    </button>
+                    <button class="hid-button-secondary hid-button-sm"
+                            disabled="@(_closingFailedRooms || _closingStaleRooms || !HasFailedSessionsForCleanup())"
+                            @onclick="CloseFailedRoomsAsync">
+                        @(_closingFailedRooms ? T["ClosingFailedRooms"] : T["CloseFailedRooms"])
+                    </button>
+                </div>
             </div>
             <div class="hid-inline-meta">
                 <span>1. @T["FleetQuickStartStep1"]</span>
@@ -218,6 +238,9 @@
     private string? _backendUnavailableMessage;
     private string? _busyEndpointId;
     private bool _closingFailedRooms;
+    private bool _closingStaleRooms;
+    private int _staleAfterMinutes = 30;
+    private bool _staleCleanupDryRun;
 
     protected override async Task OnInitializedAsync()
         => await LoadDashboardAsync();
@@ -362,6 +385,65 @@
         finally
         {
             _closingFailedRooms = false;
+        }
+    }
+
+    private async Task CloseStaleRoomsAsync()
+    {
+        try
+        {
+            _closingStaleRooms = true;
+            _busyEndpointId = null;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+
+            var staleAfterMinutes = Math.Clamp(_staleAfterMinutes, 1, 60 * 24 * 30);
+            _staleAfterMinutes = staleAfterMinutes;
+
+            var summary = await ApiClient.CloseStaleSessionsAsync(
+                reason: $"bulk stale-room cleanup by {Identity.PrincipalId}",
+                staleAfterMinutes: staleAfterMinutes,
+                dryRun: _staleCleanupDryRun);
+
+            var matched = summary?.MatchedSessions ?? 0;
+            if (matched == 0)
+            {
+                _actionMessage = T["NoStaleRoomsToClose"];
+                return;
+            }
+
+            if (_staleCleanupDryRun)
+            {
+                _actionMessage = string.Format(T["StaleRoomsDryRunMessage"], matched, staleAfterMinutes);
+                return;
+            }
+
+            var closed = summary?.ClosedSessions ?? 0;
+            var failed = (summary?.FailedClosures ?? 0) + (summary?.SkippedSessions ?? 0);
+            await LoadDashboardAsync();
+            _actionMessage = string.Format(T["StaleRoomsClosedMessage"], matched, closed, failed);
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = exception.Message;
+        }
+        finally
+        {
+            _closingStaleRooms = false;
         }
     }
 

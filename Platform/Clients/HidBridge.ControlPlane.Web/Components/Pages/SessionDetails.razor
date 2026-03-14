@@ -131,6 +131,8 @@
                         <div class="hid-detail-card"><div class="hid-detail-label">@T["RequestedBy"]</div><div class="hid-detail-value">@_dashboard.RequestedBy</div></div>
                         <div class="hid-detail-card"><div class="hid-detail-label">@T["RoomId"]</div><div class="hid-detail-value">@SessionId</div></div>
                         <div class="hid-detail-card"><div class="hid-detail-label">@T["LeaseExpires"]</div><div class="hid-detail-value">@FormatTime(_dashboard.LeaseExpiresAtUtc)</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["StateReason"]</div><div class="hid-detail-value">@GetStateReasonLabel()</div></div>
+                        <div class="hid-detail-card"><div class="hid-detail-label">@T["StateChangedAt"]</div><div class="hid-detail-value">@FormatTime(_dashboard.StateChangedAtUtc)</div></div>
                     </div>
                 </div>
 
@@ -612,6 +614,27 @@
         }
 
         return T["SessionFailedHint"];
+    }
+
+    private string GetStateReasonLabel()
+    {
+        var reason = _dashboard?.StateReason;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return T["StateReasonUnknown"];
+        }
+
+        return reason switch
+        {
+            "command_path_unstable" => T["StateReasonCommandPathUnstable"],
+            "command_path_recovered" => T["StateReasonCommandPathRecovered"],
+            "command_timeout" => T["StateReasonCommandTimeout"],
+            "command_rejected" => T["StateReasonCommandRejected"],
+            "lease_expired" => T["StateReasonLeaseExpired"],
+            "lease_recovery_timeout" => T["StateReasonLeaseRecoveryTimeout"],
+            "state_reconciled" => T["StateReasonReconciled"],
+            _ => reason,
+        };
     }
 
     protected override async Task OnParametersSetAsync()

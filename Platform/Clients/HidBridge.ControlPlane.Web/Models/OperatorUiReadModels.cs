@@ -468,7 +468,9 @@ public sealed record SessionDashboardViewModel(
     DateTimeOffset? LastCommandAtUtc,
     DateTimeOffset? LastActivityAtUtc,
     DateTimeOffset? LastHeartbeatAtUtc,
-    DateTimeOffset? LeaseExpiresAtUtc);
+    DateTimeOffset? LeaseExpiresAtUtc,
+    string? StateReason,
+    DateTimeOffset? StateChangedAtUtc);
 
 /// <summary>
 /// Represents one control dashboard response for a session.

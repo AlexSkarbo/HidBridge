@@ -33,7 +33,9 @@ public sealed record SessionDashboardReadModel(
     DateTimeOffset? LastCommandAtUtc,
     DateTimeOffset? LastActivityAtUtc,
     DateTimeOffset? LastHeartbeatAtUtc,
-    DateTimeOffset? LeaseExpiresAtUtc);
+    DateTimeOffset? LeaseExpiresAtUtc,
+    string? StateReason,
+    DateTimeOffset? StateChangedAtUtc);
 
 /// <summary>
 /// Represents one participant activity projection inside a session.

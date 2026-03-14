@@ -189,6 +189,7 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
 
             if (shouldRefreshLease || shouldMoveToRecovering || shouldMoveToActive)
             {
+                var previousState = session.State;
                 if (shouldRefreshLease)
                 {
                     session.SetLease(nowUtc, SessionLifecyclePolicy.ComputeLeaseExpiration(nowUtc, _options.LeaseDuration));
@@ -205,6 +206,28 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                 }
 
                 await PersistSessionAsync(session, nowUtc, cancellationToken);
+                if (session.State != previousState)
+                {
+                    var reason = shouldMoveToActive
+                        ? "command_path_recovered"
+                        : "command_path_unstable";
+                    await _eventWriter.WriteAuditAsync(
+                        new AuditEventBody(
+                            "session.state",
+                            $"Session {session.SessionId} moved from {previousState} to {session.State}",
+                            session.SessionId,
+                            new Dictionary<string, object?>
+                            {
+                                ["previousState"] = previousState.ToString(),
+                                ["nextState"] = session.State.ToString(),
+                                ["reason"] = reason,
+                                ["commandId"] = request.CommandId,
+                                ["commandAction"] = request.Action,
+                                ["commandStatus"] = ack.Status.ToString(),
+                                ["errorCode"] = ack.Error?.Code,
+                            }),
+                        cancellationToken);
+                }
             }
         }
 

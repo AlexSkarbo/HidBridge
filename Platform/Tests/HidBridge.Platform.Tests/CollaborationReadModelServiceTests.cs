@@ -37,6 +37,123 @@ public sealed class CollaborationReadModelServiceTests
             => Task.FromResult(new ConnectorCommandResult(command.CommandId, CommandStatus.Applied));
     }
 
+    [Fact]
+    public async Task GetSessionDashboardAsync_UsesExplicitStateTransitionReasonAndTimestamp()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-read-model-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = new FilePersistenceOptions(rootDirectory);
+            var eventStore = new FileEventStore(options);
+            var commandJournalStore = new FileCommandJournalStore(options);
+            var sessionStore = new FileSessionStore(options);
+            var nowUtc = DateTimeOffset.UtcNow;
+            var transitionAtUtc = nowUtc.AddSeconds(-30);
+
+            await sessionStore.UpsertAsync(
+                new SessionSnapshot(
+                    SessionId: "reason-session",
+                    AgentId: "agent-1",
+                    EndpointId: "endpoint-1",
+                    Profile: SessionProfile.Balanced,
+                    RequestedBy: "owner",
+                    Role: SessionRole.Owner,
+                    State: SessionState.Failed,
+                    UpdatedAtUtc: nowUtc,
+                    Participants:
+                    [
+                        new SessionParticipantSnapshot("owner:owner", "owner", SessionRole.Owner, nowUtc, nowUtc),
+                    ]),
+                TestContext.Current.CancellationToken);
+
+            await eventStore.AppendAuditAsync(
+                new AuditEventBody(
+                    Category: "session.reconcile",
+                    Message: "Session reason-session moved from Recovering to Failed",
+                    SessionId: "reason-session",
+                    Data: new Dictionary<string, object?>
+                    {
+                        ["previousState"] = "Recovering",
+                        ["nextState"] = "Failed",
+                        ["reason"] = "lease_recovery_timeout",
+                    },
+                    CreatedAtUtc: transitionAtUtc),
+                TestContext.Current.CancellationToken);
+
+            var service = new CollaborationReadModelService(sessionStore, eventStore, commandJournalStore);
+            var dashboard = await service.GetSessionDashboardAsync("reason-session", TestContext.Current.CancellationToken);
+
+            Assert.Equal("lease_recovery_timeout", dashboard.StateReason);
+            Assert.Equal(transitionAtUtc, dashboard.StateChangedAtUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task GetSessionDashboardAsync_FallsBackToLatestCommandFailureWhenTransitionEventIsMissing()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-read-model-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = new FilePersistenceOptions(rootDirectory);
+            var eventStore = new FileEventStore(options);
+            var commandJournalStore = new FileCommandJournalStore(options);
+            var sessionStore = new FileSessionStore(options);
+            var nowUtc = DateTimeOffset.UtcNow;
+            var failureAtUtc = nowUtc.AddSeconds(-5);
+
+            await sessionStore.UpsertAsync(
+                new SessionSnapshot(
+                    SessionId: "reason-fallback-session",
+                    AgentId: "agent-1",
+                    EndpointId: "endpoint-1",
+                    Profile: SessionProfile.Balanced,
+                    RequestedBy: "owner",
+                    Role: SessionRole.Owner,
+                    State: SessionState.Recovering,
+                    UpdatedAtUtc: nowUtc,
+                    Participants:
+                    [
+                        new SessionParticipantSnapshot("owner:owner", "owner", SessionRole.Owner, nowUtc, nowUtc),
+                    ]),
+                TestContext.Current.CancellationToken);
+
+            await commandJournalStore.AppendAsync(
+                new CommandJournalEntryBody(
+                    CommandId: "cmd-timeout-1",
+                    SessionId: "reason-fallback-session",
+                    AgentId: "agent-1",
+                    Channel: CommandChannel.Hid,
+                    Action: "keyboard.text",
+                    Args: new Dictionary<string, object?>(),
+                    TimeoutMs: 250,
+                    IdempotencyKey: "cmd-timeout-1",
+                    Status: CommandStatus.Timeout,
+                    CreatedAtUtc: failureAtUtc,
+                    CompletedAtUtc: failureAtUtc),
+                TestContext.Current.CancellationToken);
+
+            var service = new CollaborationReadModelService(sessionStore, eventStore, commandJournalStore);
+            var dashboard = await service.GetSessionDashboardAsync("reason-fallback-session", TestContext.Current.CancellationToken);
+
+            Assert.Equal("command_timeout", dashboard.StateReason);
+            Assert.Equal(failureAtUtc, dashboard.StateChangedAtUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
     /// <summary>
     /// Verifies that the session dashboard aggregates participant, share, command, and timeline counts.
     /// </summary>

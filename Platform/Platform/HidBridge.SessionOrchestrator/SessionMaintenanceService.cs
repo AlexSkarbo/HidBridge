@@ -61,6 +61,7 @@ public sealed class SessionMaintenanceService
             await _sessionStore.UpsertAsync(updated, cancellationToken);
             if (nextState != snapshot.State)
             {
+                var transitionReason = ResolveTransitionReason(snapshot.State, nextState);
                 await _eventWriter.WriteAuditAsync(
                     new AuditEventBody(
                         "session.reconcile",
@@ -70,6 +71,7 @@ public sealed class SessionMaintenanceService
                         {
                             ["previousState"] = snapshot.State.ToString(),
                             ["nextState"] = nextState.ToString(),
+                            ["reason"] = transitionReason,
                             ["leaseExpiresAtUtc"] = snapshot.LeaseExpiresAtUtc,
                         }),
                     cancellationToken);
@@ -96,6 +98,21 @@ public sealed class SessionMaintenanceService
         }
 
         return updatedCount;
+    }
+
+    private static string ResolveTransitionReason(SessionState previousState, SessionState nextState)
+    {
+        if (previousState == SessionState.Active && nextState == SessionState.Recovering)
+        {
+            return "lease_expired";
+        }
+
+        if (previousState == SessionState.Recovering && nextState == SessionState.Failed)
+        {
+            return "lease_recovery_timeout";
+        }
+
+        return "state_reconciled";
     }
 
     /// <summary>
