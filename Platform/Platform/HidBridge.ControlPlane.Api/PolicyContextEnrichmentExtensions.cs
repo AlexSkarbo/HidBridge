@@ -1,4 +1,5 @@
 using HidBridge.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace HidBridge.ControlPlane.Api;
 
@@ -14,23 +15,33 @@ public static class PolicyContextEnrichmentExtensions
     {
         return app.Use(async (httpContext, next) =>
         {
-            var rawCaller = ApiCallerContext.FromHttpContext(httpContext);
-            if (!rawCaller.IsPresent)
+            try
             {
+                var rawCaller = ApiCallerContext.FromHttpContext(httpContext);
+                if (!rawCaller.IsPresent)
+                {
+                    await next();
+                    return;
+                }
+
+                var policyService = httpContext.RequestServices.GetRequiredService<IOperatorPolicyService>();
+                var resolution = await policyService.ResolveAsync(
+                    rawCaller.EffectivePrincipalId,
+                    rawCaller.TenantId,
+                    rawCaller.OrganizationId,
+                    rawCaller.OperatorRoles,
+                    httpContext.RequestAborted);
+
+                httpContext.Items[ApiCallerContext.ItemKey] = rawCaller.Apply(resolution);
                 await next();
-                return;
             }
-
-            var policyService = httpContext.RequestServices.GetRequiredService<IOperatorPolicyService>();
-            var resolution = await policyService.ResolveAsync(
-                rawCaller.EffectivePrincipalId,
-                rawCaller.TenantId,
-                rawCaller.OrganizationId,
-                rawCaller.OperatorRoles,
-                httpContext.RequestAborted);
-
-            httpContext.Items[ApiCallerContext.ItemKey] = rawCaller.Apply(resolution);
-            await next();
+            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+            {
+                var logger = httpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("PolicyContextEnrichment");
+                logger.LogDebug("Policy context enrichment cancelled because request was aborted by the client.");
+            }
         });
     }
 }

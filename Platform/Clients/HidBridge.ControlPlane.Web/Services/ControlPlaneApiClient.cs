@@ -73,7 +73,7 @@ public sealed class ControlPlaneApiClient
             }),
         };
 
-        using var response = await SendAsync(() => _httpClient.SendAsync(request, cancellationToken), relativeUri);
+        using var response = await SendAsync(() => _httpClient.SendAsync(request, cancellationToken), relativeUri, cancellationToken);
         await EnsureSuccessAsync(response, relativeUri, cancellationToken);
     }
 
@@ -416,7 +416,7 @@ public sealed class ControlPlaneApiClient
     /// </summary>
     public async Task DeletePolicyScopeAsync(string scopeId, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(() => _httpClient.DeleteAsync($"/api/v1/diagnostics/policies/scopes/{Uri.EscapeDataString(scopeId)}", cancellationToken), $"/api/v1/diagnostics/policies/scopes/{scopeId}");
+        using var response = await SendAsync(() => _httpClient.DeleteAsync($"/api/v1/diagnostics/policies/scopes/{Uri.EscapeDataString(scopeId)}", cancellationToken), $"/api/v1/diagnostics/policies/scopes/{scopeId}", cancellationToken);
         await EnsureSuccessAsync(response, $"/api/v1/diagnostics/policies/scopes/{scopeId}", cancellationToken);
     }
 
@@ -443,7 +443,7 @@ public sealed class ControlPlaneApiClient
     /// </summary>
     public async Task DeletePolicyAssignmentAsync(string assignmentId, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(() => _httpClient.DeleteAsync($"/api/v1/diagnostics/policies/assignments/{Uri.EscapeDataString(assignmentId)}", cancellationToken), $"/api/v1/diagnostics/policies/assignments/{assignmentId}");
+        using var response = await SendAsync(() => _httpClient.DeleteAsync($"/api/v1/diagnostics/policies/assignments/{Uri.EscapeDataString(assignmentId)}", cancellationToken), $"/api/v1/diagnostics/policies/assignments/{assignmentId}", cancellationToken);
         await EnsureSuccessAsync(response, $"/api/v1/diagnostics/policies/assignments/{assignmentId}", cancellationToken);
     }
 
@@ -473,7 +473,7 @@ public sealed class ControlPlaneApiClient
         string relativeUri,
         CancellationToken cancellationToken)
     {
-        using var response = await SendAsync(() => _httpClient.GetAsync(relativeUri, cancellationToken), relativeUri);
+        using var response = await SendAsync(() => _httpClient.GetAsync(relativeUri, cancellationToken), relativeUri, cancellationToken);
         await EnsureSuccessAsync(response, relativeUri, cancellationToken);
         return await response.Content.ReadFromJsonAsync<TResponse>(cancellationToken);
     }
@@ -489,7 +489,7 @@ public sealed class ControlPlaneApiClient
             Content = JsonContent.Create(body),
         };
 
-        using var response = await SendAsync(() => _httpClient.SendAsync(request, cancellationToken), relativeUri);
+        using var response = await SendAsync(() => _httpClient.SendAsync(request, cancellationToken), relativeUri, cancellationToken);
         await EnsureSuccessAsync(response, relativeUri, cancellationToken);
 
         return await response.Content.ReadFromJsonAsync<TResponse>(cancellationToken);
@@ -497,7 +497,8 @@ public sealed class ControlPlaneApiClient
 
     private static async Task<HttpResponseMessage> SendAsync(
         Func<Task<HttpResponseMessage>> send,
-        string relativeUri)
+        string relativeUri,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -507,7 +508,7 @@ public sealed class ControlPlaneApiClient
         {
             throw new ControlPlaneApiUnavailableException(relativeUri, exception);
         }
-        catch (TaskCanceledException exception) when (exception.InnerException is null)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             throw new ControlPlaneApiUnavailableException(relativeUri, exception);
         }

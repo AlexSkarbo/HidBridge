@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO;
 using System.Text.Json;
 using HidBridge.ControlPlane.Web.Models;
 using HidBridge.ControlPlane.Web.Services;
@@ -664,6 +665,26 @@ public sealed class ControlPlaneApiClientTests
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var handler = new ThrowingHandler(new HttpRequestException("Connection refused"));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<ControlPlaneApiUnavailableException>(() =>
+            apiClient.GetInventoryDashboardAsync(cancellationToken));
+
+        Assert.Contains("/api/v1/dashboards/inventory", exception.Message);
+    }
+
+    /// <summary>
+    /// Verifies that transport timeouts wrapped as canceled operations are surfaced as unavailable.
+    /// </summary>
+    [Fact]
+    public async Task GetInventoryDashboardAsync_ThrowsUnavailableException_WhenBackendTimeoutIncludesInnerException()
+    {
+        var cancellationToken = CancellationToken.None;
+        var timeoutException = new TaskCanceledException(
+            "The operation was canceled.",
+            new IOException("Unable to read data from the transport connection."));
+        var handler = new ThrowingHandler(timeoutException);
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
         var apiClient = new ControlPlaneApiClient(httpClient);
 

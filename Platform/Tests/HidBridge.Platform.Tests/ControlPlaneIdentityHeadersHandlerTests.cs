@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Claims;
+using System.IO;
 using HidBridge.ControlPlane.Web.Configuration;
 using HidBridge.ControlPlane.Web.Identity;
 using HidBridge.ControlPlane.Web.Services;
@@ -105,6 +106,45 @@ public sealed class ControlPlaneIdentityHeadersHandlerTests
         Assert.False(inner.Headers.ContainsKey("X-HidBridge-OrganizationId"));
     }
 
+    [Fact]
+    public async Task SendAsync_ReturnsServiceUnavailable_WhenTransportCancellationContainsInnerException()
+    {
+        var identity = new OperatorIdentityContext(
+            false,
+            "user-1",
+            "operator@example.com",
+            "Operator",
+            "tenant-a",
+            "org-a",
+            [],
+            "OIDC",
+            null);
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.RequestServices = new ServiceCollection().BuildServiceProvider();
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var options = Options.Create(new ControlPlaneApiOptions { PropagateAccessToken = false, PropagateIdentityHeaders = false });
+        var identityOptions = Options.Create(new IdentityOptions { Enabled = true, ClientId = "controlplane-web" });
+        var oidcOptions = new StaticOptionsMonitor<OpenIdConnectOptions>(new OpenIdConnectOptions());
+        var timeoutException = new TaskCanceledException(
+            "The operation was canceled.",
+            new IOException("Unable to read data from the transport connection."));
+        var inner = new ThrowingDelegatingHandler(timeoutException);
+        var handler = new ControlPlaneIdentityHeadersHandler(
+            identity,
+            accessor,
+            options,
+            identityOptions,
+            oidcOptions,
+            NullLogger<ControlPlaneIdentityHeadersHandler>.Instance)
+        { InnerHandler = inner };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        using var response = await invoker.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/test"), CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
     private sealed class FakeAuthenticationService : IAuthenticationService
     {
         private readonly string _accessToken;
@@ -146,6 +186,19 @@ public sealed class ControlPlaneIdentityHeadersHandlerTests
             LastAuthorizationParameter = request.Headers.Authorization?.Parameter;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
         }
+    }
+
+    private sealed class ThrowingDelegatingHandler : HttpMessageHandler
+    {
+        private readonly Exception _exception;
+
+        public ThrowingDelegatingHandler(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(_exception);
     }
 
     private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>

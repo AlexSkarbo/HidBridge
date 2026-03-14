@@ -89,7 +89,7 @@ public sealed class ControlPlaneIdentityHeadersHandler : DelegatingHandler
         {
             return CreateUnavailableResponse(request, exception.Message);
         }
-        catch (TaskCanceledException exception) when (exception.InnerException is null)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             return CreateUnavailableResponse(request, exception.Message);
         }
