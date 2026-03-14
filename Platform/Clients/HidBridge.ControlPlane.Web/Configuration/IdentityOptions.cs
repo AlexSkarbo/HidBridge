@@ -89,6 +89,11 @@ public sealed class IdentityOptions
     /// Gets or sets the development identity fallback configuration used when OIDC is disabled.
     /// </summary>
     public DevelopmentIdentityOptions Development { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets OIDC onboarding settings used to auto-normalize Keycloak users on first login.
+    /// </summary>
+    public IdentityOnboardingOptions Onboarding { get; set; } = new();
 }
 
 /// <summary>
@@ -125,4 +130,65 @@ public sealed class DevelopmentIdentityOptions
     /// Gets or sets the development roles granted to the local operator.
     /// </summary>
     public string[] Roles { get; set; } = ["operator.viewer", "operator.moderator", "operator.admin"];
+}
+
+/// <summary>
+/// Defines automatic onboarding options for OIDC identities.
+/// </summary>
+public sealed class IdentityOnboardingOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether automatic onboarding is enabled.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the Keycloak base URL used for admin API calls.
+    /// </summary>
+    public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
+
+    /// <summary>
+    /// Gets or sets the Keycloak admin realm.
+    /// </summary>
+    public string AdminRealm { get; set; } = "master";
+
+    /// <summary>
+    /// Gets or sets the Keycloak admin username override.
+    /// </summary>
+    public string AdminUser { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the Keycloak admin password override.
+    /// </summary>
+    public string AdminPassword { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the target realm where users are onboarded.
+    /// </summary>
+    public string RealmName { get; set; } = "hidbridge-dev";
+
+    /// <summary>
+    /// Gets or sets the operator group that should include OIDC users.
+    /// </summary>
+    public string GroupName { get; set; } = "hidbridge-operators";
+
+    /// <summary>
+    /// Gets or sets required realm roles for the onboarding group.
+    /// </summary>
+    public string[] RequiredRealmRoles { get; set; } = ["operator.viewer"];
+
+    /// <summary>
+    /// Gets or sets default tenant for newly onboarded users.
+    /// </summary>
+    public string DefaultTenantId { get; set; } = "local-tenant";
+
+    /// <summary>
+    /// Gets or sets default organization for newly onboarded users.
+    /// </summary>
+    public string DefaultOrganizationId { get; set; } = "local-org";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether operator.viewer role claim should be injected into the current principal when missing.
+    /// </summary>
+    public bool InjectViewerRoleClaimWhenMissing { get; set; } = true;
 }

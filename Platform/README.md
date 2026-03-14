@@ -396,6 +396,10 @@ Security direction for the web shell:
 
 Оновлення web shell / Identity baseline:
 - коли `Identity:Enabled=false`, development fallback identity тепер автентифікується автоматично без ручного login flow;
+- коли `Identity:Enabled=true` і `Identity:Onboarding:Enabled=true`, web shell виконує auto-onboarding OIDC користувача на `OnTokenValidated`:
+  - гарантує групу `hidbridge-operators` + роль `operator.viewer`;
+  - нормалізує user attributes (`tenant_id`, `org_id`, `principal_id`);
+  - додає користувача в операторську групу idempotent-режимом;
 - ручний theme switch лишається окремим відкритим дефектом web shell і винесений у дизайн-backlog;
 - `html, body` background зроблено напівпрозорим, щоб grid background із `landing/index.html` читався стабільно.
 

@@ -47,6 +47,7 @@ builder.Services.AddScoped(static serviceProvider => OperatorIdentityContext.Cre
     serviceProvider.GetRequiredService<IHttpContextAccessor>(),
     serviceProvider.GetRequiredService<IOptions<IdentityOptions>>()));
 builder.Services.AddTransient<ControlPlaneIdentityHeadersHandler>();
+builder.Services.AddScoped<OidcOperatorOnboardingService>();
 builder.Services.AddHttpClient<ControlPlaneApiClient>((serviceProvider, httpClient) =>
 {
     var options = serviceProvider
@@ -128,6 +129,31 @@ if (identityOptions.Enabled)
             options.ClaimActions.MapUniqueJsonKey("createdTimestamp", "createdTimestamp");
             options.ClaimActions.MapUniqueJsonKey("created_at", "created_at");
             options.ClaimActions.MapUniqueJsonKey("user_created_at", "user_created_at");
+            options.Events.OnTokenValidated = async context =>
+            {
+                if (context.Principal is null)
+                {
+                    return;
+                }
+
+                var onboardingService = context.HttpContext.RequestServices.GetRequiredService<OidcOperatorOnboardingService>();
+                var onboardingResult = await onboardingService.TryEnsureOnboardingAsync(
+                    context.Principal,
+                    context.HttpContext.RequestAborted);
+                if (onboardingResult is null)
+                {
+                    return;
+                }
+
+                var loggerFactory = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>();
+                var logger = loggerFactory.CreateLogger("OidcOperatorOnboarding");
+                logger.LogInformation(
+                    "OIDC onboarding completed for user {Username} ({UserId}). GroupAdded={GroupAdded}, AttributesUpdated={AttributesUpdated}.",
+                    onboardingResult.Username,
+                    onboardingResult.UserId,
+                    onboardingResult.AddedUserToGroup,
+                    onboardingResult.UpdatedUserAttributes);
+            };
             options.Events.OnRedirectToIdentityProviderForSignOut = async context =>
             {
                 var authResult = await context.HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
