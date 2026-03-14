@@ -218,14 +218,14 @@ internal static class SessionAuthorizationPolicy
     /// <summary>
     /// Verifies that the target participant is eligible to become the active controller.
     /// </summary>
-    internal static void EnsureControlEligible(SessionParticipantBody participant)
+    internal static void EnsureControlEligible(SessionParticipantBody participant, string sessionId)
     {
         if (participant.Role is SessionRole.Owner or SessionRole.Controller or SessionRole.Presenter)
         {
             return;
         }
 
-        throw new InvalidOperationException($"Participant {participant.ParticipantId} with role {participant.Role} is not eligible for active control.");
+        throw ControlArbitrationException.ParticipantNotEligible(sessionId, participant);
     }
 
     /// <summary>

@@ -10,10 +10,13 @@ param(
     [switch]$SkipCiLocal,
     [switch]$IncludeFull,
     [switch]$SkipServiceStartup,
+    [switch]$SkipDemoGate,
     [switch]$NoBuild,
     [switch]$ShowServiceWindows,
     [switch]$ReuseRunningServices,
-    [switch]$EnableCallerContextScope
+    [switch]$EnableCallerContextScope,
+    [switch]$RequireDemoGateDeviceAck,
+    [int]$DemoGateKeyboardInterfaceSelector = -1
 )
 
 Set-StrictMode -Version Latest
@@ -36,6 +39,7 @@ $doctorScript = Join-Path $scriptsRoot "run_doctor.ps1"
 $ciLocalScript = Join-Path $scriptsRoot "run_ci_local.ps1"
 $fullScript = Join-Path $scriptsRoot "run_full.ps1"
 $demoSeedScript = Join-Path $scriptsRoot "run_demo_seed.ps1"
+$demoGateScript = Join-Path $scriptsRoot "run_demo_gate.ps1"
 $apiProjectPath = Join-Path $repoRoot "Platform/Platform/HidBridge.ControlPlane.Api/HidBridge.ControlPlane.Api.csproj"
 $webProjectPath = Join-Path $repoRoot "Platform/Clients/HidBridge.ControlPlane.Web/HidBridge.ControlPlane.Web.csproj"
 $apiUri = [Uri]$ApiBaseUrl
@@ -351,6 +355,23 @@ try {
             KeycloakBaseUrl = $keycloakBaseUrl
             RealmName = $realmName
         } -StopOnFailure
+
+        if (-not $SkipDemoGate) {
+            $demoGateParameters = @{
+                BaseUrl = $ApiBaseUrl
+                KeycloakBaseUrl = $keycloakBaseUrl
+                RealmName = $realmName
+                OutputJsonPath = (Join-Path $logRoot "demo-gate.result.json")
+            }
+            if ($RequireDemoGateDeviceAck) {
+                $demoGateParameters["RequireDeviceAck"] = $true
+                if ($DemoGateKeyboardInterfaceSelector -ge 0 -and $DemoGateKeyboardInterfaceSelector -le 255) {
+                    $demoGateParameters["KeyboardInterfaceSelector"] = $DemoGateKeyboardInterfaceSelector
+                }
+            }
+
+            Invoke-LoggedScript -Results $results -Name "Demo Gate" -LogRoot $logRoot -ScriptPath $demoGateScript -Parameters $demoGateParameters -StopOnFailure
+        }
 
         $webEnvironment = @{
             ASPNETCORE_ENVIRONMENT = "Development"

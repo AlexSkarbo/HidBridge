@@ -211,12 +211,18 @@ Test entrypoint:
 - `Platform/run_file_smoke.ps1`
 - `Platform/run_sql_smoke.ps1`
 - `Platform/run_demo_flow.ps1`
+- `Platform/run_demo_gate.ps1`
+- `Platform/run_uart_diagnostics.ps1`
 - The runner restores the solution, builds it, and then runs `HidBridge.Platform.Tests`.
 - `Platform/run_checks.ps1` runs the unit-test pipeline first and then runs the selected smoke profile.
 - `Platform/run_smoke.ps1` is the single entrypoint wrapper that dispatches to file or SQL smoke validation.
 - `Platform/run_backend_smoke.ps1` is the canonical smoke runner for both persistence providers.
 - `Platform/run_file_smoke.ps1` wraps the generic smoke runner with `HIDBRIDGE_PERSISTENCE_PROVIDER=File` and an isolated data root.
 - `Platform/run_sql_smoke.ps1` wraps the generic smoke runner with `HIDBRIDGE_PERSISTENCE_PROVIDER=Sql`, applies migrations, probes `/health`, opens one session, and reads back persisted snapshots.
+- `Platform/run_demo_gate.ps1` runs the deterministic demo gate (`open session -> request control -> dispatch command -> verify journal -> close session`).
+  - default mode is transport-agnostic (`action=noop`) and validates auth/session/control/journal pipeline deterministically.
+  - use `-RequireDeviceAck` only when you explicitly want UART device-ack validation.
+- `Platform/run_uart_diagnostics.ps1` runs a selector sweep (`itfSel`) across multiple command scenarios (`keyboard.shortcut`, `keyboard.text`, `mouse.move`, `keyboard.reset`) and prints a consolidated matrix.
 - Collaboration tests validate:
   - participant upsert/remove
   - share grant/accept/revoke
@@ -276,11 +282,14 @@ One-command demo flow:
   - runtime checks (`doctor`)
   - CI-local checks (`ci-local`)
   - demo seed (`demo-seed`) closes active sessions in scope and ensures at least one idle endpoint for quick-start
+  - demo runtime gate (`demo-gate`) verifies live room flow end-to-end before UI startup
   - starts API (`http://127.0.0.1:18093`) and Web (`http://127.0.0.1:18110`)
 - Useful switches:
   - `-SkipIdentityReset`
     - use this when you already have a working realm and do not want to reset IdP users/settings
   - `-SkipServiceStartup`
+  - `-SkipDemoGate`
+    - use this only when you intentionally want startup without command-path verification
   - `-ReuseRunningServices`
     - by default `demo-flow` restarts API/Web to apply deterministic demo env
   - `-IncludeFull`
@@ -291,6 +300,28 @@ Manual demo seed only:
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-seed -BaseUrl http://127.0.0.1:18093`
 - by default `demo-seed` gets bearer token via `controlplane-smoke / operator.smoke.admin`
 
+Manual demo gate only:
+- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093`
+- optional report output:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/demo-gate.result.json`
+- strict UART ack mode:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -RequireDeviceAck -KeyboardInterfaceSelector 1`
+  - equivalent forward-args form:
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -ForwardArgs @('-RequireDeviceAck','-KeyboardInterfaceSelector','1')`
+  - note: do not use `--` argument separator with `run.ps1`; use direct args or `-ForwardArgs`.
+
+Manual UART diagnostics (selector sweep):
+- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093`
+- custom selector set + json report:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/uart-diagnostics.result.json -InterfaceSelectorsCsv "0,1,2,3"`
+- notes:
+  - diagnostics preflight automatically attempts to close non-terminal visible sessions before endpoint selection.
+  - if no successful probe exists, script exits with code `1` and keeps a full matrix in console/JSON output.
+  - if command journal/UI shows `Applied` but the target PC has no visible effect, prefer auto selectors:
+    - `HIDBRIDGE_UART_MOUSE_SELECTOR=255`
+    - `HIDBRIDGE_UART_KEYBOARD_SELECTOR=254`
+    - then rerun `uart-diagnostics` to confirm command path behavior.
+
 Thin operator UI shell:
 - open design backlog:
   - `Docs/SystemArchitecture/HidBridge_ControlPlane_Web_Design_Questions_UA.md`
@@ -299,8 +330,13 @@ Thin operator UI shell:
 - `Clients/HidBridge.ControlPlane.Web`
 - stack:
   - `Blazor Web App`
-  - `Tailwind CSS` browser baseline
+  - `Tailwind CSS` build pipeline (`package.json` + `tailwind.config.cjs`)
   - design baseline inherited from `landing/index.html`
+- Tailwind commands (run in `Platform/Clients/HidBridge.ControlPlane.Web`):
+  - `npm install`
+  - `npm run tailwind:build`
+  - `npm run tailwind:watch`
+  - output: `wwwroot/tailwind.generated.css`
 - current baseline screens:
   - `Fleet Overview`
   - `Ops Status`

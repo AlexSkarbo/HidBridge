@@ -518,6 +518,7 @@ public sealed record ParticipantActivityViewModel(
     DateTimeOffset? LastCommandAtUtc,
     bool DerivedFromShare,
     string? ShareId,
+    string? ShareStatus,
     bool IsCurrentController);
 
 /// <summary>
@@ -561,6 +562,25 @@ public sealed record AuthorizationDeniedCallerViewModel(
     string? TenantId,
     string? OrganizationId,
     IReadOnlyList<string> Roles);
+
+/// <summary>
+/// Represents one structured control-arbitration conflict returned by the backend.
+/// </summary>
+public sealed record ControlArbitrationConflictViewModel(
+    string SessionId,
+    string Code,
+    string Error,
+    string? RequestedParticipantId,
+    string? ActedBy,
+    ControlArbitrationCurrentControllerViewModel? CurrentController);
+
+/// <summary>
+/// Represents one active-controller snapshot projected in a control-arbitration conflict.
+/// </summary>
+public sealed record ControlArbitrationCurrentControllerViewModel(
+    string? ParticipantId,
+    string? PrincipalId,
+    DateTimeOffset? ExpiresAtUtc);
 
 
 /// <summary>

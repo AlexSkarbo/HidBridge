@@ -39,6 +39,8 @@ public sealed class CollaborationReadModelService
         var snapshot = await RequireSessionAsync(sessionId, cancellationToken);
         var commands = await _commandJournalStore.ListBySessionAsync(sessionId, cancellationToken);
         var timeline = await GetTimelineEntriesAsync(sessionId, 100, cancellationToken);
+        var participants = snapshot.Participants ?? Array.Empty<SessionParticipantSnapshot>();
+        var participantGroups = GroupParticipantsByPrincipal(participants);
 
         return new SessionDashboardReadModel(
             snapshot.SessionId,
@@ -48,10 +50,10 @@ public sealed class CollaborationReadModelService
             snapshot.Role,
             snapshot.State,
             snapshot.RequestedBy,
-            snapshot.Participants?.Count ?? 0,
-            snapshot.Participants?.Count(x => x.Role == SessionRole.Controller) ?? 0,
-            snapshot.Participants?.Count(x => x.Role == SessionRole.Observer) ?? 0,
-            snapshot.Participants?.Count(x => x.Role == SessionRole.Presenter) ?? 0,
+            participantGroups.Count,
+            participantGroups.Count(x => x.Value.Any(participant => participant.Role == SessionRole.Controller)),
+            participantGroups.Count(x => x.Value.Any(participant => participant.Role == SessionRole.Observer)),
+            participantGroups.Count(x => x.Value.Any(participant => participant.Role == SessionRole.Presenter)),
             snapshot.Shares?.Count(x => x.Status == SessionShareStatus.Requested) ?? 0,
             snapshot.Shares?.Count(x => x.Status == SessionShareStatus.Pending) ?? 0,
             snapshot.Shares?.Count(x => x.Status == SessionShareStatus.Accepted) ?? 0,
@@ -82,32 +84,62 @@ public sealed class CollaborationReadModelService
         var commands = await _commandJournalStore.ListBySessionAsync(sessionId, cancellationToken);
         var shares = snapshot.Shares ?? Array.Empty<SessionShareSnapshot>();
         var participants = snapshot.Participants ?? Array.Empty<SessionParticipantSnapshot>();
+        var participantGroups = GroupParticipantsByPrincipal(participants);
+        var activity = new List<ParticipantActivityReadModel>(participantGroups.Count + shares.Count);
+        foreach (var group in participantGroups.Values)
+        {
+            var primary = SelectPrimaryParticipant(group, snapshot.RequestedBy, snapshot.ControlLease?.ParticipantId);
+            var participantIds = group
+                .Select(x => x.ParticipantId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var participantCommands = commands
+                .Where(x => (!string.IsNullOrWhiteSpace(x.ParticipantId) && participantIds.Contains(x.ParticipantId))
+                    || string.Equals(x.PrincipalId, primary.PrincipalId, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var share = FindShareForParticipant(primary, shares);
+            activity.Add(
+                BuildParticipantActivityRow(
+                    primary.ParticipantId,
+                    primary.PrincipalId,
+                    primary.Role,
+                    primary.JoinedAtUtc,
+                    primary.UpdatedAtUtc,
+                    participantCommands,
+                    share,
+                    snapshot.ControlLease));
+        }
 
-        return participants
-            .Select(participant =>
+        // Include unresolved share-based principals so link-open/requested users are visible
+        // to the moderator even before participant materialization.
+        foreach (var share in shares.Where(x => x.Status is SessionShareStatus.Requested or SessionShareStatus.Pending or SessionShareStatus.Accepted))
+        {
+            var principalKey = NormalizePrincipalKey(share.PrincipalId, $"share:{share.ShareId}");
+            if (participantGroups.ContainsKey(principalKey))
             {
-                var participantCommands = commands
-                    .Where(x => string.Equals(x.ParticipantId, participant.ParticipantId, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(x.PrincipalId, participant.PrincipalId, StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                var share = shares.FirstOrDefault(x => string.Equals($"share:{x.ShareId}", participant.ParticipantId, StringComparison.OrdinalIgnoreCase));
-                return new ParticipantActivityReadModel(
-                    participant.ParticipantId,
-                    participant.PrincipalId,
-                    participant.Role,
-                    participant.JoinedAtUtc,
-                    participant.UpdatedAtUtc,
-                    participantCommands.Length,
-                    participantCommands.Count(x => x.Status is CommandStatus.Rejected or CommandStatus.Timeout),
-                    participantCommands
-                        .OrderByDescending(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
-                        .Select(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
-                        .FirstOrDefault(),
-                    share is not null,
-                    share?.ShareId,
-                    string.Equals(snapshot.ControlLease?.ParticipantId, participant.ParticipantId, StringComparison.OrdinalIgnoreCase));
-            })
-            .OrderByDescending(x => x.CommandCount)
+                continue;
+            }
+
+            var shareParticipantId = $"share:{share.ShareId}";
+            var participantCommands = commands
+                .Where(x => string.Equals(x.ParticipantId, shareParticipantId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(x.PrincipalId, share.PrincipalId, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            activity.Add(
+                BuildParticipantActivityRow(
+                    shareParticipantId,
+                    share.PrincipalId,
+                    share.Role,
+                    share.CreatedAtUtc,
+                    share.UpdatedAtUtc,
+                    participantCommands,
+                    share,
+                    snapshot.ControlLease));
+        }
+
+        return activity
+            .OrderByDescending(x => x.IsCurrentController)
+            .ThenByDescending(x => x.CommandCount)
+            .ThenByDescending(x => x.UpdatedAtUtc)
             .ThenBy(x => x.ParticipantId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -175,15 +207,17 @@ public sealed class CollaborationReadModelService
     {
         var snapshot = await RequireSessionAsync(sessionId, cancellationToken);
         var participants = snapshot.Participants ?? Array.Empty<SessionParticipantSnapshot>();
-        var candidates = participants
-            .Select(participant => new ControlCandidateReadModel(
-                participant.ParticipantId,
-                participant.PrincipalId,
-                participant.Role,
-                participant.Role is SessionRole.Owner or SessionRole.Controller or SessionRole.Presenter,
-                string.Equals(snapshot.ControlLease?.ParticipantId, participant.ParticipantId, StringComparison.OrdinalIgnoreCase),
-                participant.JoinedAtUtc,
-                participant.UpdatedAtUtc))
+        var candidates = GroupParticipantsByPrincipal(participants)
+            .Values
+            .Select(group => SelectPrimaryParticipant(group, snapshot.RequestedBy, snapshot.ControlLease?.ParticipantId))
+            .Select(primary => new ControlCandidateReadModel(
+                primary.ParticipantId,
+                primary.PrincipalId,
+                primary.Role,
+                primary.Role is SessionRole.Owner or SessionRole.Controller or SessionRole.Presenter,
+                string.Equals(snapshot.ControlLease?.ParticipantId, primary.ParticipantId, StringComparison.OrdinalIgnoreCase),
+                primary.JoinedAtUtc,
+                primary.UpdatedAtUtc))
             .OrderByDescending(x => x.IsCurrentController)
             .ThenByDescending(x => x.IsEligible)
             .ThenBy(x => x.ParticipantId, StringComparer.OrdinalIgnoreCase)
@@ -191,6 +225,85 @@ public sealed class CollaborationReadModelService
 
         return new ControlDashboardReadModel(snapshot.SessionId, snapshot.ControlLease, candidates);
     }
+
+    private static ParticipantActivityReadModel BuildParticipantActivityRow(
+        string participantId,
+        string principalId,
+        SessionRole role,
+        DateTimeOffset joinedAtUtc,
+        DateTimeOffset updatedAtUtc,
+        IReadOnlyList<CommandJournalEntryBody> participantCommands,
+        SessionShareSnapshot? share,
+        SessionControlLeaseBody? lease)
+        => new(
+            participantId,
+            principalId,
+            role,
+            joinedAtUtc,
+            updatedAtUtc,
+            participantCommands.Count,
+            participantCommands.Count(x => x.Status is CommandStatus.Rejected or CommandStatus.Timeout),
+            participantCommands
+                .OrderByDescending(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
+                .Select(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
+                .FirstOrDefault(),
+            share is not null,
+            share?.ShareId,
+            share?.Status,
+            string.Equals(lease?.ParticipantId, participantId, StringComparison.OrdinalIgnoreCase));
+
+    private static SessionShareSnapshot? FindShareForParticipant(
+        SessionParticipantSnapshot participant,
+        IReadOnlyList<SessionShareSnapshot> shares)
+    {
+        if (participant.ParticipantId.StartsWith("share:", StringComparison.OrdinalIgnoreCase))
+        {
+            var shareId = participant.ParticipantId["share:".Length..];
+            return shares.FirstOrDefault(x => string.Equals(x.ShareId, shareId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return shares
+            .Where(x => string.Equals(x.PrincipalId, participant.PrincipalId, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .FirstOrDefault();
+    }
+
+    private static Dictionary<string, List<SessionParticipantSnapshot>> GroupParticipantsByPrincipal(IReadOnlyList<SessionParticipantSnapshot> participants)
+    {
+        var grouped = new Dictionary<string, List<SessionParticipantSnapshot>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var participant in participants)
+        {
+            var key = NormalizePrincipalKey(participant.PrincipalId, participant.ParticipantId);
+            if (!grouped.TryGetValue(key, out var list))
+            {
+                list = new List<SessionParticipantSnapshot>();
+                grouped[key] = list;
+            }
+
+            list.Add(participant);
+        }
+
+        return grouped;
+    }
+
+    private static SessionParticipantSnapshot SelectPrimaryParticipant(
+        IReadOnlyList<SessionParticipantSnapshot> participants,
+        string ownerPrincipalId,
+        string? currentControlParticipantId)
+        => participants
+            .OrderByDescending(participant => string.Equals(participant.ParticipantId, currentControlParticipantId, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(participant =>
+                string.Equals(participant.PrincipalId, ownerPrincipalId, StringComparison.OrdinalIgnoreCase)
+                && participant.ParticipantId.StartsWith("owner:", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(participant => participant.UpdatedAtUtc)
+            .ThenByDescending(participant => participant.JoinedAtUtc)
+            .ThenBy(participant => participant.ParticipantId, StringComparer.OrdinalIgnoreCase)
+            .First();
+
+    private static string NormalizePrincipalKey(string? principalId, string fallbackParticipantId)
+        => string.IsNullOrWhiteSpace(principalId)
+            ? fallbackParticipantId.Trim()
+            : principalId.Trim();
 
     private async Task<SessionSnapshot> RequireSessionAsync(string sessionId, CancellationToken cancellationToken)
     {

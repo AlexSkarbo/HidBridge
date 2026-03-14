@@ -1,5 +1,6 @@
 using HidBridge.Abstractions;
 using HidBridge.Contracts;
+using HidBridge.SessionOrchestrator;
 
 namespace HidBridge.ControlPlane.Api.Endpoints;
 
@@ -66,6 +67,10 @@ public static class ControlEndpoints
             {
                 return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
             }
+            catch (ControlArbitrationException ex)
+            {
+                return ToControlConflict(ex);
+            }
             catch (InvalidOperationException ex)
             {
                 return Results.Conflict(new { sessionId, error = ex.Message });
@@ -97,6 +102,10 @@ public static class ControlEndpoints
             catch (UnauthorizedAccessException ex)
             {
                 return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+            catch (ControlArbitrationException ex)
+            {
+                return ToControlConflict(ex);
             }
             catch (InvalidOperationException ex)
             {
@@ -130,6 +139,10 @@ public static class ControlEndpoints
             {
                 return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
             }
+            catch (ControlArbitrationException ex)
+            {
+                return ToControlConflict(ex);
+            }
             catch (InvalidOperationException ex)
             {
                 return Results.Conflict(new { sessionId, error = ex.Message });
@@ -162,6 +175,10 @@ public static class ControlEndpoints
             {
                 return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
             }
+            catch (ControlArbitrationException ex)
+            {
+                return ToControlConflict(ex);
+            }
             catch (InvalidOperationException ex)
             {
                 return Results.Conflict(new { sessionId, error = ex.Message });
@@ -174,4 +191,22 @@ public static class ControlEndpoints
 
         return endpoints;
     }
+
+    private static IResult ToControlConflict(ControlArbitrationException ex)
+        => Results.Conflict(new
+        {
+            sessionId = ex.SessionId,
+            code = ex.Code,
+            error = ex.Message,
+            requestedParticipantId = ex.RequestedParticipantId,
+            actedBy = ex.ActedBy,
+            currentController = ex.CurrentControllerParticipantId is null && ex.CurrentControllerPrincipalId is null && ex.LeaseExpiresAtUtc is null
+                ? null
+                : new
+                {
+                    participantId = ex.CurrentControllerParticipantId,
+                    principalId = ex.CurrentControllerPrincipalId,
+                    expiresAtUtc = ex.LeaseExpiresAtUtc,
+                },
+        });
 }

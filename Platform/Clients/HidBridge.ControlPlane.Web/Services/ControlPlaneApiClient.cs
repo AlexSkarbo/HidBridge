@@ -534,7 +534,17 @@ public sealed class ControlPlaneApiClient
             denial = JsonSerializer.Deserialize<AuthorizationDeniedViewModel>(rawBody, AuthorizationJsonOptions);
         }
 
-        throw new ControlPlaneApiException(response.StatusCode, rawBody, denial);
+        ControlArbitrationConflictViewModel? controlConflict = null;
+        if ((int)response.StatusCode == 409 && !string.IsNullOrWhiteSpace(rawBody))
+        {
+            controlConflict = JsonSerializer.Deserialize<ControlArbitrationConflictViewModel>(rawBody, AuthorizationJsonOptions);
+            if (string.IsNullOrWhiteSpace(controlConflict?.Code))
+            {
+                controlConflict = null;
+            }
+        }
+
+        throw new ControlPlaneApiException(response.StatusCode, rawBody, denial, controlConflict);
     }
 }
 
@@ -549,12 +559,14 @@ public sealed class ControlPlaneApiException : InvalidOperationException
     public ControlPlaneApiException(
         System.Net.HttpStatusCode statusCode,
         string rawBody,
-        AuthorizationDeniedViewModel? authorizationDenied = null)
-        : base(BuildMessage(statusCode, rawBody, authorizationDenied))
+        AuthorizationDeniedViewModel? authorizationDenied = null,
+        ControlArbitrationConflictViewModel? controlConflict = null)
+        : base(BuildMessage(statusCode, rawBody, authorizationDenied, controlConflict))
     {
         StatusCode = statusCode;
         RawBody = rawBody;
         AuthorizationDenied = authorizationDenied;
+        ControlConflict = controlConflict;
     }
 
     /// <summary>
@@ -572,34 +584,73 @@ public sealed class ControlPlaneApiException : InvalidOperationException
     /// </summary>
     public AuthorizationDeniedViewModel? AuthorizationDenied { get; }
 
+    /// <summary>
+    /// Gets the structured control-arbitration conflict when the backend returned one.
+    /// </summary>
+    public ControlArbitrationConflictViewModel? ControlConflict { get; }
+
     private static string BuildMessage(
         System.Net.HttpStatusCode statusCode,
         string rawBody,
-        AuthorizationDeniedViewModel? authorizationDenied)
+        AuthorizationDeniedViewModel? authorizationDenied,
+        ControlArbitrationConflictViewModel? controlConflict)
     {
+        if (controlConflict is not null)
+        {
+            var conflictSegments = new List<string>
+            {
+                $"{controlConflict.Error} ({controlConflict.Code})",
+            };
+
+            if (!string.IsNullOrWhiteSpace(controlConflict.RequestedParticipantId))
+            {
+                conflictSegments.Add($"requested participant: {controlConflict.RequestedParticipantId}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(controlConflict.ActedBy))
+            {
+                conflictSegments.Add($"acted by: {controlConflict.ActedBy}");
+            }
+
+            if (controlConflict.CurrentController is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(controlConflict.CurrentController.PrincipalId))
+                {
+                    conflictSegments.Add($"current controller: {controlConflict.CurrentController.PrincipalId}");
+                }
+
+                if (controlConflict.CurrentController.ExpiresAtUtc.HasValue)
+                {
+                    conflictSegments.Add($"lease expires: {controlConflict.CurrentController.ExpiresAtUtc.Value:O}");
+                }
+            }
+
+            return string.Join(" | ", conflictSegments);
+        }
+
         if (authorizationDenied is null)
         {
             return $"ControlPlane request failed with status {(int)statusCode}: {rawBody}";
         }
 
-        var segments = new List<string>
+        var denialSegments = new List<string>
         {
             $"{authorizationDenied.Message} ({authorizationDenied.Code})",
         };
 
         if (authorizationDenied.RequiredRoles is { Count: > 0 })
         {
-            segments.Add($"required roles: {string.Join(", ", authorizationDenied.RequiredRoles)}");
+            denialSegments.Add($"required roles: {string.Join(", ", authorizationDenied.RequiredRoles)}");
         }
 
         if (!string.IsNullOrWhiteSpace(authorizationDenied.RequiredTenantId)
             || !string.IsNullOrWhiteSpace(authorizationDenied.RequiredOrganizationId))
         {
-            segments.Add(
+            denialSegments.Add(
                 $"required scope: tenant={authorizationDenied.RequiredTenantId ?? "any"}, org={authorizationDenied.RequiredOrganizationId ?? "any"}");
         }
 
-        return string.Join(" | ", segments);
+        return string.Join(" | ", denialSegments);
     }
 }
 

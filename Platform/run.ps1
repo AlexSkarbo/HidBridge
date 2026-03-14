@@ -1,6 +1,11 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "demo-flow", "demo-seed", "close-failed-rooms")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "close-failed-rooms")]
     [string]$Task = "checks",
+    [string]$BaseUrl,
+    [switch]$RequireDeviceAck,
+    [int]$KeyboardInterfaceSelector = -1,
+    [string]$OutputJsonPath,
+    [string]$InterfaceSelectorsCsv,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ForwardArgs
 )
@@ -25,6 +30,8 @@ $scriptMap = @{
     "identity-reset" = "..\\run_identity_reset.ps1"
     "demo-flow"    = "run_demo_flow.ps1"
     "demo-seed"    = "run_demo_seed.ps1"
+    "demo-gate"    = "run_demo_gate.ps1"
+    "uart-diagnostics" = "run_uart_diagnostics.ps1"
     "close-failed-rooms" = "run_close_failed_rooms.ps1"
 }
 
@@ -38,5 +45,42 @@ if ($null -eq $pwsh) {
     throw "powershell.exe not found in PATH"
 }
 
-& $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath @ForwardArgs
+$effectiveForwardArgs = [System.Collections.Generic.List[string]]::new()
+if ($null -ne $ForwardArgs) {
+    foreach ($argument in $ForwardArgs) {
+        if (-not [string]::IsNullOrWhiteSpace($argument)) {
+            $effectiveForwardArgs.Add($argument) | Out-Null
+        }
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("BaseUrl")) {
+    $effectiveForwardArgs.Add("-BaseUrl") | Out-Null
+    $effectiveForwardArgs.Add($BaseUrl) | Out-Null
+}
+
+if ($RequireDeviceAck) {
+    $effectiveForwardArgs.Add("-RequireDeviceAck") | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("KeyboardInterfaceSelector")) {
+    if ($KeyboardInterfaceSelector -lt 0 -or $KeyboardInterfaceSelector -gt 255) {
+        throw "KeyboardInterfaceSelector must be between 0 and 255."
+    }
+
+    $effectiveForwardArgs.Add("-KeyboardInterfaceSelector") | Out-Null
+    $effectiveForwardArgs.Add([string]$KeyboardInterfaceSelector) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("OutputJsonPath")) {
+    $effectiveForwardArgs.Add("-OutputJsonPath") | Out-Null
+    $effectiveForwardArgs.Add($OutputJsonPath) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("InterfaceSelectorsCsv")) {
+    $effectiveForwardArgs.Add("-InterfaceSelectorsCsv") | Out-Null
+    $effectiveForwardArgs.Add($InterfaceSelectorsCsv) | Out-Null
+}
+
+& $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath @($effectiveForwardArgs.ToArray())
 exit $LASTEXITCODE

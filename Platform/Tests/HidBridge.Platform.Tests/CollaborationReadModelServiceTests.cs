@@ -210,6 +210,95 @@ public sealed class CollaborationReadModelServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that participant activity deduplicates accepted shares for the same principal.
+    /// </summary>
+    [Fact]
+    public async Task GetParticipantActivityAsync_DeduplicatesPrincipalWithMultipleAcceptedShares()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-read-model-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (service, orchestrator, _) = await CreateHarnessAsync(rootDirectory);
+
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("dedupe-session", SessionProfile.Balanced, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            await orchestrator.GrantShareAsync(
+                "dedupe-session",
+                new SessionShareGrantBody("share-1", "operator-user", "owner", SessionRole.Controller),
+                TestContext.Current.CancellationToken);
+            await orchestrator.AcceptShareAsync(
+                "dedupe-session",
+                new SessionShareTransitionBody("share-1", "operator-user"),
+                TestContext.Current.CancellationToken);
+
+            await orchestrator.GrantShareAsync(
+                "dedupe-session",
+                new SessionShareGrantBody("share-2", "operator-user", "owner", SessionRole.Controller),
+                TestContext.Current.CancellationToken);
+            await orchestrator.AcceptShareAsync(
+                "dedupe-session",
+                new SessionShareTransitionBody("share-2", "operator-user"),
+                TestContext.Current.CancellationToken);
+
+            var activity = await service.GetParticipantActivityAsync("dedupe-session", TestContext.Current.CancellationToken);
+            var operatorRows = activity.Where(x => string.Equals(x.PrincipalId, "operator-user", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+            Assert.Single(operatorRows);
+            Assert.Equal(SessionShareStatus.Accepted, operatorRows[0].ShareStatus);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that requested/pending share principals are visible in participant activity before acceptance.
+    /// </summary>
+    [Fact]
+    public async Task GetParticipantActivityAsync_IncludesUnmaterializedInvitationRequests()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-read-model-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (service, orchestrator, _) = await CreateHarnessAsync(rootDirectory);
+
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("request-visibility", SessionProfile.Balanced, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            await orchestrator.RequestInvitationAsync(
+                "request-visibility",
+                new SessionInvitationRequestBody(
+                    "request-share-1",
+                    "viewer-user",
+                    "viewer-user",
+                    SessionRole.Observer,
+                    "viewer requested access"),
+                TestContext.Current.CancellationToken);
+
+            var activity = await service.GetParticipantActivityAsync("request-visibility", TestContext.Current.CancellationToken);
+            var requested = Assert.Single(activity, x => string.Equals(x.PrincipalId, "viewer-user", StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(requested.DerivedFromShare);
+            Assert.Equal("request-share-1", requested.ShareId);
+            Assert.Equal(SessionShareStatus.Requested, requested.ShareStatus);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
     private static async Task<(CollaborationReadModelService Service, InMemorySessionOrchestrator Orchestrator, FileEventStore EventStore)> CreateHarnessAsync(string rootDirectory)
     {
         var options = new FilePersistenceOptions(rootDirectory);

@@ -1,7 +1,10 @@
 @inherits LayoutComponentBase
+@implements IAsyncDisposable
 @inject OperatorText T
 @inject OperatorAuthDescriptor Auth
 @inject OperatorIdentityContext Identity
+@inject NavigationManager Navigation
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
 
 <div class="hid-shell">
     <div class="hid-shell-frame">
@@ -59,6 +62,18 @@
                 </div>
             </header>
 
+            @if (!_isBackendAvailable)
+            {
+                <div class="hid-alert hid-alert--danger hid-backend-banner" role="status" aria-live="polite">
+                    <div class="hid-backend-banner-title">@T["BackendUnavailable"]</div>
+                    <div>@T["BackendMonitorUnavailable"]</div>
+                    @if (!string.IsNullOrWhiteSpace(_backendUnavailableDetail))
+                    {
+                        <div class="hid-backend-banner-detail">@_backendUnavailableDetail</div>
+                    }
+                </div>
+            }
+
             <article class="hid-content-panel hid-card">
                 @Body
             </article>
@@ -71,3 +86,120 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private static readonly TimeSpan BackendProbeInterval = TimeSpan.FromSeconds(3);
+    private CancellationTokenSource? _backendProbeCts;
+    private Task? _backendProbeTask;
+    private bool _monitorStarted;
+    private bool _isBackendAvailable = true;
+    private string? _backendUnavailableDetail;
+    private bool _reloadCurrentViewOnRecovery;
+
+    protected override void OnInitialized()
+        => StartBackendProbe();
+
+    private void StartBackendProbe()
+    {
+        if (_monitorStarted)
+        {
+            return;
+        }
+
+        _monitorStarted = true;
+        _backendProbeCts = new CancellationTokenSource();
+        _backendProbeTask = ProbeLoopAsync(_backendProbeCts.Token);
+    }
+
+    private async Task ProbeLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(BackendProbeInterval);
+        try
+        {
+            await ProbeBackendAsync(cancellationToken);
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await ProbeBackendAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected during layout disposal.
+        }
+    }
+
+    private async Task ProbeBackendAsync(CancellationToken cancellationToken)
+    {
+        var wasAvailable = _isBackendAvailable;
+        var isAvailable = true;
+        string? unavailableDetail = null;
+
+        try
+        {
+            _ = await ApiClient.GetHealthAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (HidBridge.ControlPlane.Web.Services.ControlPlaneApiUnavailableException exception)
+        {
+            isAvailable = false;
+            unavailableDetail = exception.Message;
+        }
+        catch (HidBridge.ControlPlane.Web.Services.ControlPlaneApiException)
+        {
+            // Reachable API with auth/validation error still means backend is up.
+            isAvailable = true;
+        }
+        catch (Exception exception)
+        {
+            isAvailable = false;
+            unavailableDetail = exception.Message;
+        }
+
+        _isBackendAvailable = isAvailable;
+        _backendUnavailableDetail = unavailableDetail;
+
+        if (wasAvailable != _isBackendAvailable)
+        {
+            if (!_isBackendAvailable)
+            {
+                _reloadCurrentViewOnRecovery = true;
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+
+        if (_isBackendAvailable && _reloadCurrentViewOnRecovery)
+        {
+            _reloadCurrentViewOnRecovery = false;
+            await InvokeAsync(() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true, replace: true));
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_backendProbeCts is null)
+        {
+            return;
+        }
+
+        _backendProbeCts.Cancel();
+
+        if (_backendProbeTask is not null)
+        {
+            try
+            {
+                await _backendProbeTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during disposal.
+            }
+        }
+
+        _backendProbeCts.Dispose();
+        _backendProbeCts = null;
+    }
+}

@@ -64,6 +64,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipI
 - `CI Local PASS`
 - `Start API PASS`
 - `Demo Seed PASS`
+- `Demo Gate PASS`
 - `Start Web PASS`
 
 ## 4) Що робити в UI під час демо
@@ -131,6 +132,17 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 - дія:
 ```powershell
 powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Sync-HidBridgeDevRealm.ps1 -ExternalProviderConfigPaths "Platform/Identity/Keycloak/providers/google-oidc.local.json"
+```
+
+5. Команди мають `Applied`, але на цільовому ПК немає ефекту (текст/шорткат/рух миші):
+- причина: невдалий fixed `itfSel` для поточного USB HID маршруту;
+- дія: повернути auto-selectors і перевірити UART path через diagnostics:
+```powershell
+# runtime env (API)
+$env:HIDBRIDGE_UART_MOUSE_SELECTOR="255"
+$env:HIDBRIDGE_UART_KEYBOARD_SELECTOR="254"
+
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093
 ```
 
 ## 8) Де шукати логи

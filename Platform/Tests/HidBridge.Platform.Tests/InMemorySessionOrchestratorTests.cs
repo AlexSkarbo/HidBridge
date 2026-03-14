@@ -15,13 +15,16 @@ public sealed class InMemorySessionOrchestratorTests
 {
     private sealed class FakeConnector : IConnector
     {
-        public FakeConnector(string agentId, string endpointId)
+        private readonly Func<CommandRequestBody, ConnectorCommandResult> _execute;
+
+        public FakeConnector(string agentId, string endpointId, Func<CommandRequestBody, ConnectorCommandResult>? execute = null)
         {
             Descriptor = new ConnectorDescriptor(
                 agentId,
                 endpointId,
                 ConnectorType.HidBridge,
                 new[] { new CapabilityDescriptor(CapabilityNames.HidKeyboardV1, "1.0") });
+            _execute = execute ?? (command => new ConnectorCommandResult(command.CommandId, CommandStatus.Applied));
         }
 
         public ConnectorDescriptor Descriptor { get; }
@@ -37,7 +40,7 @@ public sealed class InMemorySessionOrchestratorTests
         public Task<ConnectorCommandResult> ExecuteAsync(CommandRequestBody command, CancellationToken cancellationToken)
         {
             Commands.Add(command);
-            return Task.FromResult(new ConnectorCommandResult(command.CommandId, CommandStatus.Applied));
+            return Task.FromResult(_execute(command));
         }
     }
 
@@ -75,6 +78,282 @@ public sealed class InMemorySessionOrchestratorTests
         var command = Assert.Single(connector.Commands);
         Assert.Equal("keyboard.text", command.Action);
         Assert.Equal("session-1", command.SessionId);
+    }
+
+    [Fact]
+    /// <summary>
+    /// Verifies that one command timeout transitions the room to recovering instead of failed.
+    /// </summary>
+    public async Task DispatchAsync_TimeoutMovesSessionToRecovering()
+    {
+        var registry = new InMemoryConnectorRegistry();
+        var connector = new FakeConnector(
+            "agent-1",
+            "endpoint-1",
+            command => new ConnectorCommandResult(
+                command.CommandId,
+                CommandStatus.Timeout,
+                new ErrorInfo(ErrorDomain.Uart, "E_UART_TIMEOUT", "No UART ACK", false)));
+        await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+        var orchestrator = new InMemorySessionOrchestrator(
+            new OpenSessionUseCase(registry),
+            new DispatchCommandUseCase(registry, registry),
+            registry);
+
+        await orchestrator.OpenAsync(
+            new SessionOpenBody("session-timeout", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var ack = await orchestrator.DispatchAsync(
+            new CommandRequestBody(
+                "cmd-timeout",
+                "session-timeout",
+                CommandChannel.Hid,
+                "keyboard.text",
+                new Dictionary<string, object?> { ["text"] = "timeout" },
+                250,
+                "idem-timeout"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = Assert.Single(await orchestrator.SnapshotAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(CommandStatus.Timeout, ack.Status);
+        Assert.Equal(SessionState.Recovering, snapshot.State);
+    }
+
+    [Fact]
+    /// <summary>
+    /// Verifies that a later successful command returns the room from recovering to active.
+    /// </summary>
+    public async Task DispatchAsync_AppliedAfterTimeoutReturnsSessionToActive()
+    {
+        var registry = new InMemoryConnectorRegistry();
+        var connector = new FakeConnector(
+            "agent-1",
+            "endpoint-1",
+            command => command.CommandId == "cmd-timeout"
+                ? new ConnectorCommandResult(
+                    command.CommandId,
+                    CommandStatus.Timeout,
+                    new ErrorInfo(ErrorDomain.Uart, "E_UART_TIMEOUT", "No UART ACK", false))
+                : new ConnectorCommandResult(command.CommandId, CommandStatus.Applied));
+        await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+        var orchestrator = new InMemorySessionOrchestrator(
+            new OpenSessionUseCase(registry),
+            new DispatchCommandUseCase(registry, registry),
+            registry);
+
+        await orchestrator.OpenAsync(
+            new SessionOpenBody("session-timeout-recover", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        _ = await orchestrator.DispatchAsync(
+            new CommandRequestBody(
+                "cmd-timeout",
+                "session-timeout-recover",
+                CommandChannel.Hid,
+                "keyboard.text",
+                new Dictionary<string, object?> { ["text"] = "timeout" },
+                250,
+                "idem-timeout"),
+            TestContext.Current.CancellationToken);
+
+        var recoveringSnapshot = Assert.Single(await orchestrator.SnapshotAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(SessionState.Recovering, recoveringSnapshot.State);
+
+        var appliedAck = await orchestrator.DispatchAsync(
+            new CommandRequestBody(
+                "cmd-applied",
+                "session-timeout-recover",
+                CommandChannel.Hid,
+                "keyboard.text",
+                new Dictionary<string, object?> { ["text"] = "recover" },
+                250,
+                "idem-applied"),
+            TestContext.Current.CancellationToken);
+
+        var activeSnapshot = Assert.Single(await orchestrator.SnapshotAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(CommandStatus.Applied, appliedAck.Status);
+        Assert.Equal(SessionState.Active, activeSnapshot.State);
+    }
+
+    [Fact]
+    /// <summary>
+    /// Verifies that successful dispatch refreshes the persisted session lease markers.
+    /// </summary>
+    public async Task DispatchAsync_RefreshesPersistedSessionLeaseMarkers()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-session-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new InMemoryConnectorRegistry();
+            var connector = new FakeConnector("agent-1", "endpoint-1");
+            await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+            var fileOptions = new FilePersistenceOptions(rootDirectory);
+            var sessionStore = new FileSessionStore(fileOptions);
+            var commandJournalStore = new FileCommandJournalStore(fileOptions);
+            var openUseCase = new OpenSessionUseCase(registry);
+            var dispatchUseCase = new DispatchCommandUseCase(registry, registry);
+
+            var orchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("session-lease-refresh", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            var persisted = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            var staleSnapshot = persisted with
+            {
+                LastHeartbeatAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5),
+                LeaseExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-4),
+            };
+            await sessionStore.UpsertAsync(staleSnapshot, TestContext.Current.CancellationToken);
+
+            var reloadedOrchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            var ack = await reloadedOrchestrator.DispatchAsync(
+                new CommandRequestBody(
+                    "cmd-lease-refresh",
+                    "session-lease-refresh",
+                    CommandChannel.Hid,
+                    "keyboard.text",
+                    new Dictionary<string, object?> { ["text"] = "lease" },
+                    250,
+                    "idem-lease-refresh"),
+                TestContext.Current.CancellationToken);
+
+            var updated = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(CommandStatus.Applied, ack.Status);
+            Assert.NotNull(updated.LastHeartbeatAtUtc);
+            Assert.NotNull(updated.LeaseExpiresAtUtc);
+            Assert.True(updated.LastHeartbeatAtUtc > staleSnapshot.LastHeartbeatAtUtc);
+            Assert.True(updated.LeaseExpiresAtUtc > staleSnapshot.LeaseExpiresAtUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    /// <summary>
+    /// Verifies that a successful command transitions a recovering session back to active.
+    /// </summary>
+    public async Task DispatchAsync_AppliedCommandRecoversRecoveringSession()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-session-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new InMemoryConnectorRegistry();
+            var connector = new FakeConnector("agent-1", "endpoint-1");
+            await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+            var fileOptions = new FilePersistenceOptions(rootDirectory);
+            var sessionStore = new FileSessionStore(fileOptions);
+            var commandJournalStore = new FileCommandJournalStore(fileOptions);
+            var openUseCase = new OpenSessionUseCase(registry);
+            var dispatchUseCase = new DispatchCommandUseCase(registry, registry);
+
+            var orchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("session-recover", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            var persisted = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            var recoveringSnapshot = persisted with
+            {
+                State = SessionState.Recovering,
+                UpdatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+                LastHeartbeatAtUtc = DateTimeOffset.UtcNow.AddMinutes(-2),
+                LeaseExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+            };
+            await sessionStore.UpsertAsync(recoveringSnapshot, TestContext.Current.CancellationToken);
+
+            var reloadedOrchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            var ack = await reloadedOrchestrator.DispatchAsync(
+                new CommandRequestBody(
+                    "cmd-recover",
+                    "session-recover",
+                    CommandChannel.Hid,
+                    "keyboard.text",
+                    new Dictionary<string, object?> { ["text"] = "recover" },
+                    250,
+                    "idem-recover"),
+                TestContext.Current.CancellationToken);
+
+            var updated = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(CommandStatus.Applied, ack.Status);
+            Assert.Equal(SessionState.Active, updated.State);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    /// <summary>
+    /// Verifies that a successful command transitions a failed session back to active.
+    /// </summary>
+    public async Task DispatchAsync_AppliedCommandRecoversFailedSession()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-session-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new InMemoryConnectorRegistry();
+            var connector = new FakeConnector("agent-1", "endpoint-1");
+            await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+            var fileOptions = new FilePersistenceOptions(rootDirectory);
+            var sessionStore = new FileSessionStore(fileOptions);
+            var commandJournalStore = new FileCommandJournalStore(fileOptions);
+            var openUseCase = new OpenSessionUseCase(registry);
+            var dispatchUseCase = new DispatchCommandUseCase(registry, registry);
+
+            var orchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("session-failed-recover", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            var persisted = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            var failedSnapshot = persisted with
+            {
+                State = SessionState.Failed,
+                UpdatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+                LastHeartbeatAtUtc = DateTimeOffset.UtcNow.AddMinutes(-2),
+                LeaseExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+            };
+            await sessionStore.UpsertAsync(failedSnapshot, TestContext.Current.CancellationToken);
+
+            var reloadedOrchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            var ack = await reloadedOrchestrator.DispatchAsync(
+                new CommandRequestBody(
+                    "cmd-failed-recover",
+                    "session-failed-recover",
+                    CommandChannel.Hid,
+                    "keyboard.text",
+                    new Dictionary<string, object?> { ["text"] = "recover-failed" },
+                    250,
+                    "idem-failed-recover"),
+                TestContext.Current.CancellationToken);
+
+            var updated = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(CommandStatus.Applied, ack.Status);
+            Assert.Equal(SessionState.Active, updated.State);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -419,6 +698,270 @@ public sealed class InMemorySessionOrchestratorTests
         Assert.Equal("owner:owner", takeover.ParticipantId);
         Assert.Equal("owner", takeover.PrincipalId);
     }
+
+    /// <summary>
+    /// Verifies the deterministic request/grant/force/release handoff sequence and conflict payload semantics.
+    /// </summary>
+    [Fact]
+    public async Task ControlHandoffSequence_EnforcesDeterministicConflictsAndRecovery()
+    {
+        var registry = new InMemoryConnectorRegistry();
+        var connector = new FakeConnector("agent-1", "endpoint-1");
+        await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+        var orchestrator = new InMemorySessionOrchestrator(
+            new OpenSessionUseCase(registry),
+            new DispatchCommandUseCase(registry, registry),
+            registry);
+
+        await orchestrator.OpenAsync(
+            new SessionOpenBody("session-control-sequence", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        await orchestrator.UpsertParticipantAsync(
+            "session-control-sequence",
+            new SessionParticipantUpsertBody("controller-1", "controller-1", SessionRole.Controller, "owner"),
+            TestContext.Current.CancellationToken);
+
+        await orchestrator.UpsertParticipantAsync(
+            "session-control-sequence",
+            new SessionParticipantUpsertBody("controller-2", "controller-2", SessionRole.Controller, "owner"),
+            TestContext.Current.CancellationToken);
+
+        var granted = await orchestrator.GrantControlAsync(
+            "session-control-sequence",
+            new SessionControlGrantBody("controller-1", "owner", 30, "initial grant"),
+            TestContext.Current.CancellationToken);
+        Assert.Equal("controller-1", granted.ParticipantId);
+        Assert.Equal("controller-1", granted.PrincipalId);
+
+        var leaseConflict = await Assert.ThrowsAsync<ControlArbitrationException>(() => orchestrator.RequestControlAsync(
+            "session-control-sequence",
+            new SessionControlRequestBody("controller-2", "controller-2", 30, "request while lease held"),
+            TestContext.Current.CancellationToken));
+        Assert.Equal("E_CONTROL_LEASE_HELD_BY_OTHER", leaseConflict.Code);
+        Assert.Equal("controller-2", leaseConflict.RequestedParticipantId);
+        Assert.Equal("controller-1", leaseConflict.CurrentControllerParticipantId);
+
+        var takeover = await orchestrator.ForceTakeoverControlAsync(
+            "session-control-sequence",
+            new SessionControlGrantBody("controller-2", "owner", 30, "force takeover"),
+            TestContext.Current.CancellationToken);
+        Assert.Equal("controller-2", takeover.ParticipantId);
+        Assert.Equal("controller-2", takeover.PrincipalId);
+
+        var mismatchConflict = await Assert.ThrowsAsync<ControlArbitrationException>(() => orchestrator.ReleaseControlAsync(
+            "session-control-sequence",
+            new SessionControlReleaseBody("owner", "controller-1", "wrong participant"),
+            TestContext.Current.CancellationToken));
+        Assert.Equal("E_CONTROL_PARTICIPANT_MISMATCH", mismatchConflict.Code);
+        Assert.Equal("controller-1", mismatchConflict.RequestedParticipantId);
+        Assert.Equal("controller-2", mismatchConflict.CurrentControllerParticipantId);
+
+        var released = await orchestrator.ReleaseControlAsync(
+            "session-control-sequence",
+            new SessionControlReleaseBody("owner", "controller-2", "final release"),
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(released);
+        Assert.Equal("controller-2", released!.ParticipantId);
+
+        var activeLease = await orchestrator.GetControlLeaseAsync("session-control-sequence", TestContext.Current.CancellationToken);
+        Assert.Null(activeLease);
+    }
+
+    /// <summary>
+    /// Verifies that request-control conflicts return deterministic lease-held-by-other metadata.
+    /// </summary>
+    [Fact]
+    public async Task RequestControlAsync_WhenLeaseHeldByOther_ThrowsControlArbitrationException()
+    {
+        var registry = new InMemoryConnectorRegistry();
+        var connector = new FakeConnector("agent-1", "endpoint-1");
+        await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+        var orchestrator = new InMemorySessionOrchestrator(
+            new OpenSessionUseCase(registry),
+            new DispatchCommandUseCase(registry, registry),
+            registry);
+
+        await orchestrator.OpenAsync(
+            new SessionOpenBody("session-control-conflict", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        await orchestrator.UpsertParticipantAsync(
+            "session-control-conflict",
+            new SessionParticipantUpsertBody("controller-1", "controller-1", SessionRole.Controller, "owner"),
+            TestContext.Current.CancellationToken);
+
+        await orchestrator.UpsertParticipantAsync(
+            "session-control-conflict",
+            new SessionParticipantUpsertBody("controller-2", "controller-2", SessionRole.Controller, "owner"),
+            TestContext.Current.CancellationToken);
+
+        await orchestrator.GrantControlAsync(
+            "session-control-conflict",
+            new SessionControlGrantBody("controller-1", "owner", 30),
+            TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<ControlArbitrationException>(() => orchestrator.RequestControlAsync(
+            "session-control-conflict",
+            new SessionControlRequestBody("controller-2", "controller-2", 30, "take control"),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal("E_CONTROL_LEASE_HELD_BY_OTHER", ex.Code);
+        Assert.Equal("session-control-conflict", ex.SessionId);
+        Assert.Equal("controller-1", ex.CurrentControllerParticipantId);
+        Assert.Equal("controller-2", ex.RequestedParticipantId);
+        Assert.Equal("controller-2", ex.ActedBy);
+    }
+
+    /// <summary>
+    /// Verifies that release-control conflicts return deterministic participant-mismatch metadata.
+    /// </summary>
+    [Fact]
+    public async Task ReleaseControlAsync_WhenParticipantMismatch_ThrowsControlArbitrationException()
+    {
+        var registry = new InMemoryConnectorRegistry();
+        var connector = new FakeConnector("agent-1", "endpoint-1");
+        await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+        var orchestrator = new InMemorySessionOrchestrator(
+            new OpenSessionUseCase(registry),
+            new DispatchCommandUseCase(registry, registry),
+            registry);
+
+        await orchestrator.OpenAsync(
+            new SessionOpenBody("session-control-release-conflict", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        await orchestrator.GrantControlAsync(
+            "session-control-release-conflict",
+            new SessionControlGrantBody("owner:owner", "owner", 30),
+            TestContext.Current.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<ControlArbitrationException>(() => orchestrator.ReleaseControlAsync(
+            "session-control-release-conflict",
+            new SessionControlReleaseBody("owner", "controller-1"),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal("E_CONTROL_PARTICIPANT_MISMATCH", ex.Code);
+        Assert.Equal("owner:owner", ex.CurrentControllerParticipantId);
+        Assert.Equal("controller-1", ex.RequestedParticipantId);
+        Assert.Equal("owner", ex.ActedBy);
+    }
+
+    /// <summary>
+    /// Verifies that control leases are clamped to configured min/max boundaries.
+    /// </summary>
+    [Fact]
+    public async Task RequestControlAsync_ClampsLeaseDurationWithinConfiguredBounds()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-session-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new InMemoryConnectorRegistry();
+            var connector = new FakeConnector("agent-1", "endpoint-1");
+            await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+            var fileOptions = new FilePersistenceOptions(rootDirectory);
+            var orchestrator = new InMemorySessionOrchestrator(
+                new OpenSessionUseCase(registry),
+                new DispatchCommandUseCase(registry, registry),
+                registry,
+                new FileCommandJournalStore(fileOptions),
+                new FileSessionStore(fileOptions),
+                new SessionMaintenanceOptions
+                {
+                    ControlLeaseDuration = TimeSpan.FromSeconds(30),
+                    MinControlLeaseDuration = TimeSpan.FromSeconds(5),
+                    MaxControlLeaseDuration = TimeSpan.FromSeconds(60),
+                });
+
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("session-control-clamp", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            var shortLease = await orchestrator.RequestControlAsync(
+                "session-control-clamp",
+                new SessionControlRequestBody("owner:owner", "owner", 1),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TimeSpan.FromSeconds(5), shortLease.ExpiresAtUtc - shortLease.GrantedAtUtc);
+
+            _ = await orchestrator.ReleaseControlAsync(
+                "session-control-clamp",
+                new SessionControlReleaseBody("owner"),
+                TestContext.Current.CancellationToken);
+
+            var longLease = await orchestrator.RequestControlAsync(
+                "session-control-clamp",
+                new SessionControlRequestBody("owner:owner", "owner", 3600),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TimeSpan.FromSeconds(60), longLease.ExpiresAtUtc - longLease.GrantedAtUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that reading control lease clears stale expired state from persisted session snapshots.
+    /// </summary>
+    [Fact]
+    public async Task GetControlLeaseAsync_ClearsExpiredLeaseFromSnapshot()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "hidbridge-session-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new InMemoryConnectorRegistry();
+            var connector = new FakeConnector("agent-1", "endpoint-1");
+            await registry.RegisterAsync(connector, TestContext.Current.CancellationToken);
+
+            var fileOptions = new FilePersistenceOptions(rootDirectory);
+            var sessionStore = new FileSessionStore(fileOptions);
+            var commandJournalStore = new FileCommandJournalStore(fileOptions);
+            var openUseCase = new OpenSessionUseCase(registry);
+            var dispatchUseCase = new DispatchCommandUseCase(registry, registry);
+
+            var orchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            await orchestrator.OpenAsync(
+                new SessionOpenBody("session-expired-control", SessionProfile.UltraLowLatency, "owner", "agent-1", "endpoint-1"),
+                TestContext.Current.CancellationToken);
+
+            var lease = await orchestrator.GrantControlAsync(
+                "session-expired-control",
+                new SessionControlGrantBody("owner:owner", "owner", 30),
+                TestContext.Current.CancellationToken);
+
+            var staleSnapshot = (Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken))) with
+            {
+                ControlLease = lease with
+                {
+                    GrantedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-2),
+                    ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+                },
+            };
+            await sessionStore.UpsertAsync(staleSnapshot, TestContext.Current.CancellationToken);
+
+            var reloadedOrchestrator = new InMemorySessionOrchestrator(openUseCase, dispatchUseCase, registry, commandJournalStore, sessionStore);
+            var resolvedLease = await reloadedOrchestrator.GetControlLeaseAsync("session-expired-control", TestContext.Current.CancellationToken);
+
+            var updated = Assert.Single(await sessionStore.ListAsync(TestContext.Current.CancellationToken));
+            Assert.Null(resolvedLease);
+            Assert.Null(updated.ControlLease);
+        }
+        finally
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
     /// <summary>
     /// Verifies that opening a session materializes owner participant and lease metadata.
     /// </summary>

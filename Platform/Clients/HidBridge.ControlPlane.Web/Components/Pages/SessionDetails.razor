@@ -1,5 +1,6 @@
 @page "/sessions/{SessionId}"
 @attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@implements IAsyncDisposable
 @inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
 @inject OperatorIdentityContext Identity
 @inject OperatorText T
@@ -33,6 +34,11 @@
     @if (!string.IsNullOrWhiteSpace(_actionMessage))
     {
         <div class="hid-alert hid-alert--info">@_actionMessage</div>
+    }
+
+    @if (_dashboard is not null && string.Equals(_dashboard.State, "Recovering", StringComparison.OrdinalIgnoreCase))
+    {
+        <div class="hid-alert hid-alert--info">@T["SessionRecoveringHint"]</div>
     }
 
     @if (_dashboard is not null && string.Equals(_dashboard.State, "Failed", StringComparison.OrdinalIgnoreCase))
@@ -160,6 +166,7 @@
                             <div class="hid-meta-note">@T["Participant"]: @_control.ActiveLease.ParticipantId</div>
                             <div class="hid-meta-note">@T["GrantedBy"]: @_control.ActiveLease.GrantedBy</div>
                             <div class="hid-meta-note">@T["LeaseExpires"]: @FormatTime(_control.ActiveLease.ExpiresAtUtc)</div>
+                            <div class="hid-meta-note">@T["LeaseRemaining"]: @FormatLeaseRemaining(_control.ActiveLease.ExpiresAtUtc)</div>
                         </div>
                     }
 
@@ -331,7 +338,10 @@
                     <div class="hid-form-grid">
                         <label class="hid-field">
                             <span class="hid-field-label">@T["Principal"]</span>
-                            <input class="hid-input" @bind="_shareRequest.PrincipalId" placeholder="operator@example.com" />
+                            <input class="hid-input"
+                                   @bind="_shareRequest.PrincipalId"
+                                   placeholder="operator@example.com"
+                                   readonly="@(!_canModerate)" />
                         </label>
                         <label class="hid-field">
                             <span class="hid-field-label">@T["Role"]</span>
@@ -345,12 +355,12 @@
                     </div>
                     <div class="hid-candidate-actions">
                         <button class="hid-button-primary hid-button-sm"
-                                disabled="@(_busy || string.IsNullOrWhiteSpace(_shareRequest.PrincipalId))"
+                                disabled="@(_busy || !_canModerate || string.IsNullOrWhiteSpace(EffectiveSharePrincipalId))"
                                 @onclick="GrantShareAsync">
                             @T["GrantInvite"]
                         </button>
                         <button class="hid-button-secondary hid-button-sm"
-                                disabled="@(_busy || string.IsNullOrWhiteSpace(_shareRequest.PrincipalId))"
+                                disabled="@(_busy || string.IsNullOrWhiteSpace(EffectiveSharePrincipalId))"
                                 @onclick="RequestInvitationAsync">
                             @T["RequestInvite"]
                         </button>
@@ -452,7 +462,7 @@
                                 <div class="hid-list-card-header">
                                     <div>
                                         <div class="hid-list-title">@participant.PrincipalId</div>
-                                        <div class="hid-list-subtitle">@participant.ParticipantId · @participant.Role</div>
+                                        <div class="hid-list-subtitle">@BuildParticipantSubtitle(participant)</div>
                                     </div>
                                     <div class="hid-list-side">
                                         <div class="hid-list-title">@participant.CommandCount @T["Commands"]</div>
@@ -519,7 +529,7 @@
     private AuthorizationDeniedViewModel? _denial;
     private string? _backendUnavailableMessage;
     private bool _busy;
-    private SessionShareGrantRequestViewModel _shareRequest = new();
+    private SessionShareGrantRequestViewModel _shareRequest = new() { Role = "Observer" };
     private CommandAckViewModel? _lastCommandAck;
     private string _demoCommandText = "Hello from MicroMeet";
     private string _demoShortcut = "CTRL+ALT+M";
@@ -530,8 +540,16 @@
     private const string CommandScenarioShortcutId = "shortcut";
     private const string CommandScenarioMouseId = "mouse";
     private static readonly string[] SessionRoles = ["Observer", "Controller", "Presenter"];
+    private static readonly TimeSpan RecoveryStatePollInterval = TimeSpan.FromSeconds(3);
+    private CancellationTokenSource? _recoveryPollingCts;
+    private Task? _recoveryPollingTask;
+    private bool _isRefreshing;
 
     private string CurrentOperatorPrincipalId => Identity.PrincipalId;
+    private string EffectiveSharePrincipalId =>
+        string.IsNullOrWhiteSpace(_shareRequest.PrincipalId)
+            ? (CurrentOperatorPrincipalId?.Trim() ?? string.Empty)
+            : _shareRequest.PrincipalId.Trim();
     private string SessionRoomUrl => Navigation.ToAbsoluteUri($"/sessions/{Uri.EscapeDataString(SessionId)}").ToString();
 
     private bool _canModerate => Identity.IsModerator
@@ -597,21 +615,76 @@
     }
 
     protected override async Task OnParametersSetAsync()
-        => await RefreshAsync();
+    {
+        EnsureShareRequestDefaults();
+        EnsureRecoveryStatePollingStarted();
+        await RefreshAsync();
+    }
+
+    private void EnsureRecoveryStatePollingStarted()
+    {
+        if (_recoveryPollingTask is not null)
+        {
+            return;
+        }
+
+        _recoveryPollingCts = new CancellationTokenSource();
+        _recoveryPollingTask = RecoveryStatePollingLoopAsync(_recoveryPollingCts.Token);
+    }
+
+    private async Task RecoveryStatePollingLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(RecoveryStatePollInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_busy || !ShouldPollRecoveryState())
+                {
+                    continue;
+                }
+
+                await InvokeAsync(async () =>
+                {
+                    if (_busy || !ShouldPollRecoveryState())
+                    {
+                        return;
+                    }
+
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected during component disposal.
+        }
+    }
+
+    private bool ShouldPollRecoveryState()
+        => string.Equals(_dashboard?.State, "Recovering", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(_dashboard?.State, "Failed", StringComparison.OrdinalIgnoreCase);
 
     private async Task RefreshAsync()
     {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
         try
         {
+            _isRefreshing = true;
             _dashboard = await ApiClient.GetSessionDashboardAsync(SessionId);
             _control = await ApiClient.GetControlDashboardAsync(SessionId);
             _lobby = await ApiClient.GetLobbyAsync(SessionId);
             _participants = await ApiClient.GetParticipantActivityAsync(SessionId);
             _timeline = await ApiClient.GetOperatorTimelineAsync(SessionId, 20);
+            EnsureShareRequestDefaults();
             _error = null;
             _denial = null;
             _backendUnavailableMessage = null;
-            ResetDrafts();
         }
         catch (ControlPlaneApiUnavailableException exception)
         {
@@ -622,7 +695,7 @@
         catch (ControlPlaneApiException exception)
         {
             _denial = exception.AuthorizationDenied;
-            _error = $"{T["SessionDetailsTitle"]}: {exception.Message}";
+            _error = $"{T["SessionDetailsTitle"]}: {ResolveApiErrorMessage(exception)}";
             _backendUnavailableMessage = null;
         }
         catch (Exception exception)
@@ -631,12 +704,16 @@
             _error = $"{T["SessionDetailsTitle"]}: {exception.Message}";
             _backendUnavailableMessage = null;
         }
+        finally
+        {
+            _isRefreshing = false;
+        }
     }
 
     private async Task RequestControlAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(
             $"{T["ControlRequestedMessage"]} {candidate.PrincipalId}.",
-            () => ApiClient.RequestControlAsync(SessionId, candidate.ParticipantId, candidate.PrincipalId, 30, "operator requested control"));
+            () => ApiClient.RequestControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, 30, "operator requested control"));
 
     private async Task ReleaseControlAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(
@@ -776,9 +853,9 @@
         catch (ControlPlaneApiException exception)
         {
             _denial = exception.AuthorizationDenied;
-            _error = exception.Message;
+            _error = ResolveApiErrorMessage(exception);
             _backendUnavailableMessage = null;
-            var detail = exception.AuthorizationDenied?.Message ?? exception.Message;
+            var detail = exception.AuthorizationDenied?.Message ?? ResolveApiErrorMessage(exception);
             RegisterCommandScenarioResult(scenarioId, scenarioName, "Rejected", false, detail);
         }
         catch (Exception exception)
@@ -816,7 +893,7 @@
         catch (ControlPlaneApiException exception)
         {
             _denial = exception.AuthorizationDenied;
-            _error = exception.Message;
+            _error = ResolveApiErrorMessage(exception);
             _backendUnavailableMessage = null;
         }
         catch (Exception exception)
@@ -854,7 +931,7 @@
         catch (ControlPlaneApiException exception)
         {
             _denial = exception.AuthorizationDenied;
-            _error = exception.Message;
+            _error = ResolveApiErrorMessage(exception);
             _backendUnavailableMessage = null;
         }
         catch (Exception exception)
@@ -955,6 +1032,14 @@
             ?.ParticipantId;
     }
 
+    private static string BuildParticipantSubtitle(ParticipantActivityViewModel participant)
+    {
+        var shareStatusSuffix = participant.DerivedFromShare && !string.IsNullOrWhiteSpace(participant.ShareStatus)
+            ? $" · share:{participant.ShareStatus}"
+            : string.Empty;
+        return $"{participant.ParticipantId} · {participant.Role}{shareStatusSuffix}";
+    }
+
     private bool CanRelease(ControlCandidateViewModel candidate)
         => string.Equals(candidate.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase) || _canModerate;
 
@@ -971,7 +1056,7 @@
         => new()
         {
             ShareId = BuildShareId("share"),
-            PrincipalId = _shareRequest.PrincipalId.Trim(),
+            PrincipalId = EffectiveSharePrincipalId,
             GrantedBy = CurrentOperatorPrincipalId,
             Role = _shareRequest.Role,
             TenantId = Identity.TenantId,
@@ -983,7 +1068,7 @@
         => new()
         {
             ShareId = BuildShareId("invite"),
-            PrincipalId = _shareRequest.PrincipalId.Trim(),
+            PrincipalId = EffectiveSharePrincipalId,
             RequestedBy = CurrentOperatorPrincipalId,
             RequestedRole = _shareRequest.Role,
             Message = "requested in session room",
@@ -996,8 +1081,18 @@
     {
         _shareRequest = new SessionShareGrantRequestViewModel
         {
+            PrincipalId = CurrentOperatorPrincipalId,
             Role = "Observer",
         };
+    }
+
+    private void EnsureShareRequestDefaults()
+    {
+        if (string.IsNullOrWhiteSpace(_shareRequest.PrincipalId)
+            && !string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId))
+        {
+            _shareRequest.PrincipalId = CurrentOperatorPrincipalId.Trim();
+        }
     }
 
     private static string BuildShareId(string prefix)
@@ -1006,8 +1101,78 @@
         return shareId.Length <= 48 ? shareId : shareId[..48];
     }
 
+    private string ResolveApiErrorMessage(ControlPlaneApiException exception)
+    {
+        if (exception.ControlConflict is null)
+        {
+            return exception.Message;
+        }
+
+        return BuildControlConflictMessage(exception.ControlConflict);
+    }
+
+    private string BuildControlConflictMessage(ControlArbitrationConflictViewModel conflict)
+    {
+        var requestedParticipant = conflict.RequestedParticipantId ?? "—";
+        var activeParticipant = conflict.CurrentController?.ParticipantId ?? "—";
+        var activePrincipal = conflict.CurrentController?.PrincipalId ?? "—";
+        var leaseExpires = FormatTime(conflict.CurrentController?.ExpiresAtUtc);
+
+        return conflict.Code switch
+        {
+            "E_CONTROL_LEASE_HELD_BY_OTHER" => string.Format(T["ControlConflictLeaseHeldByOther"], activePrincipal, leaseExpires),
+            "E_CONTROL_PARTICIPANT_MISMATCH" => string.Format(T["ControlConflictParticipantMismatch"], activeParticipant, requestedParticipant),
+            "E_CONTROL_NOT_ELIGIBLE" => string.Format(T["ControlConflictNotEligible"], requestedParticipant),
+            _ => string.Format(T["ControlConflictGeneric"], conflict.Error, conflict.Code),
+        };
+    }
+
+    private string FormatLeaseRemaining(DateTimeOffset expiresAtUtc)
+    {
+        var remaining = expiresAtUtc - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            return T["LeaseExpiredNow"];
+        }
+
+        if (remaining.TotalMinutes >= 1)
+        {
+            return string.Format(
+                T["LeaseRemainingMinutesSeconds"],
+                (int)remaining.TotalMinutes,
+                Math.Max(0, remaining.Seconds));
+        }
+
+        return string.Format(T["LeaseRemainingSeconds"], Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds)));
+    }
+
     private static string FormatTime(DateTimeOffset? value)
         => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_recoveryPollingCts is null)
+        {
+            return;
+        }
+
+        _recoveryPollingCts.Cancel();
+
+        if (_recoveryPollingTask is not null)
+        {
+            try
+            {
+                await _recoveryPollingTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during component disposal.
+            }
+        }
+
+        _recoveryPollingCts.Dispose();
+        _recoveryPollingCts = null;
+    }
 
     private sealed record CommandScenarioSnapshot(
         string AckStatus,

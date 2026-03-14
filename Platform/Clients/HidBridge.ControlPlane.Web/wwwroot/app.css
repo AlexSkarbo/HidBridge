@@ -355,6 +355,22 @@ html[data-platform="apple"] .hid-logo {
     color: var(--hid-foreground-strong);
 }
 
+.hid-backend-banner {
+    margin-top: -.35rem;
+    margin-bottom: -.35rem;
+}
+
+.hid-backend-banner-title {
+    font-weight: 700;
+    margin-bottom: .2rem;
+}
+
+.hid-backend-banner-detail {
+    margin-top: .45rem;
+    color: var(--hid-muted);
+    font-size: .9rem;
+}
+
 .hid-empty-state {
     padding: 1.2rem;
     color: var(--hid-muted);

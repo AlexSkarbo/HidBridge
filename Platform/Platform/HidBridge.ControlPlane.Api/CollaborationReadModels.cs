@@ -49,6 +49,7 @@ public sealed record ParticipantActivityReadModel(
     DateTimeOffset? LastCommandAtUtc,
     bool DerivedFromShare,
     string? ShareId,
+    SessionShareStatus? ShareStatus,
     bool IsCurrentController);
 
 /// <summary>

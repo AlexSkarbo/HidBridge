@@ -564,6 +564,35 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies that control-arbitration conflicts are parsed into a typed conflict payload.
+    /// </summary>
+    [Fact]
+    public async Task RequestControlAsync_ParsesControlArbitrationConflict()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(
+            HttpStatusCode.Conflict,
+            new ControlArbitrationConflictViewModel(
+                "session-1",
+                "E_CONTROL_LEASE_HELD_BY_OTHER",
+                "Session session-1 is currently controlled by owner@example.com.",
+                "participant-2",
+                "viewer@example.com",
+                new ControlArbitrationCurrentControllerViewModel("participant-1", "owner@example.com", DateTimeOffset.UtcNow.AddSeconds(10))));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<ControlPlaneApiException>(() =>
+            apiClient.RequestControlAsync("session-1", "participant-2", "viewer@example.com", 30, "need control", cancellationToken));
+
+        Assert.Equal(HttpStatusCode.Conflict, exception.StatusCode);
+        Assert.NotNull(exception.ControlConflict);
+        Assert.Equal("E_CONTROL_LEASE_HELD_BY_OTHER", exception.ControlConflict!.Code);
+        Assert.Equal("participant-1", exception.ControlConflict.CurrentController?.ParticipantId);
+        Assert.Null(exception.AuthorizationDenied);
+    }
+
+    /// <summary>
     /// Verifies that structured backend denials are surfaced as typed client exceptions.
     /// </summary>
     [Fact]

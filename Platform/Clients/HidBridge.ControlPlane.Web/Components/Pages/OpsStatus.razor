@@ -202,6 +202,11 @@
                         <div class="hid-list-title">@T["RunTokenDebugCommand"]</div>
                         <pre class="hid-command-block">powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task token-debug</pre>
                     </div>
+                    <div class="hid-command-card">
+                        <div class="hid-list-title">@T["RunUartDiagnosticsCommand"]</div>
+                        <pre class="hid-command-block">powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093</pre>
+                        <div class="hid-list-subtitle">@T["UartAppliedNoEffectHint"]</div>
+                    </div>
                     <div class="hid-candidate-actions">
                         <a class="hid-button-secondary hid-button-sm" href="/policy-governance">@T["OpenPolicyGovernance"]</a>
                         <a class="hid-button-secondary hid-button-sm" href="/settings">@T["OpenSettingsLink"]</a>

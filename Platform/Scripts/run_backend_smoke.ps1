@@ -505,6 +505,37 @@ try {
         organizationId = "local-org"
     }
 
+    $ownerParticipantId = "owner:smoke-runner"
+
+    $lastStep = "request control conflict"
+    $requestControlConflict = Invoke-ExpectedJsonFailure -Method "POST" -Uri "$BaseUrl/api/v1/sessions/$sessionId/control/request" -ExpectedStatusCode 409 -Headers $ownerHeaders -Body @{
+        participantId = $ownerParticipantId
+        requestedBy = "smoke-runner"
+        leaseSeconds = 30
+        reason = "owner should wait for active lease"
+        tenantId = "local-tenant"
+        organizationId = "local-org"
+    }
+
+    $lastStep = "grant control not eligible conflict"
+    $notEligibleControlConflict = Invoke-ExpectedJsonFailure -Method "POST" -Uri "$BaseUrl/api/v1/sessions/$sessionId/control/grant" -ExpectedStatusCode 409 -Headers $ownerHeaders -Body @{
+        participantId = $participantId
+        grantedBy = "smoke-runner"
+        leaseSeconds = 30
+        reason = "observer should be ineligible"
+        tenantId = "local-tenant"
+        organizationId = "local-org"
+    }
+
+    $lastStep = "release control mismatch conflict"
+    $releaseMismatchConflict = Invoke-ExpectedJsonFailure -Method "POST" -Uri "$BaseUrl/api/v1/sessions/$sessionId/control/release" -ExpectedStatusCode 409 -Headers $ownerHeaders -Body @{
+        participantId = $ownerParticipantId
+        actedBy = "smoke-runner"
+        reason = "release target mismatch"
+        tenantId = "local-tenant"
+        organizationId = "local-org"
+    }
+
     $lastStep = "read active control lease"
     $activeControl = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/sessions/$sessionId/control" -Headers $controllerHeaders
 
@@ -533,8 +564,6 @@ try {
         tenantId = "local-tenant"
         organizationId = "local-org"
     }
-
-    $ownerParticipantId = "owner:smoke-runner"
 
     $lastStep = "force takeover control"
     $takeoverControl = Invoke-Json -Method "POST" -Uri "$BaseUrl/api/v1/sessions/$sessionId/control/force-takeover" -Headers $ownerHeaders -Body @{
@@ -575,9 +604,13 @@ try {
     $lastStep = "read telemetry dashboard"
     $telemetryDashboard = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/dashboards/telemetry?take=20" -Headers $ownerHeaders
     $lastStep = "query session projections"
-    $sessionProjection = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/projections/sessions?state=Active&principalId=smoke-runner&take=20" -Headers $ownerHeaders
+    # Do not pin to state=Active here: with failure/recovery hardening, a just-tested
+    # room can legitimately be Recovering/Degraded during smoke execution.
+    $sessionProjection = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/projections/sessions?principalId=smoke-runner&take=50" -Headers $ownerHeaders
     $lastStep = "query endpoint projections"
-    $endpointProjection = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/projections/endpoints?status=Active&activeOnly=true&take=20" -Headers $ownerHeaders
+    # Do not constrain endpoint status to Active: during recovery hardening an endpoint
+    # can be temporarily Recovering/Degraded while still being the correct smoke target.
+    $endpointProjection = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/projections/endpoints?take=50" -Headers $ownerHeaders
     $lastStep = "query audit projections"
     $auditProjection = Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/projections/audit?sessionId=${sessionId}&take=20" -Headers $ownerHeaders
     $lastStep = "query telemetry projections"
@@ -608,6 +641,14 @@ try {
     Assert-True ((Get-Count $auditAfter) -gt (Get-Count $auditBefore)) "Expected audit stream growth after session actions."
     Assert-True ($null -ne $activeControl) "Expected an active control lease after request."
     Assert-True ($activeControl.principalId -eq "controller-user") "Expected controller-user to hold control after request."
+    Assert-True ($requestControlConflict.code -eq "E_CONTROL_LEASE_HELD_BY_OTHER") "Expected lease-held-by-other conflict code."
+    Assert-True ($requestControlConflict.requestedParticipantId -eq $ownerParticipantId) "Expected requested participant id in lease conflict payload."
+    Assert-True ($requestControlConflict.currentController.principalId -eq "controller-user") "Expected current controller principal in lease conflict payload."
+    Assert-True ($notEligibleControlConflict.code -eq "E_CONTROL_NOT_ELIGIBLE") "Expected participant-not-eligible conflict code."
+    Assert-True ($notEligibleControlConflict.requestedParticipantId -eq $participantId) "Expected observer participant id in not-eligible conflict payload."
+    Assert-True ($releaseMismatchConflict.code -eq "E_CONTROL_PARTICIPANT_MISMATCH") "Expected participant-mismatch conflict code."
+    Assert-True ($releaseMismatchConflict.requestedParticipantId -eq $ownerParticipantId) "Expected requested participant id in release mismatch payload."
+    Assert-True ($releaseMismatchConflict.currentController.participantId -eq $controllerParticipantId) "Expected active participant id in release mismatch payload."
     Assert-True ($takeoverControl.principalId -eq "smoke-runner") "Expected smoke-runner to hold control after takeover."
     Assert-True ($controlDashboard.activeLease.principalId -eq "smoke-runner") "Expected control dashboard to reflect the owner takeover."
     Assert-True ($session.tenantId -eq "local-tenant") "Expected caller tenant scope to be stamped onto the session."
@@ -622,8 +663,12 @@ try {
     Assert-True ($inventoryDashboard.totalAgents -ge 1) "Expected inventory dashboard to report at least one agent."
     Assert-True ($auditDashboard.totalEvents -ge (Get-Count $auditAfter)) "Expected audit dashboard totals to cover the persisted audit stream."
     Assert-True ($null -ne $telemetryDashboard) "Expected telemetry dashboard response."
-    Assert-True ($sessionProjection.total -ge 1) "Expected at least one projected session item."
-    Assert-True ($endpointProjection.total -ge 1) "Expected at least one projected endpoint item."
+    $sessionProjectionItems = @($sessionProjection.items)
+    $projectedSmokeSession = @($sessionProjectionItems | Where-Object { $_.sessionId -eq $sessionId } | Select-Object -First 1)[0]
+    Assert-True ($null -ne $projectedSmokeSession) "Expected smoke session to appear in session projections."
+    $endpointProjectionItems = @($endpointProjection.items)
+    $projectedSmokeEndpoint = @($endpointProjectionItems | Where-Object { $_.endpointId -eq "endpoint_local_demo" } | Select-Object -First 1)[0]
+    Assert-True ($null -ne $projectedSmokeEndpoint) "Expected smoke endpoint to appear in endpoint projections."
     Assert-True ($auditProjection.total -ge 1) "Expected at least one projected audit item."
     Assert-True ($telemetryProjection.total -ge 1) "Expected at least one projected telemetry item."
     Assert-True ($replayBundle.sessionId -eq $sessionId) "Expected replay bundle to match the smoke session."
@@ -666,6 +711,9 @@ try {
         AcceptedInvitation = $acceptedInvitation
         ControlLease = $controlLease
         ActiveControl = $activeControl
+        RequestControlConflict = $requestControlConflict
+        NotEligibleControlConflict = $notEligibleControlConflict
+        ReleaseMismatchConflict = $releaseMismatchConflict
         CommandAck = $commandAck
         ReleasedControl = $releasedControl
         TakeoverControl = $takeoverControl

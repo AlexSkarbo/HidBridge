@@ -179,6 +179,35 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                 request.Args.TryGetValue("shareId", out var shareId) ? shareId?.ToString() : null),
             cancellationToken);
 
+        if (session is not null)
+        {
+            var shouldRefreshLease = ShouldRefreshSessionLeaseFromDispatch(ack);
+            var shouldMoveToRecovering = ShouldMoveSessionToRecoveringFromDispatch(ack)
+                && session.State is SessionState.Active or SessionState.Preparing or SessionState.Arming;
+            var shouldMoveToActive = ack.Status == CommandStatus.Applied
+                && session.State is SessionState.Recovering or SessionState.Failed;
+
+            if (shouldRefreshLease || shouldMoveToRecovering || shouldMoveToActive)
+            {
+                if (shouldRefreshLease)
+                {
+                    session.SetLease(nowUtc, SessionLifecyclePolicy.ComputeLeaseExpiration(nowUtc, _options.LeaseDuration));
+                }
+
+                if (shouldMoveToRecovering)
+                {
+                    session.MoveTo(SessionState.Recovering);
+                }
+
+                if (shouldMoveToActive)
+                {
+                    session.MoveTo(SessionState.Active);
+                }
+
+                await PersistSessionAsync(session, nowUtc, cancellationToken);
+            }
+        }
+
         return ack;
     }
 
@@ -500,13 +529,7 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     public async Task<SessionControlLeaseBody?> GetControlLeaseAsync(string sessionId, CancellationToken cancellationToken)
     {
         var aggregate = await RequireSessionAsync(sessionId, cancellationToken);
-        var lease = aggregate.ControlLease;
-        if (lease is null || lease.ExpiresAtUtc <= DateTimeOffset.UtcNow)
-        {
-            return null;
-        }
-
-        return lease;
+        return await NormalizeControlLeaseAsync(aggregate, DateTimeOffset.UtcNow, cancellationToken);
     }
 
     /// <summary>
@@ -522,15 +545,18 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         var nowUtc = DateTimeOffset.UtcNow;
         SessionAuthorizationPolicy.EnsureInSessionScope(aggregate, request.TenantId, request.OrganizationId, request.OperatorRoles);
         var participant = RequireParticipant(aggregate, request.ParticipantId, sessionId);
-        SessionAuthorizationPolicy.EnsureControlEligible(participant);
+        SessionAuthorizationPolicy.EnsureControlEligible(participant, sessionId);
         SessionAuthorizationPolicy.EnsureCanRequestControl(aggregate, request.RequestedBy, participant, request.OperatorRoles);
 
-        var existingLease = aggregate.ControlLease;
+        var existingLease = await NormalizeControlLeaseAsync(aggregate, nowUtc, cancellationToken);
         if (existingLease is not null
-            && existingLease.ExpiresAtUtc > nowUtc
             && !string.Equals(existingLease.PrincipalId, participant.PrincipalId, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Session {sessionId} is already controlled by {existingLease.PrincipalId}.");
+            throw ControlArbitrationException.LeaseHeldByOther(
+                sessionId,
+                existingLease,
+                participant.ParticipantId,
+                request.RequestedBy);
         }
 
         var lease = BuildControlLease(participant, request.RequestedBy, nowUtc, request.LeaseSeconds);
@@ -575,20 +601,24 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     public async Task<SessionControlLeaseBody?> ReleaseControlAsync(string sessionId, SessionControlReleaseBody request, CancellationToken cancellationToken)
     {
         var aggregate = await RequireSessionAsync(sessionId, cancellationToken);
-        var existingLease = aggregate.ControlLease;
+        var nowUtc = DateTimeOffset.UtcNow;
+        var existingLease = await NormalizeControlLeaseAsync(aggregate, nowUtc, cancellationToken);
         if (existingLease is null)
         {
             return null;
         }
 
-        var nowUtc = DateTimeOffset.UtcNow;
         SessionAuthorizationPolicy.EnsureInSessionScope(aggregate, request.TenantId, request.OrganizationId, request.OperatorRoles);
         SessionAuthorizationPolicy.EnsureCanReleaseControl(aggregate, request.ActedBy, existingLease, request.OperatorRoles);
 
         if (!string.IsNullOrWhiteSpace(request.ParticipantId)
             && !string.Equals(existingLease.ParticipantId, request.ParticipantId, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Current control lease is held by participant {existingLease.ParticipantId}, not {request.ParticipantId}.");
+            throw ControlArbitrationException.ParticipantMismatch(
+                sessionId,
+                existingLease,
+                request.ParticipantId,
+                request.ActedBy);
         }
 
         aggregate.ReplaceControlLease(null);
@@ -685,6 +715,41 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
 
     private async Task PersistSessionAsync(SessionAggregate aggregate, DateTimeOffset nowUtc, CancellationToken cancellationToken)
         => await _sessionStore.UpsertAsync(ToSnapshot(aggregate, nowUtc), cancellationToken);
+
+    private static bool ShouldRefreshSessionLeaseFromDispatch(CommandAckBody ack)
+    {
+        if (ack.Status is CommandStatus.Applied or CommandStatus.Accepted or CommandStatus.Timeout)
+        {
+            return true;
+        }
+
+        if (ack.Status != CommandStatus.Rejected)
+        {
+            return false;
+        }
+
+        if (ack.Error is null)
+        {
+            return true;
+        }
+
+        return ack.Error.Domain switch
+        {
+            ErrorDomain.Auth => false,
+            ErrorDomain.Session => false,
+            _ => !string.Equals(ack.Error.Code, "E_COMMAND_INVALID_PAYLOAD", StringComparison.OrdinalIgnoreCase),
+        };
+    }
+
+    private static bool ShouldMoveSessionToRecoveringFromDispatch(CommandAckBody ack)
+    {
+        if (ack.Status is CommandStatus.Applied or CommandStatus.Accepted)
+        {
+            return false;
+        }
+
+        return ShouldRefreshSessionLeaseFromDispatch(ack);
+    }
 
     private async Task<SessionShareBody> TransitionShareAsync(
         string sessionId,
@@ -835,15 +900,18 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         SessionAuthorizationPolicy.EnsureCanModerate(aggregate, request.GrantedBy, request.OperatorRoles, nowUtc);
 
         var participant = RequireParticipant(aggregate, request.ParticipantId, sessionId);
-        SessionAuthorizationPolicy.EnsureControlEligible(participant);
+        SessionAuthorizationPolicy.EnsureControlEligible(participant, sessionId);
 
-        var existingLease = aggregate.ControlLease;
+        var existingLease = await NormalizeControlLeaseAsync(aggregate, nowUtc, cancellationToken);
         if (!forceTakeover
             && existingLease is not null
-            && existingLease.ExpiresAtUtc > nowUtc
             && !string.Equals(existingLease.PrincipalId, participant.PrincipalId, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Session {sessionId} is already controlled by {existingLease.PrincipalId}.");
+            throw ControlArbitrationException.LeaseHeldByOther(
+                sessionId,
+                existingLease,
+                participant.ParticipantId,
+                request.GrantedBy);
         }
 
         var lease = BuildControlLease(participant, request.GrantedBy, nowUtc, request.LeaseSeconds);
@@ -877,16 +945,55 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
 
     private SessionControlLeaseBody BuildControlLease(SessionParticipantBody participant, string grantedBy, DateTimeOffset nowUtc, int? leaseSeconds)
     {
+        var defaultDuration = _options.ControlLeaseDuration > TimeSpan.Zero
+            ? _options.ControlLeaseDuration
+            : TimeSpan.FromSeconds(30);
+        var minDuration = _options.MinControlLeaseDuration > TimeSpan.Zero
+            ? _options.MinControlLeaseDuration
+            : TimeSpan.FromSeconds(1);
+        var maxDurationCandidate = _options.MaxControlLeaseDuration > TimeSpan.Zero
+            ? _options.MaxControlLeaseDuration
+            : defaultDuration;
+        var maxDuration = maxDurationCandidate < minDuration
+            ? minDuration
+            : maxDurationCandidate;
+
         var requestedDuration = leaseSeconds.HasValue && leaseSeconds.Value > 0
             ? TimeSpan.FromSeconds(leaseSeconds.Value)
-            : _options.ControlLeaseDuration;
+            : defaultDuration;
+        var effectiveDuration = requestedDuration < minDuration
+            ? minDuration
+            : requestedDuration > maxDuration
+                ? maxDuration
+                : requestedDuration;
 
         return new SessionControlLeaseBody(
             participant.ParticipantId,
             participant.PrincipalId,
             grantedBy,
             nowUtc,
-            nowUtc + requestedDuration);
+            nowUtc + effectiveDuration);
+    }
+
+    private async Task<SessionControlLeaseBody?> NormalizeControlLeaseAsync(
+        SessionAggregate aggregate,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var lease = aggregate.ControlLease;
+        if (lease is null)
+        {
+            return null;
+        }
+
+        if (lease.ExpiresAtUtc > nowUtc)
+        {
+            return lease;
+        }
+
+        aggregate.ReplaceControlLease(null);
+        await PersistSessionAsync(aggregate, nowUtc, cancellationToken);
+        return null;
     }
 
 

@@ -1,0 +1,13 @@
+{
+  "name": "hidbridge-controlplane-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tailwind build pipeline for HidBridge ControlPlane Web.",
+  "scripts": {
+    "tailwind:build": "tailwindcss -i ./Styles/tailwind.input.css -o ./wwwroot/tailwind.generated.css --minify",
+    "tailwind:watch": "tailwindcss -i ./Styles/tailwind.input.css -o ./wwwroot/tailwind.generated.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

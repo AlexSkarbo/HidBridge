@@ -43,6 +43,7 @@ Tools/HidControlServer/devices_cache.json
 Tools/HidControlServer/tmp_source.json
 USBCaptureDesc.txt
 Platform/Identity/Keycloak/providers/*.local.json
+Platform/Clients/HidBridge.ControlPlane.Web/node_modules/
 .tmp_keycloak_debug.ps1
 pi@192.168.0.152
 

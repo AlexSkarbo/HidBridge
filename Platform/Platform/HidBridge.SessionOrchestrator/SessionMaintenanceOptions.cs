@@ -16,6 +16,16 @@ public sealed class SessionMaintenanceOptions
     public TimeSpan ControlLeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Gets or sets the minimum active-controller lease duration accepted from request payloads.
+    /// </summary>
+    public TimeSpan MinControlLeaseDuration { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets or sets the maximum active-controller lease duration accepted from request payloads.
+    /// </summary>
+    public TimeSpan MaxControlLeaseDuration { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// Gets or sets the grace period allowed while a session stays in recovering state.
     /// </summary>
     public TimeSpan RecoveryGracePeriod { get; set; } = TimeSpan.FromMinutes(2);
