@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "close-failed-rooms")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "close-failed-rooms")]
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
@@ -28,6 +28,7 @@ $scriptMap = @{
     "token-debug"  = "run_token_debug.ps1"
     "bearer-rollout" = "run_bearer_rollout_phase.ps1"
     "identity-reset" = "..\\run_identity_reset.ps1"
+    "identity-onboard" = "..\\run_identity_onboard.ps1"
     "demo-flow"    = "run_demo_flow.ps1"
     "demo-seed"    = "run_demo_seed.ps1"
     "demo-gate"    = "run_demo_gate.ps1"

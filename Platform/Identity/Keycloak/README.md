@@ -166,6 +166,9 @@ Click-by-click runbook для Keycloak UI claim mapping:
     - `operator.smoke.foreign`
   - гарантує групу `hidbridge-operators` з роллю `operator.viewer`
 
+Скрипт idempotent onboarding одного оператора:
+- `Platform/Identity/Keycloak/Onboard-HidBridgeOperator.ps1`
+
 Приклад запуску:
 ```powershell
 powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Sync-HidBridgeDevRealm.ps1
@@ -222,6 +225,57 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Reset-HidBri
 Якщо потрібен саме чистий reset без external IdP:
 ```powershell
 powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Reset-HidBridgeDevRealm.ps1 -AllowIdentityProviderLoss
+```
+
+## Operator onboarding automation (single-user, idempotent)
+
+Скрипт:
+- `Platform/Identity/Keycloak/Onboard-HidBridgeOperator.ps1`
+
+Що робить:
+- знаходить існуючого user за `userId` або `username` або `email`;
+- гарантує групу `hidbridge-operators` з базовою роллю `operator.viewer`;
+- upsert-ить user attributes:
+  - `tenant_id`
+  - `org_id`
+  - `principal_id`
+- додає user у `hidbridge-operators`;
+- працює `idempotent` (повторний запуск не дає зайвих змін).
+
+Примітка:
+- для federated user часто надійніше запускати через `-Username` (де `username` у Keycloak часто дорівнює email), а не тільки через `-Email`.
+
+Рекомендований запуск (через launcher):
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-TenantId','local-tenant',
+  '-OrganizationId','local-org'
+)
+```
+
+Dry-run preview (без змін):
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-PrintOnly'
+)
+```
+
+PowerShell `-WhatIf` preview:
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-WhatIf'
+)
+```
+
+JSON summary:
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-OutputJsonPath','Platform/.logs/identity-onboard/result.json'
+)
 ```
 
 ## Відновлення після "зник Google provider / зник Google user"

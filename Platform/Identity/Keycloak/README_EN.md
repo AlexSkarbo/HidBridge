@@ -23,6 +23,8 @@ This baseline covers:
   - `Platform/Identity/Keycloak/realm-import/hidbridge-dev-realm.json`
 - Realm sync script:
   - `Platform/Identity/Keycloak/Sync-HidBridgeDevRealm.ps1`
+- Single-user onboarding script:
+  - `Platform/Identity/Keycloak/Onboard-HidBridgeOperator.ps1`
 - Safe reset script:
   - `Platform/Identity/Keycloak/Reset-HidBridgeDevRealm.ps1`
 - Google provider template:
@@ -85,6 +87,57 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Reset-HidBri
 Intentionally clean reset (remove external IdPs):
 ```powershell
 powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Reset-HidBridgeDevRealm.ps1 -AllowIdentityProviderLoss
+```
+
+## Operator Onboarding Automation (Single User, Idempotent)
+
+Script:
+- `Platform/Identity/Keycloak/Onboard-HidBridgeOperator.ps1`
+
+What it does:
+- resolves one existing user by `userId` or `username` or `email`;
+- ensures group `hidbridge-operators` with base role `operator.viewer`;
+- upserts user attributes:
+  - `tenant_id`
+  - `org_id`
+  - `principal_id`
+- adds the user to `hidbridge-operators`;
+- remains idempotent on repeated runs.
+
+Note:
+- for federated users, `-Username` is often more reliable than `-Email` (Keycloak username is frequently set to the email-like login).
+
+Run via launcher:
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-TenantId','local-tenant',
+  '-OrganizationId','local-org'
+)
+```
+
+Dry-run preview (no writes):
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-PrintOnly'
+)
+```
+
+`WhatIf` preview:
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-WhatIf'
+)
+```
+
+JSON summary:
+```powershell
+& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+  '-Email','alexandr.skarbo@gmail.com',
+  '-OutputJsonPath','Platform/.logs/identity-onboard/result.json'
+)
 ```
 
 ## Recovery: "Google provider/user disappeared"

@@ -506,6 +506,8 @@ Policy governance diagnostics:
   - `Docs/SystemArchitecture/HidBridge_Bearer_Rollout_Profile_UA.md`
 - для контрольованого reset/reimport dev realm додано:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset`
+- для idempotent onboarding нового OIDC оператора додано:
+  - `& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @('-Email','<user@email>')`
 - готовий runtime preset для першої safe rollout фази:
   - `Platform/Profiles/BearerRollout/Phase1-Control.ps1`
   - `Platform/Profiles/BearerRollout/Phase1-Control.env.example`
