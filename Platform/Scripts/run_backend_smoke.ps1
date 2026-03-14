@@ -244,6 +244,35 @@ function Get-Count {
     return $count
 }
 
+function Get-ObjectPropertyString {
+    param(
+        [object]$InputObject,
+        [string]$Name
+    )
+
+    if ($null -eq $InputObject -or [string]::IsNullOrWhiteSpace($Name)) {
+        return ""
+    }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return ""
+    }
+
+    return [string]$property.Value
+}
+
+function Get-SessionIdValue {
+    param([object]$InputObject)
+
+    $sessionId = Get-ObjectPropertyString -InputObject $InputObject -Name "sessionId"
+    if (-not [string]::IsNullOrWhiteSpace($sessionId)) {
+        return $sessionId
+    }
+
+    return Get-ObjectPropertyString -InputObject $InputObject -Name "SessionId"
+}
+
 function New-CallerHeaders {
     param(
         [string]$SubjectId,
@@ -664,7 +693,7 @@ try {
     Assert-True ($auditDashboard.totalEvents -ge (Get-Count $auditAfter)) "Expected audit dashboard totals to cover the persisted audit stream."
     Assert-True ($null -ne $telemetryDashboard) "Expected telemetry dashboard response."
     $sessionProjectionItems = @($sessionProjection.items)
-    $projectedSmokeSession = @($sessionProjectionItems | Where-Object { $_.sessionId -eq $sessionId } | Select-Object -First 1)[0]
+    $projectedSmokeSession = @($sessionProjectionItems | Where-Object { (Get-SessionIdValue -InputObject $_) -eq $sessionId } | Select-Object -First 1)[0]
     Assert-True ($null -ne $projectedSmokeSession) "Expected smoke session to appear in session projections."
     $endpointProjectionItems = @($endpointProjection.items)
     $projectedSmokeEndpoint = @($endpointProjectionItems | Where-Object { $_.endpointId -eq "endpoint_local_demo" } | Select-Object -First 1)[0]
@@ -690,7 +719,7 @@ try {
 
     $lastStep = "list sessions after close"
     $sessionsAfterClose = @(Invoke-Json -Method "GET" -Uri "$BaseUrl/api/v1/sessions" -Headers $ownerHeaders)
-    $closedSessionStillVisible = @($sessionsAfterClose | Where-Object { $_.sessionId -eq $sessionId }).Count -gt 0
+    $closedSessionStillVisible = @($sessionsAfterClose | Where-Object { (Get-SessionIdValue -InputObject $_) -eq $sessionId }).Count -gt 0
     Assert-True (-not $closedSessionStillVisible) "Expected closed smoke session to disappear from the session list."
 
     if ($closedEndpoint.PSObject.Properties["activeSessionId"] -and -not [string]::IsNullOrWhiteSpace([string]$closedEndpoint.activeSessionId)) {

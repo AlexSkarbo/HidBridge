@@ -78,6 +78,42 @@ public sealed class ControlPlaneApiClient
     }
 
     /// <summary>
+    /// Closes all failed sessions visible to the caller.
+    /// </summary>
+    public async Task<SessionBulkCloseResultViewModel?> CloseFailedSessionsAsync(
+        string reason,
+        bool dryRun = false,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<SessionBulkCloseResultViewModel>(
+            HttpMethod.Post,
+            "/api/v1/sessions/actions/close-failed",
+            new
+            {
+                dryRun,
+                reason,
+            },
+            cancellationToken);
+
+    /// <summary>
+    /// Closes stale sessions visible to the caller.
+    /// </summary>
+    public async Task<SessionBulkCloseResultViewModel?> CloseStaleSessionsAsync(
+        string reason,
+        int staleAfterMinutes = 30,
+        bool dryRun = false,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<SessionBulkCloseResultViewModel>(
+            HttpMethod.Post,
+            "/api/v1/sessions/actions/close-stale",
+            new
+            {
+                dryRun,
+                reason,
+                staleAfterMinutes,
+            },
+            cancellationToken);
+
+    /// <summary>
     /// Dispatches one command through the specified session room.
     /// </summary>
     public async Task<CommandAckViewModel?> DispatchCommandAsync(

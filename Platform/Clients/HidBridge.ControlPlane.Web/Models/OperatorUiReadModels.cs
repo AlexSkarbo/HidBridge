@@ -248,6 +248,25 @@ public sealed record CommandAckViewModel(
     IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
+/// Represents one bulk session-close result returned by cleanup actions.
+/// </summary>
+public sealed record SessionBulkCloseResultViewModel(
+    string Action,
+    bool DryRun,
+    string Reason,
+    DateTimeOffset GeneratedAtUtc,
+    int ScannedSessions,
+    int MatchedSessions,
+    int ClosedSessions,
+    int SkippedSessions,
+    int FailedClosures,
+    int? StaleAfterMinutes,
+    IReadOnlyList<string> MatchedSessionIds,
+    IReadOnlyList<string> ClosedSessionIds,
+    IReadOnlyList<string> SkippedSessionIds,
+    IReadOnlyList<string> Errors);
+
+/// <summary>
 /// Represents one backend error payload.
 /// </summary>
 public sealed record ErrorInfoViewModel(

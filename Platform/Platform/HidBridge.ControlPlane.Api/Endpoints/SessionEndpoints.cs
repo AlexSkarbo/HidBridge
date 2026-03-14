@@ -16,6 +16,159 @@ public static class SessionEndpoints
         var sessionGroup = endpoints.MapGroup("/api/v1/sessions")
             .WithTags(ApiEndpointTags.Sessions);
 
+        sessionGroup.MapPost("/actions/close-failed", async (
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            ISessionOrchestrator orchestrator,
+            CloseFailedSessionsActionBody? request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureModeratorAccess();
+                var snapshots = await sessionStore.ListAsync(ct);
+                var visibleSnapshots = caller.IsPresent
+                    ? snapshots.Where(snapshot => IsVisibleToCaller(caller, snapshot)).ToArray()
+                    : snapshots.ToArray();
+                var matchedSnapshots = visibleSnapshots
+                    .Where(snapshot => snapshot.State == SessionState.Failed)
+                    .OrderBy(snapshot => snapshot.SessionId, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                var dryRun = request?.DryRun ?? false;
+                var reason = string.IsNullOrWhiteSpace(request?.Reason)
+                    ? $"bulk failed-room cleanup by {caller.EffectivePrincipalId ?? "system"}"
+                    : request!.Reason.Trim();
+
+                var closedSessionIds = new List<string>(matchedSnapshots.Length);
+                var skippedSessionIds = new List<string>();
+                var errors = new List<string>();
+                if (!dryRun)
+                {
+                    foreach (var snapshot in matchedSnapshots)
+                    {
+                        try
+                        {
+                            await orchestrator.CloseAsync(new SessionCloseBody(snapshot.SessionId, reason), ct);
+                            closedSessionIds.Add(snapshot.SessionId);
+                        }
+                        catch (KeyNotFoundException)
+                        {
+                            skippedSessionIds.Add(snapshot.SessionId);
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"{snapshot.SessionId}: {ex.Message}");
+                        }
+                    }
+                }
+
+                return Results.Ok(new SessionBulkCloseResultBody(
+                    Action: "close-failed",
+                    DryRun: dryRun,
+                    Reason: reason,
+                    GeneratedAtUtc: DateTimeOffset.UtcNow,
+                    ScannedSessions: visibleSnapshots.Length,
+                    MatchedSessions: matchedSnapshots.Length,
+                    ClosedSessions: closedSessionIds.Count,
+                    SkippedSessions: skippedSessionIds.Count,
+                    FailedClosures: errors.Count,
+                    StaleAfterMinutes: null,
+                    MatchedSessionIds: matchedSnapshots.Select(snapshot => snapshot.SessionId).ToArray(),
+                    ClosedSessionIds: closedSessionIds.ToArray(),
+                    SkippedSessionIds: skippedSessionIds.ToArray(),
+                    Errors: errors.ToArray()));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex);
+            }
+        })
+            .Accepts<CloseFailedSessionsActionBody>("application/json")
+            .Produces<SessionBulkCloseResultBody>(StatusCodes.Status200OK)
+            .WithSummary("Close all failed sessions visible to the caller.")
+            .WithDescription("Finds failed sessions, optionally dry-runs the operation, and returns one summary with closed/skipped/error counters.");
+
+        sessionGroup.MapPost("/actions/close-stale", async (
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            ISessionOrchestrator orchestrator,
+            CloseStaleSessionsActionBody? request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureModeratorAccess();
+
+                var staleAfterMinutes = request?.StaleAfterMinutes ?? 30;
+                staleAfterMinutes = Math.Clamp(staleAfterMinutes, 1, 60 * 24 * 30);
+
+                var snapshots = await sessionStore.ListAsync(ct);
+                var visibleSnapshots = caller.IsPresent
+                    ? snapshots.Where(snapshot => IsVisibleToCaller(caller, snapshot)).ToArray()
+                    : snapshots.ToArray();
+                var cutoffUtc = DateTimeOffset.UtcNow.AddMinutes(-staleAfterMinutes);
+                var matchedSnapshots = visibleSnapshots
+                    .Where(snapshot => IsStaleSnapshot(snapshot, cutoffUtc))
+                    .OrderBy(snapshot => snapshot.SessionId, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                var dryRun = request?.DryRun ?? false;
+                var reason = string.IsNullOrWhiteSpace(request?.Reason)
+                    ? $"bulk stale-room cleanup by {caller.EffectivePrincipalId ?? "system"}"
+                    : request!.Reason.Trim();
+
+                var closedSessionIds = new List<string>(matchedSnapshots.Length);
+                var skippedSessionIds = new List<string>();
+                var errors = new List<string>();
+                if (!dryRun)
+                {
+                    foreach (var snapshot in matchedSnapshots)
+                    {
+                        try
+                        {
+                            await orchestrator.CloseAsync(new SessionCloseBody(snapshot.SessionId, reason), ct);
+                            closedSessionIds.Add(snapshot.SessionId);
+                        }
+                        catch (KeyNotFoundException)
+                        {
+                            skippedSessionIds.Add(snapshot.SessionId);
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"{snapshot.SessionId}: {ex.Message}");
+                        }
+                    }
+                }
+
+                return Results.Ok(new SessionBulkCloseResultBody(
+                    Action: "close-stale",
+                    DryRun: dryRun,
+                    Reason: reason,
+                    GeneratedAtUtc: DateTimeOffset.UtcNow,
+                    ScannedSessions: visibleSnapshots.Length,
+                    MatchedSessions: matchedSnapshots.Length,
+                    ClosedSessions: closedSessionIds.Count,
+                    SkippedSessions: skippedSessionIds.Count,
+                    FailedClosures: errors.Count,
+                    StaleAfterMinutes: staleAfterMinutes,
+                    MatchedSessionIds: matchedSnapshots.Select(snapshot => snapshot.SessionId).ToArray(),
+                    ClosedSessionIds: closedSessionIds.ToArray(),
+                    SkippedSessionIds: skippedSessionIds.ToArray(),
+                    Errors: errors.ToArray()));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex);
+            }
+        })
+            .Accepts<CloseStaleSessionsActionBody>("application/json")
+            .Produces<SessionBulkCloseResultBody>(StatusCodes.Status200OK)
+            .WithSummary("Close stale sessions visible to the caller.")
+            .WithDescription("Closes sessions older than the supplied staleness threshold, excluding currently active sessions.");
+
         sessionGroup.MapPost("/", async (HttpContext httpContext, ISessionOrchestrator orchestrator, SessionOpenBody request, CancellationToken ct) =>
         {
             var caller = ApiCallerContext.FromHttpContext(httpContext);
@@ -196,4 +349,49 @@ public static class SessionEndpoints
             return false;
         }
     }
+
+    private static bool IsStaleSnapshot(SessionSnapshot snapshot, DateTimeOffset cutoffUtc)
+    {
+        if (snapshot.State == SessionState.Active)
+        {
+            return false;
+        }
+
+        var stalePivot = snapshot.LastHeartbeatAtUtc ?? snapshot.UpdatedAtUtc;
+        return stalePivot <= cutoffUtc;
+    }
 }
+
+/// <summary>
+/// Represents one bulk close request for failed sessions.
+/// </summary>
+public sealed record CloseFailedSessionsActionBody(
+    bool DryRun = false,
+    string? Reason = null);
+
+/// <summary>
+/// Represents one bulk close request for stale sessions.
+/// </summary>
+public sealed record CloseStaleSessionsActionBody(
+    bool DryRun = false,
+    string? Reason = null,
+    int StaleAfterMinutes = 30);
+
+/// <summary>
+/// Represents one bulk session-close summary.
+/// </summary>
+public sealed record SessionBulkCloseResultBody(
+    string Action,
+    bool DryRun,
+    string Reason,
+    DateTimeOffset GeneratedAtUtc,
+    int ScannedSessions,
+    int MatchedSessions,
+    int ClosedSessions,
+    int SkippedSessions,
+    int FailedClosures,
+    int? StaleAfterMinutes,
+    IReadOnlyList<string> MatchedSessionIds,
+    IReadOnlyList<string> ClosedSessionIds,
+    IReadOnlyList<string> SkippedSessionIds,
+    IReadOnlyList<string> Errors);

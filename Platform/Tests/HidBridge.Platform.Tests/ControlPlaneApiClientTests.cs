@@ -185,6 +185,81 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the bulk close-failed action route and payload.
+    /// </summary>
+    [Fact]
+    public async Task CloseFailedSessionsAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new
+        {
+            action = "close-failed",
+            dryRun = false,
+            reason = "bulk cleanup",
+            generatedAtUtc = DateTimeOffset.UtcNow,
+            scannedSessions = 3,
+            matchedSessions = 2,
+            closedSessions = 2,
+            skippedSessions = 0,
+            failedClosures = 0,
+            staleAfterMinutes = (int?)null,
+            matchedSessionIds = new[] { "room-1", "room-2" },
+            closedSessionIds = new[] { "room-1", "room-2" },
+            skippedSessionIds = Array.Empty<string>(),
+            errors = Array.Empty<string>(),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.CloseFailedSessionsAsync("bulk cleanup", false, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/actions/close-failed", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("False", payload!["dryRun"]?.ToString());
+        Assert.Equal("bulk cleanup", payload["reason"]?.ToString());
+    }
+
+    /// <summary>
+    /// Verifies the bulk close-stale action route and payload.
+    /// </summary>
+    [Fact]
+    public async Task CloseStaleSessionsAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new
+        {
+            action = "close-stale",
+            dryRun = false,
+            reason = "stale cleanup",
+            generatedAtUtc = DateTimeOffset.UtcNow,
+            scannedSessions = 5,
+            matchedSessions = 1,
+            closedSessions = 1,
+            skippedSessions = 0,
+            failedClosures = 0,
+            staleAfterMinutes = 45,
+            matchedSessionIds = new[] { "room-9" },
+            closedSessionIds = new[] { "room-9" },
+            skippedSessionIds = Array.Empty<string>(),
+            errors = Array.Empty<string>(),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.CloseStaleSessionsAsync("stale cleanup", 45, false, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/actions/close-stale", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("False", payload!["dryRun"]?.ToString());
+        Assert.Equal("stale cleanup", payload["reason"]?.ToString());
+        Assert.Equal("45", payload["staleAfterMinutes"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the command-dispatch route and payload.
     /// </summary>
     [Fact]

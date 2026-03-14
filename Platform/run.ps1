@@ -1,9 +1,10 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "close-failed-rooms")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "close-failed-rooms", "close-stale-rooms")]
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
     [int]$KeyboardInterfaceSelector = -1,
+    [int]$StaleAfterMinutes = -1,
     [string]$OutputJsonPath,
     [string]$InterfaceSelectorsCsv,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -34,6 +35,7 @@ $scriptMap = @{
     "demo-gate"    = "run_demo_gate.ps1"
     "uart-diagnostics" = "run_uart_diagnostics.ps1"
     "close-failed-rooms" = "run_close_failed_rooms.ps1"
+    "close-stale-rooms" = "run_close_stale_rooms.ps1"
 }
 
 $scriptPath = Join-Path $PSScriptRoot (Join-Path "Scripts" $scriptMap[$Task])
@@ -71,6 +73,15 @@ if ($PSBoundParameters.ContainsKey("KeyboardInterfaceSelector")) {
 
     $effectiveForwardArgs.Add("-KeyboardInterfaceSelector") | Out-Null
     $effectiveForwardArgs.Add([string]$KeyboardInterfaceSelector) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("StaleAfterMinutes")) {
+    if ($StaleAfterMinutes -lt 1) {
+        throw "StaleAfterMinutes must be greater than 0."
+    }
+
+    $effectiveForwardArgs.Add("-StaleAfterMinutes") | Out-Null
+    $effectiveForwardArgs.Add([string]$StaleAfterMinutes) | Out-Null
 }
 
 if ($PSBoundParameters.ContainsKey("OutputJsonPath")) {

@@ -8,10 +8,11 @@ param(
     [string]$TokenUsername = "operator.smoke.admin",
     [string]$TokenPassword = "ChangeMe123!",
     [string]$AccessToken = "",
-    [string]$PrincipalId = "failed-room-cleanup",
+    [string]$PrincipalId = "stale-room-cleanup",
     [string]$TenantId = "local-tenant",
     [string]$OrganizationId = "local-org",
-    [string]$Reason = "manual failed-room cleanup",
+    [string]$Reason = "manual stale-room cleanup",
+    [int]$StaleAfterMinutes = 30,
     [switch]$DryRun
 )
 
@@ -115,7 +116,7 @@ if ([string]::IsNullOrWhiteSpace($resolvedToken)) {
         -Password $TokenPassword
 
     if ([string]::IsNullOrWhiteSpace($tokenResponse.access_token)) {
-        throw "Failed-room cleanup token response did not contain access_token."
+        throw "Stale-room cleanup token response did not contain access_token."
     }
 
     $resolvedToken = $tokenResponse.access_token
@@ -130,13 +131,18 @@ $callerHeaders = @{
     "X-HidBridge-Role" = "operator.admin,operator.moderator,operator.viewer"
 }
 
+if ($StaleAfterMinutes -lt 1) {
+    throw "StaleAfterMinutes must be greater than 0."
+}
+
 $result = Invoke-CleanupJson `
     -Method "POST" `
-    -Uri "$($BaseUrl.TrimEnd('/'))/api/v1/sessions/actions/close-failed" `
+    -Uri "$($BaseUrl.TrimEnd('/'))/api/v1/sessions/actions/close-stale" `
     -Headers $callerHeaders `
     -Body @{
         dryRun = $DryRun.IsPresent
         reason = $Reason
+        staleAfterMinutes = $StaleAfterMinutes
     }
 
 $sessionsVisible = if ($null -ne $result -and $null -ne $result.PSObject.Properties["scannedSessions"]) {
@@ -160,15 +166,15 @@ else {
     0
 }
 
-$failedClosureCount = if ($null -ne $result -and $null -ne $result.PSObject.Properties["failedClosures"]) {
-    [int]$result.failedClosures
+$skippedSessions = if ($null -ne $result -and $null -ne $result.PSObject.Properties["skippedSessions"]) {
+    [int]$result.skippedSessions
 }
 else {
     0
 }
 
-$skippedSessions = if ($null -ne $result -and $null -ne $result.PSObject.Properties["skippedSessions"]) {
-    [int]$result.skippedSessions
+$failedClosureCount = if ($null -ne $result -and $null -ne $result.PSObject.Properties["failedClosures"]) {
+    [int]$result.failedClosures
 }
 else {
     0
@@ -196,16 +202,17 @@ else {
 }
 
 Write-Host ""
-Write-Host "=== Close Failed Rooms Summary ==="
+Write-Host "=== Close Stale Rooms Summary ==="
 Write-Host "BaseUrl: $BaseUrl"
+Write-Host "Stale after minutes: $StaleAfterMinutes"
 Write-Host "Sessions visible: $sessionsVisible"
-Write-Host "Failed sessions found: $matchedSessions"
+Write-Host "Stale sessions found: $matchedSessions"
 Write-Host "Dry run: $($DryRun.IsPresent)"
 Write-Host "Closed sessions: $closedSessions"
 Write-Host "Skipped sessions: $skippedSessions"
 Write-Host "Close failures: $failedClosureCount"
 if (@($matchedSessionIds).Count -gt 0) {
-    Write-Host "Failed session IDs: $($matchedSessionIds -join ', ')"
+    Write-Host "Stale session IDs: $($matchedSessionIds -join ', ')"
 }
 if (@($closedSessionIds).Count -gt 0) {
     Write-Host "Closed session IDs: $($closedSessionIds -join ', ')"

@@ -322,6 +322,16 @@ Manual UART diagnostics (selector sweep):
     - `HIDBRIDGE_UART_KEYBOARD_SELECTOR=254`
     - then rerun `uart-diagnostics` to confirm command path behavior.
 
+Bulk room cleanup actions:
+- close failed rooms:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-failed-rooms -BaseUrl http://127.0.0.1:18093`
+  - dry run:
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-failed-rooms -BaseUrl http://127.0.0.1:18093 -ForwardArgs @('-DryRun')`
+- close stale rooms (non-active sessions older than threshold):
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-stale-rooms -BaseUrl http://127.0.0.1:18093 -StaleAfterMinutes 30`
+  - dry run:
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-stale-rooms -BaseUrl http://127.0.0.1:18093 -StaleAfterMinutes 30 -ForwardArgs @('-DryRun')`
+
 Thin operator UI shell:
 - open design backlog:
   - `Docs/SystemArchitecture/HidBridge_ControlPlane_Web_Design_Questions_UA.md`

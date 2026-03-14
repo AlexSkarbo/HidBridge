@@ -333,20 +333,12 @@
                 return;
             }
 
-            var closed = 0;
-            var failed = 0;
-            foreach (var sessionId in sessionIds)
-            {
-                try
-                {
-                    await ApiClient.CloseSessionAsync(sessionId, $"bulk failed-room cleanup by {Identity.PrincipalId}");
-                    closed++;
-                }
-                catch
-                {
-                    failed++;
-                }
-            }
+            var summary = await ApiClient.CloseFailedSessionsAsync(
+                reason: $"bulk failed-room cleanup by {Identity.PrincipalId}",
+                dryRun: false);
+
+            var closed = summary?.ClosedSessions ?? 0;
+            var failed = (summary?.FailedClosures ?? 0) + (summary?.SkippedSessions ?? 0);
 
             await LoadDashboardAsync();
             _actionMessage = string.Format(T["FailedRoomsClosedMessage"], closed, failed);
