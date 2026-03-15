@@ -249,6 +249,92 @@ public sealed record CommandAckViewModel(
     IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
+/// Represents one persisted command journal entry projected from transport health diagnostics.
+/// </summary>
+public sealed record CommandJournalEntryViewModel(
+    string CommandId,
+    string SessionId,
+    string AgentId,
+    string Channel,
+    string Action,
+    IReadOnlyDictionary<string, object?> Args,
+    int TimeoutMs,
+    string IdempotencyKey,
+    string Status,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? CompletedAtUtc = null,
+    ErrorInfoViewModel? Error = null,
+    IReadOnlyDictionary<string, double>? Metrics = null,
+    string? ParticipantId = null,
+    string? PrincipalId = null,
+    string? ShareId = null);
+
+/// <summary>
+/// Represents one transport route health snapshot for a session.
+/// </summary>
+public sealed record SessionTransportHealthViewModel(
+    string SessionId,
+    string AgentId,
+    string EndpointId,
+    string Provider,
+    string ProviderSource,
+    bool Connected,
+    string Status,
+    IReadOnlyDictionary<string, object?> Metrics,
+    CommandJournalEntryViewModel? LastCommandAck = null,
+    DateTimeOffset? ReportedAtUtc = null);
+
+/// <summary>
+/// Represents one WebRTC signaling message.
+/// </summary>
+public sealed record WebRtcSignalMessageViewModel(
+    string SessionId,
+    int Sequence,
+    string Kind,
+    string SenderPeerId,
+    string? RecipientPeerId,
+    string Payload,
+    string? Mid = null,
+    int? MLineIndex = null,
+    DateTimeOffset? CreatedAtUtc = null);
+
+/// <summary>
+/// Represents one signaling publish request emitted by the operator shell.
+/// </summary>
+public sealed class WebRtcSignalPublishRequestViewModel
+{
+    /// <summary>
+    /// Gets or sets signal kind (Offer/Answer/IceCandidate/Bye/Heartbeat).
+    /// </summary>
+    public string Kind { get; set; } = "Heartbeat";
+
+    /// <summary>
+    /// Gets or sets sender peer identifier.
+    /// </summary>
+    public string SenderPeerId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets optional target peer identifier.
+    /// </summary>
+    public string? RecipientPeerId { get; set; }
+
+    /// <summary>
+    /// Gets or sets payload serialized by the signaling plane.
+    /// </summary>
+    public string Payload { get; set; } = "{}";
+
+    /// <summary>
+    /// Gets or sets optional SDP media id.
+    /// </summary>
+    public string? Mid { get; set; }
+
+    /// <summary>
+    /// Gets or sets optional SDP media line index.
+    /// </summary>
+    public int? MLineIndex { get; set; }
+}
+
+/// <summary>
 /// Represents one bulk session-close result returned by cleanup actions.
 /// </summary>
 public sealed record SessionBulkCloseResultViewModel(

@@ -507,6 +507,115 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the transport-health route.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionTransportHealthAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new SessionTransportHealthViewModel(
+            "session-1",
+            "agent-1",
+            "endpoint-1",
+            "Uart",
+            "default",
+            true,
+            "ok",
+            new Dictionary<string, object?>()));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetSessionTransportHealthAsync("session-1", cancellationToken: cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/health", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the transport-health provider query parameter.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionTransportHealthAsync_AppendsProviderQuery()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new SessionTransportHealthViewModel(
+            "session-1",
+            "agent-1",
+            "endpoint-1",
+            "WebRtcDataChannel",
+            "endpoint-override",
+            true,
+            "ok",
+            new Dictionary<string, object?>()));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetSessionTransportHealthAsync("session-1", "webrtc-datachannel", cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/health?provider=webrtc-datachannel", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the WebRTC signaling list route and query parameters.
+    /// </summary>
+    [Fact]
+    public async Task GetWebRtcSignalsAsync_TargetsExpectedRouteAndQuery()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new[]
+        {
+            new WebRtcSignalMessageViewModel("session-1", 10, "Offer", "peer-a", "peer-b", "{ }"),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetWebRtcSignalsAsync("session-1", "peer-b", 9, 25, cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/signals?recipientPeerId=peer-b&afterSequence=9&limit=25", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the WebRTC signaling publish route and payload.
+    /// </summary>
+    [Fact]
+    public async Task PublishWebRtcSignalAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new WebRtcSignalPublishRequestViewModel
+        {
+            Kind = "IceCandidate",
+            SenderPeerId = "peer-a",
+            RecipientPeerId = "peer-b",
+            Payload = "{\"candidate\":\"cand\"}",
+            Mid = "0",
+            MLineIndex = 0,
+        };
+        var handler = new RecordingHandler(new WebRtcSignalMessageViewModel(
+            "session-1",
+            11,
+            "IceCandidate",
+            "peer-a",
+            "peer-b",
+            "{\"candidate\":\"cand\"}",
+            "0",
+            0));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.PublishWebRtcSignalAsync("session-1", request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/signals", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("IceCandidate", payload!["kind"]?.ToString());
+        Assert.Equal("peer-a", payload["senderPeerId"]?.ToString());
+        Assert.Equal("peer-b", payload["recipientPeerId"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the policy-scopes route.
     /// </summary>
     [Fact]

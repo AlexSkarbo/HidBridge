@@ -149,6 +149,81 @@
                 <div>
                     <div class="hid-panel-toolbar">
                         <div>
+                            <h3 class="hid-card-title">@T["TransportHealthPanel"]</h3>
+                            <p class="hid-card-subtitle">@T["TransportHealthSubtitle"]</p>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_transportHealthError))
+                    {
+                        <div class="hid-alert hid-alert--warning">@_transportHealthError</div>
+                    }
+                    else if (_transportHealth is null)
+                    {
+                        <div class="hid-empty-state">@T["LoadingTransportHealth"]</div>
+                    }
+                    else
+                    {
+                        <div class="hid-meta-grid">
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportProviderLabel"]</div><div class="hid-detail-value">@_transportHealth.Provider</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRouteSource"]</div><div class="hid-detail-value">@_transportHealth.ProviderSource</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportConnectivity"]</div><div class="hid-detail-value">@(_transportHealth.Connected ? T["Yes"] : T["No"])</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportStatus"]</div><div class="hid-detail-value">@_transportHealth.Status</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["ReportedAt"]</div><div class="hid-detail-value">@FormatTime(_transportHealth.ReportedAtUtc)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMetricsCount"]</div><div class="hid-detail-value">@(_transportHealth.Metrics?.Count ?? 0)</div></div>
+                        </div>
+
+                        @if (_transportHealth.LastCommandAck is null)
+                        {
+                            <div class="hid-empty-state">@T["NoTransportAckYet"]</div>
+                        }
+                        else
+                        {
+                            <div class="hid-detail-card">
+                                <div class="hid-detail-label">@T["LastTransportAck"]</div>
+                                <div class="hid-detail-value">@_transportHealth.LastCommandAck.Action -> @_transportHealth.LastCommandAck.Status</div>
+                                <div class="hid-inline-meta">
+                                    <span>@T["CommandId"]: @_transportHealth.LastCommandAck.CommandId</span>
+                                    <span>@T["Channel"]: @_transportHealth.LastCommandAck.Channel</span>
+                                    <span>@T["LastCommand"]: @FormatTime(_transportHealth.LastCommandAck.CompletedAtUtc ?? _transportHealth.LastCommandAck.CreatedAtUtc)</span>
+                                </div>
+                                @if (_transportHealth.LastCommandAck.Error is not null)
+                                {
+                                    <div class="hid-meta-note">@_transportHealth.LastCommandAck.Error.Code · @_transportHealth.LastCommandAck.Error.Message</div>
+                                }
+                            </div>
+                        }
+
+                        <div>
+                            <h4 class="hid-card-title">@T["WebRtcSignalInbox"]</h4>
+                            @if (_webRtcSignals.Count == 0)
+                            {
+                                <div class="hid-empty-state">@T["NoWebRtcSignals"]</div>
+                            }
+                            else
+                            {
+                                <div class="hid-list-stack">
+                                    @foreach (var signal in _webRtcSignals.Take(5))
+                                    {
+                                        <div class="hid-list-card">
+                                            <div class="hid-list-card-header">
+                                                <div>
+                                                    <div class="hid-list-title">#@signal.Sequence · @signal.Kind</div>
+                                                    <div class="hid-list-subtitle">@signal.SenderPeerId -> @(signal.RecipientPeerId ?? "*")</div>
+                                                </div>
+                                                <div class="hid-list-timestamp">@FormatTime(signal.CreatedAtUtc)</div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div>
+                    <div class="hid-panel-toolbar">
+                        <div>
                             <h3 class="hid-card-title">@T["ControlOperationsPanel"]</h3>
                             <p class="hid-card-subtitle">@T["ControlArbitration"]</p>
                             <p class="hid-meta-note">@T["OperatorPrincipal"]: @CurrentOperatorPrincipalId</p>
@@ -526,6 +601,9 @@
     private SessionLobbyViewModel? _lobby;
     private IReadOnlyList<ParticipantActivityViewModel>? _participants;
     private OperatorTimelineViewModel? _timeline;
+    private SessionTransportHealthViewModel? _transportHealth;
+    private IReadOnlyList<WebRtcSignalMessageViewModel> _webRtcSignals = [];
+    private string? _transportHealthError;
     private string? _error;
     private string? _actionMessage;
     private AuthorizationDeniedViewModel? _denial;
@@ -704,6 +782,7 @@
             _lobby = await ApiClient.GetLobbyAsync(SessionId);
             _participants = await ApiClient.GetParticipantActivityAsync(SessionId);
             _timeline = await ApiClient.GetOperatorTimelineAsync(SessionId, 20);
+            await LoadTransportDiagnosticsAsync();
             EnsureShareRequestDefaults();
             _error = null;
             _denial = null;
@@ -730,6 +809,35 @@
         finally
         {
             _isRefreshing = false;
+        }
+    }
+
+    private async Task LoadTransportDiagnosticsAsync()
+    {
+        try
+        {
+            _transportHealth = await ApiClient.GetSessionTransportHealthAsync(SessionId);
+            _webRtcSignals = await ApiClient.GetWebRtcSignalsAsync(SessionId, limit: 12)
+                ?? Array.Empty<WebRtcSignalMessageViewModel>();
+            _transportHealthError = null;
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _transportHealth = null;
+            _webRtcSignals = [];
+            _transportHealthError = exception.Message;
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _transportHealth = null;
+            _webRtcSignals = [];
+            _transportHealthError = ResolveApiErrorMessage(exception);
+        }
+        catch (Exception exception)
+        {
+            _transportHealth = null;
+            _webRtcSignals = [];
+            _transportHealthError = exception.Message;
         }
     }
 

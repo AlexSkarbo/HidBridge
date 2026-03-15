@@ -193,6 +193,43 @@ public sealed class ControlPlaneApiClient
             cancellationToken);
 
     /// <summary>
+    /// Reads transport routing health and latest command ack diagnostics for one session.
+    /// </summary>
+    public async Task<SessionTransportHealthViewModel?> GetSessionTransportHealthAsync(
+        string sessionId,
+        string? provider = null,
+        CancellationToken cancellationToken = default)
+        => await GetJsonAsync<SessionTransportHealthViewModel>(
+            BuildTransportHealthQuery(sessionId, provider),
+            cancellationToken);
+
+    /// <summary>
+    /// Reads session-scoped WebRTC signaling messages.
+    /// </summary>
+    public async Task<IReadOnlyList<WebRtcSignalMessageViewModel>?> GetWebRtcSignalsAsync(
+        string sessionId,
+        string? recipientPeerId = null,
+        int? afterSequence = null,
+        int? limit = null,
+        CancellationToken cancellationToken = default)
+        => await GetJsonAsync<IReadOnlyList<WebRtcSignalMessageViewModel>>(
+            BuildWebRtcSignalsQuery(sessionId, recipientPeerId, afterSequence, limit),
+            cancellationToken);
+
+    /// <summary>
+    /// Publishes one WebRTC signaling message for the specified session.
+    /// </summary>
+    public async Task<WebRtcSignalMessageViewModel?> PublishWebRtcSignalAsync(
+        string sessionId,
+        WebRtcSignalPublishRequestViewModel body,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<WebRtcSignalMessageViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/signals",
+            body,
+            cancellationToken);
+
+    /// <summary>
     /// Requests active control for the specified participant.
     /// </summary>
     public async Task<SessionControlLeaseViewModel?> RequestControlAsync(
@@ -503,6 +540,43 @@ public sealed class ControlPlaneApiClient
 
         query.Add($"take={take}");
         return $"/api/v1/diagnostics/policies/revisions?{string.Join("&", query)}";
+    }
+
+    private static string BuildTransportHealthQuery(string sessionId, string? provider)
+    {
+        var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/health";
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            return route;
+        }
+
+        return $"{route}?provider={Uri.EscapeDataString(provider)}";
+    }
+
+    private static string BuildWebRtcSignalsQuery(
+        string sessionId,
+        string? recipientPeerId,
+        int? afterSequence,
+        int? limit)
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(recipientPeerId))
+        {
+            query.Add($"recipientPeerId={Uri.EscapeDataString(recipientPeerId)}");
+        }
+
+        if (afterSequence.HasValue)
+        {
+            query.Add($"afterSequence={afterSequence.Value}");
+        }
+
+        if (limit.HasValue)
+        {
+            query.Add($"limit={limit.Value}");
+        }
+
+        var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/signals";
+        return query.Count == 0 ? route : $"{route}?{string.Join("&", query)}";
     }
 
     private async Task<TResponse?> GetJsonAsync<TResponse>(
