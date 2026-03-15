@@ -101,6 +101,178 @@ public static class TransportEndpoints
         .WithSummary("Read WebRTC signaling messages for a session.")
         .WithDescription("Reads signaling messages for one session with optional recipient and sequence checkpoint filters.");
 
+        group.MapPost("/{sessionId}/transport/webrtc/peers/{peerId}/online", async (
+            string sessionId,
+            string peerId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            WebRtcCommandRelayService relay,
+            WebRtcPeerPresenceBody? request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                var snapshot = await relay.MarkPeerOnlineAsync(
+                    sessionId,
+                    peerId,
+                    request?.EndpointId,
+                    request?.Metadata,
+                    ct);
+                return Results.Ok(snapshot);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Accepts<WebRtcPeerPresenceBody>("application/json")
+        .Produces<WebRtcPeerStateBody>(StatusCodes.Status200OK)
+        .WithSummary("Marks one WebRTC peer online for a session.")
+        .WithDescription("Registers one peer heartbeat/presence record that can receive relay command envelopes.");
+
+        group.MapPost("/{sessionId}/transport/webrtc/peers/{peerId}/offline", async (
+            string sessionId,
+            string peerId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            WebRtcCommandRelayService relay,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                var snapshot = await relay.MarkPeerOfflineAsync(sessionId, peerId, ct);
+                return Results.Ok(snapshot);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Produces<WebRtcPeerStateBody>(StatusCodes.Status200OK)
+        .WithSummary("Marks one WebRTC peer offline for a session.")
+        .WithDescription("Updates peer presence to offline so transport health and relay routing can react deterministically.");
+
+        group.MapGet("/{sessionId}/transport/webrtc/peers", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            WebRtcCommandRelayService relay,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                return Results.Ok(await relay.ListPeersAsync(sessionId, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Produces<IReadOnlyList<WebRtcPeerStateBody>>(StatusCodes.Status200OK)
+        .WithSummary("Lists WebRTC peers for a session.")
+        .WithDescription("Returns transient peer presence records tracked by the WebRTC relay path.");
+
+        group.MapGet("/{sessionId}/transport/webrtc/commands", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            WebRtcCommandRelayService relay,
+            string peerId,
+            int? afterSequence,
+            int? limit,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                if (string.IsNullOrWhiteSpace(peerId))
+                {
+                    return Results.BadRequest(new { sessionId, error = "peerId is required." });
+                }
+
+                var items = await relay.ListCommandsAsync(
+                    sessionId,
+                    peerId.Trim(),
+                    afterSequence,
+                    limit ?? 100,
+                    ct);
+                return Results.Ok(items);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Produces<IReadOnlyList<WebRtcCommandEnvelopeBody>>(StatusCodes.Status200OK)
+        .WithSummary("Lists queued relay commands for one WebRTC peer.")
+        .WithDescription("Returns command envelopes awaiting execution for the supplied peer and sequence checkpoint.");
+
+        group.MapPost("/{sessionId}/transport/webrtc/commands/{commandId}/ack", async (
+            string sessionId,
+            string commandId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            WebRtcCommandRelayService relay,
+            WebRtcCommandAckPublishBody? request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                var status = request?.Status ?? CommandStatus.Applied;
+                var ack = new CommandAckBody(
+                    commandId,
+                    status,
+                    request?.Error,
+                    request?.Metrics);
+                var accepted = await relay.PublishAckAsync(sessionId, ack, ct);
+                return accepted
+                    ? Results.Ok(new { sessionId, commandId, accepted = true })
+                    : Results.NotFound(new { sessionId, commandId, error = "Pending command was not found for acknowledgment." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Accepts<WebRtcCommandAckPublishBody>("application/json")
+        .Produces(StatusCodes.Status200OK)
+        .WithSummary("Publishes command acknowledgment from the WebRTC relay consumer.")
+        .WithDescription("Completes the pending relay command by commandId so dispatch can return the final acknowledgment.");
+
         group.MapGet("/{sessionId}/transport/health", async (
             string sessionId,
             HttpContext httpContext,
@@ -190,4 +362,13 @@ public static class TransportEndpoints
         string Payload,
         string? Mid = null,
         int? MLineIndex = null);
+
+    private sealed record WebRtcPeerPresenceBody(
+        string? EndpointId = null,
+        IReadOnlyDictionary<string, string>? Metadata = null);
+
+    private sealed record WebRtcCommandAckPublishBody(
+        CommandStatus? Status = null,
+        ErrorInfo? Error = null,
+        IReadOnlyDictionary<string, double>? Metrics = null);
 }

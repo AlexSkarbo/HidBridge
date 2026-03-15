@@ -124,6 +124,7 @@ builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
 {
     EnableDefaultProviderFallbackOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
 });
+builder.Services.AddSingleton<WebRtcCommandRelayService>();
 builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new ConnectorBackedRealtimeTransport(
         RealtimeTransportProvider.Uart,
@@ -132,6 +133,7 @@ builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new WebRtcDataChannelRealtimeTransport(
         sp.GetRequiredService<IConnectorRegistry>(),
         sp.GetRequiredService<IEndpointSnapshotStore>(),
+        sp.GetRequiredService<WebRtcCommandRelayService>(),
         sp.GetRequiredService<WebRtcTransportRuntimeOptions>()));
 builder.Services.AddSingleton<IRealtimeTransportFactory, DefaultRealtimeTransportFactory>();
 builder.Services.AddSessionOrchestrator();
@@ -204,6 +206,7 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     UartUsesMasterSecret = !string.IsNullOrWhiteSpace(uartMasterSecret),
     WebRtcRequireCapability = webRtcRequireCapability,
     WebRtcEnableConnectorBridge = webRtcEnableConnectorBridge,
+    TransportFallbackToDefaultOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
     AgentId = agentId,
     EndpointId = endpointId,
     Maintenance = maintenanceOptions,

@@ -131,6 +131,11 @@ Default ControlPlane API:
   - `GET /api/v1/sessions/{sessionId}/transport/health?provider={uart|webrtc}`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/signals`
   - `GET /api/v1/sessions/{sessionId}/transport/webrtc/signals?recipientPeerId={peerId}&afterSequence={n}&limit={n}`
+  - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/online`
+  - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/offline`
+  - `GET /api/v1/sessions/{sessionId}/transport/webrtc/peers`
+  - `GET /api/v1/sessions/{sessionId}/transport/webrtc/commands?peerId={peerId}&afterSequence={n}&limit={n}`
+  - `POST /api/v1/sessions/{sessionId}/transport/webrtc/commands/{commandId}/ack`
 - command journal:
 - `GET /api/v1/sessions/{sessionId}/commands/journal`
   - `GET /api/v1/commands?sessionId={sessionId}`
@@ -189,6 +194,12 @@ Useful environment variables:
 - `HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY`
 - `HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE`
 - `HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR` (default: `true`; retries once via default provider when WebRTC route returns transport error and no explicit `transportProvider` override was requested)
+
+WebRTC relay command path:
+- peers publish online/offline presence via `/transport/webrtc/peers/*`;
+- commands are queued by transport and consumed from `/transport/webrtc/commands`;
+- peer-side ACK is posted to `/transport/webrtc/commands/{commandId}/ack`;
+- if relay ACK times out and fallback is enabled, dispatch retries once via default provider.
 
 UART key-mode notes:
 - If `HIDBRIDGE_UART_HMAC_KEY` is not set but `HIDBRIDGE_UART_MASTER_SECRET` is set, bootstrap HMAC key defaults to `HIDBRIDGE_UART_MASTER_SECRET`.

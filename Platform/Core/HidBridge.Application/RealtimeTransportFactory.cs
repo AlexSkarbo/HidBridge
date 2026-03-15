@@ -220,6 +220,7 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
 {
     private readonly IConnectorRegistry _connectorRegistry;
     private readonly IEndpointSnapshotStore _endpointSnapshotStore;
+    private readonly WebRtcCommandRelayService _commandRelay;
     private readonly WebRtcTransportRuntimeOptions _options;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _connectedRoutes = new(StringComparer.OrdinalIgnoreCase);
 
@@ -229,10 +230,12 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
     public WebRtcDataChannelRealtimeTransport(
         IConnectorRegistry connectorRegistry,
         IEndpointSnapshotStore endpointSnapshotStore,
+        WebRtcCommandRelayService commandRelay,
         WebRtcTransportRuntimeOptions options)
     {
         _connectorRegistry = connectorRegistry;
         _endpointSnapshotStore = endpointSnapshotStore;
+        _commandRelay = commandRelay;
         _options = options;
     }
 
@@ -244,6 +247,12 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
     {
         var endpointSnapshot = await RequireEndpointSnapshotAsync(route.EndpointId, cancellationToken);
         EnsureEndpointSupportsWebRtc(route, endpointSnapshot);
+
+        if (_commandRelay.HasOnlinePeer(route.SessionId, route.EndpointId))
+        {
+            _connectedRoutes[BuildRouteKey(route)] = DateTimeOffset.UtcNow;
+            return;
+        }
 
         var connector = await _connectorRegistry.ResolveAsync(route.AgentId, cancellationToken);
         if (connector is null)
@@ -267,6 +276,34 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
                     "E_TRANSPORT_DISCONNECTED",
                     "WebRTC transport route is not connected.",
                     true));
+        }
+
+        if (!string.IsNullOrWhiteSpace(route.SessionId)
+            && _commandRelay.HasOnlinePeer(route.SessionId, route.EndpointId))
+        {
+            _ = await _commandRelay.EnqueueCommandAsync(route, command, cancellationToken);
+            var relayAck = await _commandRelay.WaitForAckAsync(
+                route.SessionId,
+                command.CommandId,
+                TimeSpan.FromMilliseconds(Math.Max(command.TimeoutMs, 100)),
+                cancellationToken);
+            if (relayAck is null)
+            {
+                return new CommandAckBody(
+                    command.CommandId,
+                    CommandStatus.Timeout,
+                    new ErrorInfo(
+                        ErrorDomain.Transport,
+                        "E_TRANSPORT_TIMEOUT",
+                        "WebRTC relay ACK timeout.",
+                        true));
+            }
+
+            var relayMetrics = relayAck.Metrics is null
+                ? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, double>(relayAck.Metrics, StringComparer.OrdinalIgnoreCase);
+            relayMetrics["transportRelayMode"] = 1;
+            return relayAck with { Metrics = relayMetrics };
         }
 
         if (!_options.EnableConnectorBridge)
@@ -335,20 +372,36 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
             endpointSupportsWebRtc = endpoint?.Capabilities.Any(IsWebRtcCapability) == true;
         }
 
-        var connected = _connectedRoutes.ContainsKey(routeKey);
+        var relayMetrics = await _commandRelay.GetSessionMetricsAsync(route.SessionId, endpointId, cancellationToken);
+        var relayOnlinePeers = relayMetrics.TryGetValue("onlinePeerCount", out var onlinePeersValue)
+            && int.TryParse(onlinePeersValue?.ToString(), out var parsedOnlinePeers)
+            ? parsedOnlinePeers
+            : 0;
+        var connected = _connectedRoutes.ContainsKey(routeKey) || relayOnlinePeers > 0;
+        var bridgeMode = relayOnlinePeers > 0
+            ? "webrtc-relay"
+            : _options.EnableConnectorBridge
+                ? "connector-bridge"
+                : "disabled";
+        var metrics = new Dictionary<string, object?>
+        {
+            ["agentId"] = route.AgentId,
+            ["endpointId"] = endpointId,
+            ["connected"] = connected,
+            ["capabilityRequired"] = _options.RequireDataChannelCapability,
+            ["endpointSupportsWebRtc"] = endpointSupportsWebRtc,
+            ["bridgeMode"] = bridgeMode,
+        };
+        foreach (var pair in relayMetrics)
+        {
+            metrics[pair.Key] = pair.Value;
+        }
+
         return new RealtimeTransportHealth(
             Provider,
             connected,
             connected ? "Connected" : "Disconnected",
-            new Dictionary<string, object?>
-            {
-                ["agentId"] = route.AgentId,
-                ["endpointId"] = endpointId,
-                ["connected"] = connected,
-                ["capabilityRequired"] = _options.RequireDataChannelCapability,
-                ["endpointSupportsWebRtc"] = endpointSupportsWebRtc,
-                ["bridgeMode"] = _options.EnableConnectorBridge ? "connector-bridge" : "disabled",
-            });
+            metrics);
     }
 
     private async Task<EndpointSnapshot> RequireEndpointSnapshotAsync(string? endpointId, CancellationToken cancellationToken)

@@ -83,6 +83,11 @@ public sealed class ApiRuntimeSettings
     public required bool WebRtcEnableConnectorBridge { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether transport routing falls back to the default provider after WebRTC transport errors.
+    /// </summary>
+    public required bool TransportFallbackToDefaultOnWebRtcError { get; init; }
+
+    /// <summary>
     /// Gets the local agent identifier.
     /// </summary>
     public required string AgentId { get; init; }

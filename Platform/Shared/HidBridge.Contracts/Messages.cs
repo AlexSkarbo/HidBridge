@@ -385,6 +385,28 @@ public sealed record WebRtcSignalMessageBody(
     DateTimeOffset? CreatedAtUtc = null);
 
 /// <summary>
+/// Represents one WebRTC peer presence snapshot inside a session.
+/// </summary>
+public sealed record WebRtcPeerStateBody(
+    string SessionId,
+    string PeerId,
+    string? EndpointId,
+    bool IsOnline,
+    DateTimeOffset LastSeenAtUtc,
+    IReadOnlyDictionary<string, string>? Metadata = null);
+
+/// <summary>
+/// Carries one command envelope published through the WebRTC relay path.
+/// </summary>
+public sealed record WebRtcCommandEnvelopeBody(
+    string SessionId,
+    int Sequence,
+    string? EndpointId,
+    string? RecipientPeerId,
+    CommandRequestBody Command,
+    DateTimeOffset CreatedAtUtc);
+
+/// <summary>
 /// Carries one transport health report for a session route.
 /// </summary>
 public sealed record SessionTransportHealthBody(

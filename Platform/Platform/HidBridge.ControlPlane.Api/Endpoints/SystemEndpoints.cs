@@ -33,6 +33,8 @@ public static class SystemEndpoints
                 "/api/v1/sessions",
                 "/api/v1/sessions/{sessionId}/transport/health",
                 "/api/v1/sessions/{sessionId}/transport/webrtc/signals",
+                "/api/v1/sessions/{sessionId}/transport/webrtc/peers",
+                "/api/v1/sessions/{sessionId}/transport/webrtc/commands",
                 "/api/v1/events/audit",
                 "/api/v1/events/telemetry",
                 "/api/v1/runtime/uart",
@@ -72,6 +74,7 @@ public static class SystemEndpoints
             {
                 runtimeSettings.WebRtcRequireCapability,
                 runtimeSettings.WebRtcEnableConnectorBridge,
+                runtimeSettings.TransportFallbackToDefaultOnWebRtcError,
             },
             runtimeSettings.AgentId,
             runtimeSettings.EndpointId,
