@@ -38,6 +38,7 @@ public sealed class ControlPlaneApiClientTests
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var handler = new RecordingHandler(new ApiRuntimeViewModel(
+            "Uart",
             "COM6",
             3000000,
             255,
@@ -70,6 +71,7 @@ public sealed class ControlPlaneApiClientTests
         var cancellationToken = TestContext.Current.CancellationToken;
         var handler = new RecordingHandler(new
         {
+            transportProvider = "Uart",
             port = "COM6",
             baudRate = 3000000,
             mouseSelector = 255,
@@ -122,6 +124,7 @@ public sealed class ControlPlaneApiClientTests
         var runtime = await apiClient.GetRuntimeAsync(cancellationToken);
 
         Assert.NotNull(runtime);
+        Assert.Equal("Uart", runtime!.TransportProvider);
         Assert.True(runtime!.PolicyBootstrap.ViewerRoleRequired);
     }
 

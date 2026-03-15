@@ -21,6 +21,117 @@ public sealed record ConnectorCommandResult(
     IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
+/// Identifies the transport provider used by the realtime transport fabric.
+/// </summary>
+public enum RealtimeTransportProvider
+{
+    Uart,
+    WebRtcDataChannel,
+}
+
+/// <summary>
+/// Represents one normalized realtime transport message category.
+/// </summary>
+public enum RealtimeTransportMessageKind
+{
+    Command,
+    Ack,
+    Event,
+    Heartbeat,
+}
+
+/// <summary>
+/// Represents one transport-level error class independent of the concrete provider.
+/// </summary>
+public enum RealtimeTransportErrorKind
+{
+    Timeout,
+    Disconnected,
+    Rejected,
+    ProtocolError,
+}
+
+/// <summary>
+/// Carries route metadata used by realtime transport providers.
+/// </summary>
+public sealed record RealtimeTransportRouteContext(
+    string AgentId,
+    string? EndpointId = null,
+    string? SessionId = null,
+    string? RoomId = null,
+    string? AttachmentId = null);
+
+/// <summary>
+/// Represents one normalized transport message payload.
+/// </summary>
+public sealed record RealtimeTransportMessage(
+    RealtimeTransportMessageKind Kind,
+    string Name,
+    IReadOnlyDictionary<string, object?> Payload,
+    DateTimeOffset? CreatedAtUtc = null);
+
+/// <summary>
+/// Represents one transport health snapshot for diagnostics and routing decisions.
+/// </summary>
+public sealed record RealtimeTransportHealth(
+    RealtimeTransportProvider Provider,
+    bool IsConnected,
+    string Status,
+    IReadOnlyDictionary<string, object?> Metrics);
+
+/// <summary>
+/// Defines one provider adapter that can connect, send commands, receive events, and report health.
+/// </summary>
+public interface IRealtimeTransport
+{
+    /// <summary>
+    /// Gets the provider identity implemented by this adapter.
+    /// </summary>
+    RealtimeTransportProvider Provider { get; }
+
+    /// <summary>
+    /// Ensures provider-level connectivity for the supplied route context.
+    /// </summary>
+    Task ConnectAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sends one command and returns the normalized command acknowledgment.
+    /// </summary>
+    Task<CommandAckBody> SendCommandAsync(RealtimeTransportRouteContext route, CommandRequestBody command, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads provider-originated event/heartbeat messages for the supplied route context.
+    /// </summary>
+    IAsyncEnumerable<RealtimeTransportMessage> ReceiveAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Closes provider-level connectivity for the supplied route context.
+    /// </summary>
+    Task CloseAsync(RealtimeTransportRouteContext route, string? reason, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads provider-level health details for the supplied route context.
+    /// </summary>
+    Task<RealtimeTransportHealth> GetHealthAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Resolves a concrete realtime transport provider based on runtime policy.
+/// </summary>
+public interface IRealtimeTransportFactory
+{
+    /// <summary>
+    /// Gets the default provider selected by runtime configuration.
+    /// </summary>
+    RealtimeTransportProvider DefaultProvider { get; }
+
+    /// <summary>
+    /// Resolves one concrete transport provider.
+    /// </summary>
+    IRealtimeTransport Resolve(RealtimeTransportProvider? provider = null);
+}
+
+/// <summary>
 /// Defines the runtime contract implemented by every agent or agentless connector.
 /// </summary>
 public interface IConnector

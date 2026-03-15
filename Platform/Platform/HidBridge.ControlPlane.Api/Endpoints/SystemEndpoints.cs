@@ -57,6 +57,7 @@ public static class SystemEndpoints
 
         endpoints.MapGet("/api/v1/runtime/uart", (ApiRuntimeSettings runtimeSettings) => Results.Ok(new
         {
+            runtimeSettings.TransportProvider,
             port = runtimeSettings.UartPort,
             baudRate = runtimeSettings.UartBaudRate,
             runtimeSettings.MouseSelector,
@@ -111,7 +112,7 @@ public static class SystemEndpoints
         }))
         .WithTags(ApiEndpointTags.System)
         .WithSummary("Read active UART runtime configuration.")
-        .WithDescription("Returns the effective UART transport configuration, logical selector values, and active persistence provider settings used by the local HID bridge connector.");
+        .WithDescription("Returns the effective transport provider together with UART transport configuration, logical selector values, and active persistence settings used by the local HID bridge connector.");
 
         return endpoints;
     }

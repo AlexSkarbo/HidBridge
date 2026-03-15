@@ -18,6 +18,11 @@ public sealed class ApiRuntimeSettings
     public required string PersistenceProvider { get; init; }
 
     /// <summary>
+    /// Gets the selected realtime transport provider name.
+    /// </summary>
+    public required string TransportProvider { get; init; }
+
+    /// <summary>
     /// Gets the SQL schema name used by the SQL persistence provider.
     /// </summary>
     public required string SqlSchema { get; init; }

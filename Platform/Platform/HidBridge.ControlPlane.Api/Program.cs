@@ -69,6 +69,8 @@ var policyRevisionLifecycleOptions = new PolicyRevisionLifecycleOptions
     Retention = TimeSpan.FromDays(int.TryParse(builder.Configuration["HIDBRIDGE_POLICY_REVISION_RETENTION_DAYS"], out var parsedPolicyRevisionRetentionDays) ? parsedPolicyRevisionRetentionDays : 90),
     MaxRevisionsPerEntity = int.TryParse(builder.Configuration["HIDBRIDGE_POLICY_REVISION_MAX_PER_ENTITY"], out var parsedPolicyRevisionMaxPerEntity) ? parsedPolicyRevisionMaxPerEntity : 20,
 };
+var transportProviderToken = builder.Configuration["HIDBRIDGE_TRANSPORT_PROVIDER"] ?? "uart";
+var defaultTransportProvider = ParseTransportProvider(transportProviderToken);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
 builder.Services.AddAuthorization();
@@ -100,6 +102,16 @@ else
 }
 
 builder.Services.AddConnectorHost();
+builder.Services.AddSingleton(new RealtimeTransportRuntimeOptions
+{
+    DefaultProvider = defaultTransportProvider,
+});
+builder.Services.AddSingleton<IRealtimeTransport>(sp =>
+    new ConnectorBackedRealtimeTransport(
+        RealtimeTransportProvider.Uart,
+        sp.GetRequiredService<IConnectorRegistry>()));
+builder.Services.AddSingleton<IRealtimeTransport>(_ => new WebRtcDataChannelRealtimeTransport());
+builder.Services.AddSingleton<IRealtimeTransportFactory, DefaultRealtimeTransportFactory>();
 builder.Services.AddSessionOrchestrator();
 builder.Services.AddSingleton(maintenanceOptions);
 builder.Services.AddSingleton<RegisterAgentUseCase>();
@@ -156,6 +168,7 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
 {
     DataRoot = dataRoot,
     PersistenceProvider = persistenceProvider,
+    TransportProvider = defaultTransportProvider.ToString(),
     SqlSchema = sqlSchema,
     SqlApplyMigrations = sqlApplyMigrations,
     UartPort = uartPort,
@@ -221,6 +234,16 @@ static IReadOnlyList<string> ParsePrefixes(string? value)
         .Where(static entry => !string.IsNullOrWhiteSpace(entry))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
+}
+
+static RealtimeTransportProvider ParseTransportProvider(string? value)
+{
+    if (RealtimeTransportProviderParser.TryParse(value, out var parsedProvider))
+    {
+        return parsedProvider;
+    }
+
+    return RealtimeTransportProvider.Uart;
 }
 
 static IReadOnlyList<PolicyBootstrapAssignment> ParseBootstrapAssignments(string? value)

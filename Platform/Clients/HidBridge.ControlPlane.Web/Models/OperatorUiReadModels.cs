@@ -12,6 +12,7 @@ public sealed record ApiHealthViewModel(
 /// Represents the runtime UART and auth configuration exposed by the ControlPlane API.
 /// </summary>
 public sealed record ApiRuntimeViewModel(
+    string TransportProvider,
     string Port,
     int BaudRate,
     int MouseSelector,
