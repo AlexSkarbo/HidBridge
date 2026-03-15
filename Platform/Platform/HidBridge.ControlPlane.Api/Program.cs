@@ -4,6 +4,7 @@ using HidBridge.Connectors.HidBridgeUart;
 using HidBridge.ControlPlane.Api;
 using HidBridge.ControlPlane.Api.Endpoints;
 using HidBridge.ConnectorHost;
+using HidBridge.Contracts;
 using HidBridge.Persistence;
 using HidBridge.Persistence.Sql;
 using HidBridge.SessionOrchestrator;
@@ -178,6 +179,7 @@ var uartInjectRetries = int.TryParse(builder.Configuration["HIDBRIDGE_UART_INJEC
     : 2;
 var agentId = builder.Configuration["HIDBRIDGE_AGENT_ID"] ?? "agent_hidbridge_uart_local";
 var endpointId = builder.Configuration["HIDBRIDGE_ENDPOINT_ID"] ?? "endpoint_local_demo";
+var endpointExtraCapabilities = ParseCapabilityDescriptors(builder.Configuration["HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES"]);
 var uartOptions = new HidBridgeUartClientOptions(
     uartPort,
     uartBaud,
@@ -220,7 +222,8 @@ builder.Services.AddSingleton<IConnector>(_ =>
     new HidBridgeUartConnector(
         agentId: agentId,
         endpointId: endpointId,
-        options: uartOptions));
+        options: uartOptions,
+        extraCapabilities: endpointExtraCapabilities));
 
 var app = builder.Build();
 
@@ -300,6 +303,46 @@ static IReadOnlyDictionary<string, RealtimeTransportProvider> ParseTransportProv
     }
 
     return map;
+}
+
+static IReadOnlyList<CapabilityDescriptor> ParseCapabilityDescriptors(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return [];
+    }
+
+    var results = new List<CapabilityDescriptor>();
+    foreach (var token in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            continue;
+        }
+
+        var name = token;
+        var version = "1.0";
+        var delimiterIndex = token.IndexOf('@');
+        if (delimiterIndex > 0 && delimiterIndex < token.Length - 1)
+        {
+            name = token[..delimiterIndex].Trim();
+            version = token[(delimiterIndex + 1)..].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            continue;
+        }
+
+        if (results.Any(existing => string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            continue;
+        }
+
+        results.Add(new CapabilityDescriptor(name, string.IsNullOrWhiteSpace(version) ? "1.0" : version));
+    }
+
+    return results;
 }
 
 static IReadOnlyList<PolicyBootstrapAssignment> ParseBootstrapAssignments(string? value)

@@ -616,6 +616,139 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the WebRTC relay peer-online route and payload.
+    /// </summary>
+    [Fact]
+    public async Task MarkWebRtcPeerOnlineAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new WebRtcPeerPresenceRequestViewModel
+        {
+            EndpointId = "endpoint-1",
+            Metadata = new Dictionary<string, string> { ["client"] = "web-shell" },
+        };
+        var handler = new RecordingHandler(new WebRtcPeerStateViewModel(
+            "session-1",
+            "peer-a",
+            "endpoint-1",
+            true,
+            DateTimeOffset.UtcNow,
+            request.Metadata));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.MarkWebRtcPeerOnlineAsync("session-1", "peer-a", request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/peers/peer-a/online", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("endpoint-1", payload!["endpointId"]?.ToString());
+    }
+
+    /// <summary>
+    /// Verifies the WebRTC relay peer-offline route.
+    /// </summary>
+    [Fact]
+    public async Task MarkWebRtcPeerOfflineAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new WebRtcPeerStateViewModel(
+            "session-1",
+            "peer-a",
+            "endpoint-1",
+            false,
+            DateTimeOffset.UtcNow));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.MarkWebRtcPeerOfflineAsync("session-1", "peer-a", cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/peers/peer-a/offline", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the WebRTC relay peers list route.
+    /// </summary>
+    [Fact]
+    public async Task GetWebRtcPeersAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new[]
+        {
+            new WebRtcPeerStateViewModel("session-1", "peer-a", "endpoint-1", true, DateTimeOffset.UtcNow),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetWebRtcPeersAsync("session-1", cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/peers", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the WebRTC relay command queue route and query parameters.
+    /// </summary>
+    [Fact]
+    public async Task GetWebRtcCommandsAsync_TargetsExpectedRouteAndQuery()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new[]
+        {
+            new WebRtcCommandEnvelopeViewModel(
+                "session-1",
+                5,
+                "endpoint-1",
+                "peer-a",
+                new WebRtcRelayCommandRequestViewModel
+                {
+                    CommandId = "cmd-1",
+                    SessionId = "session-1",
+                    Channel = "Hid",
+                    Action = "keyboard.text",
+                    Args = new Dictionary<string, object?>(),
+                    TimeoutMs = 1500,
+                    IdempotencyKey = "idem-1",
+                },
+                DateTimeOffset.UtcNow),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetWebRtcCommandsAsync("session-1", "peer-a", 4, 20, cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/commands?peerId=peer-a&afterSequence=4&limit=20", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the WebRTC relay command-ack route and payload.
+    /// </summary>
+    [Fact]
+    public async Task PublishWebRtcCommandAckAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new WebRtcCommandAckPublishRequestViewModel
+        {
+            Status = "Applied",
+            Metrics = new Dictionary<string, double> { ["rttMs"] = 12.5 },
+        };
+        var handler = new RecordingHandler(new WebRtcCommandAckPublishResultViewModel("session-1", "cmd-1", true));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.PublishWebRtcCommandAckAsync("session-1", "cmd-1", request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/webrtc/commands/cmd-1/ack", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("Applied", payload!["status"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the policy-scopes route.
     /// </summary>
     [Fact]

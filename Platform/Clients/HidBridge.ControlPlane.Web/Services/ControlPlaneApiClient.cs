@@ -230,6 +230,70 @@ public sealed class ControlPlaneApiClient
             cancellationToken);
 
     /// <summary>
+    /// Marks one WebRTC relay peer online for the specified session.
+    /// </summary>
+    public async Task<WebRtcPeerStateViewModel?> MarkWebRtcPeerOnlineAsync(
+        string sessionId,
+        string peerId,
+        WebRtcPeerPresenceRequestViewModel? body = null,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<WebRtcPeerStateViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(peerId)}/online",
+            body ?? new WebRtcPeerPresenceRequestViewModel(),
+            cancellationToken);
+
+    /// <summary>
+    /// Marks one WebRTC relay peer offline for the specified session.
+    /// </summary>
+    public async Task<WebRtcPeerStateViewModel?> MarkWebRtcPeerOfflineAsync(
+        string sessionId,
+        string peerId,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<WebRtcPeerStateViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(peerId)}/offline",
+            new { },
+            cancellationToken);
+
+    /// <summary>
+    /// Lists WebRTC relay peers for one session.
+    /// </summary>
+    public async Task<IReadOnlyList<WebRtcPeerStateViewModel>?> GetWebRtcPeersAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+        => await GetJsonAsync<IReadOnlyList<WebRtcPeerStateViewModel>>(
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/peers",
+            cancellationToken);
+
+    /// <summary>
+    /// Lists queued WebRTC relay command envelopes for one peer.
+    /// </summary>
+    public async Task<IReadOnlyList<WebRtcCommandEnvelopeViewModel>?> GetWebRtcCommandsAsync(
+        string sessionId,
+        string peerId,
+        int? afterSequence = null,
+        int? limit = null,
+        CancellationToken cancellationToken = default)
+        => await GetJsonAsync<IReadOnlyList<WebRtcCommandEnvelopeViewModel>>(
+            BuildWebRtcCommandsQuery(sessionId, peerId, afterSequence, limit),
+            cancellationToken);
+
+    /// <summary>
+    /// Publishes one command acknowledgment for the WebRTC relay path.
+    /// </summary>
+    public async Task<WebRtcCommandAckPublishResultViewModel?> PublishWebRtcCommandAckAsync(
+        string sessionId,
+        string commandId,
+        WebRtcCommandAckPublishRequestViewModel body,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<WebRtcCommandAckPublishResultViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/commands/{Uri.EscapeDataString(commandId)}/ack",
+            body,
+            cancellationToken);
+
+    /// <summary>
     /// Requests active control for the specified participant.
     /// </summary>
     public async Task<SessionControlLeaseViewModel?> RequestControlAsync(
@@ -577,6 +641,31 @@ public sealed class ControlPlaneApiClient
 
         var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/signals";
         return query.Count == 0 ? route : $"{route}?{string.Join("&", query)}";
+    }
+
+    private static string BuildWebRtcCommandsQuery(
+        string sessionId,
+        string peerId,
+        int? afterSequence,
+        int? limit)
+    {
+        var query = new List<string>
+        {
+            $"peerId={Uri.EscapeDataString(peerId)}",
+        };
+
+        if (afterSequence.HasValue)
+        {
+            query.Add($"afterSequence={afterSequence.Value}");
+        }
+
+        if (limit.HasValue)
+        {
+            query.Add($"limit={limit.Value}");
+        }
+
+        var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/webrtc/commands";
+        return $"{route}?{string.Join("&", query)}";
     }
 
     private async Task<TResponse?> GetJsonAsync<TResponse>(

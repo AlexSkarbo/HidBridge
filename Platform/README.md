@@ -330,6 +330,15 @@ Manual demo gate only:
     - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -ForwardArgs @('-RequireDeviceAck','-KeyboardInterfaceSelector','1')`
   - note: do not use `--` argument separator with `run.ps1`; use direct args or `-ForwardArgs`.
 
+Manual WebRTC relay smoke (peer queue + ack + transport health):
+- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-relay-smoke -BaseUrl http://127.0.0.1:18093`
+- optional JSON summary output:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-relay-smoke -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/webrtc-relay-smoke.result.json`
+- this scenario force-routes command dispatch through `transportProvider=webrtc`, simulates peer polling (`/transport/webrtc/commands`), publishes ack (`/transport/webrtc/commands/{commandId}/ack`), checks transport health, then cleans up session + peer presence.
+- if relay smoke reports `endpointSupportsWebRtc=false`, restart API with endpoint capability override:
+  - `setx HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES "transport.webrtc.datachannel.v1@1.0"` (new terminal required), or
+  - in current shell: `$env:HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES="transport.webrtc.datachannel.v1@1.0"` then restart API.
+
 Manual UART diagnostics (selector sweep):
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093`
 - custom selector set + json report:

@@ -180,7 +180,8 @@ public sealed record SessionOpenBody(
     SessionRole ShareMode = SessionRole.Owner,
     string? TenantId = null,
     string? OrganizationId = null,
-    IReadOnlyList<string>? OperatorRoles = null);
+    IReadOnlyList<string>? OperatorRoles = null,
+    string? TransportProvider = null);
 
 /// <summary>
 /// Requests an orderly session shutdown.

@@ -22,20 +22,45 @@ public sealed class HidBridgeUartConnector : IConnector
     /// <param name="agentId">The connector agent identifier.</param>
     /// <param name="endpointId">The endpoint identifier exposed to the control plane.</param>
     /// <param name="options">The UART transport configuration.</param>
-    public HidBridgeUartConnector(string agentId, string endpointId, HidBridgeUartClientOptions options)
+    /// <param name="extraCapabilities">Optional extra capability descriptors to advertise for routing tests.</param>
+    public HidBridgeUartConnector(
+        string agentId,
+        string endpointId,
+        HidBridgeUartClientOptions options,
+        IReadOnlyList<CapabilityDescriptor>? extraCapabilities = null)
     {
         _options = options;
         _client = new Lazy<HidBridgeUartClient>(() => new HidBridgeUartClient(_options));
+        var capabilities = new List<CapabilityDescriptor>
+        {
+            new(CapabilityNames.HidMouseV1, "1.0"),
+            new(CapabilityNames.HidKeyboardV1, "1.0"),
+            new(CapabilityNames.DiagnosticsTelemetryV1, "1.0"),
+        };
+
+        if (extraCapabilities is not null)
+        {
+            foreach (var capability in extraCapabilities)
+            {
+                if (string.IsNullOrWhiteSpace(capability.Name))
+                {
+                    continue;
+                }
+
+                if (capabilities.Any(existing => string.Equals(existing.Name, capability.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                capabilities.Add(capability);
+            }
+        }
+
         Descriptor = new ConnectorDescriptor(
             agentId,
             endpointId,
             ConnectorType.HidBridge,
-            new[]
-            {
-                new CapabilityDescriptor(CapabilityNames.HidMouseV1, "1.0"),
-                new CapabilityDescriptor(CapabilityNames.HidKeyboardV1, "1.0"),
-                new CapabilityDescriptor(CapabilityNames.DiagnosticsTelemetryV1, "1.0"),
-            });
+            capabilities);
         UartPort = options.PortName;
         BaudRate = options.BaudRate;
     }

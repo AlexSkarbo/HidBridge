@@ -335,6 +335,115 @@ public sealed class WebRtcSignalPublishRequestViewModel
 }
 
 /// <summary>
+/// Represents one transient WebRTC relay peer snapshot.
+/// </summary>
+public sealed record WebRtcPeerStateViewModel(
+    string SessionId,
+    string PeerId,
+    string? EndpointId,
+    bool IsOnline,
+    DateTimeOffset LastSeenAtUtc,
+    IReadOnlyDictionary<string, string>? Metadata = null);
+
+/// <summary>
+/// Represents one peer presence payload sent to WebRTC relay endpoints.
+/// </summary>
+public sealed class WebRtcPeerPresenceRequestViewModel
+{
+    /// <summary>
+    /// Gets or sets optional endpoint identifier associated with the peer.
+    /// </summary>
+    public string? EndpointId { get; set; }
+
+    /// <summary>
+    /// Gets or sets optional peer metadata.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Metadata { get; set; }
+}
+
+/// <summary>
+/// Represents one command request carried inside a WebRTC relay envelope.
+/// </summary>
+public sealed class WebRtcRelayCommandRequestViewModel
+{
+    /// <summary>
+    /// Gets or sets the command identifier.
+    /// </summary>
+    public string CommandId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the session identifier.
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the command channel.
+    /// </summary>
+    public string Channel { get; set; } = "Hid";
+
+    /// <summary>
+    /// Gets or sets the command action.
+    /// </summary>
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets command arguments.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?> Args { get; set; } = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets or sets command timeout in milliseconds.
+    /// </summary>
+    public int TimeoutMs { get; set; } = 3000;
+
+    /// <summary>
+    /// Gets or sets idempotency key.
+    /// </summary>
+    public string IdempotencyKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents one queued command envelope for a WebRTC relay peer.
+/// </summary>
+public sealed record WebRtcCommandEnvelopeViewModel(
+    string SessionId,
+    int Sequence,
+    string? EndpointId,
+    string? RecipientPeerId,
+    WebRtcRelayCommandRequestViewModel Command,
+    DateTimeOffset CreatedAtUtc);
+
+/// <summary>
+/// Represents one command acknowledgment publish payload for WebRTC relay.
+/// </summary>
+public sealed class WebRtcCommandAckPublishRequestViewModel
+{
+    /// <summary>
+    /// Gets or sets command status string (Applied/Rejected/Timeout/Accepted).
+    /// </summary>
+    public string Status { get; set; } = "Applied";
+
+    /// <summary>
+    /// Gets or sets optional structured error details.
+    /// </summary>
+    public ErrorInfoViewModel? Error { get; set; }
+
+    /// <summary>
+    /// Gets or sets optional numeric metrics.
+    /// </summary>
+    public IReadOnlyDictionary<string, double>? Metrics { get; set; }
+}
+
+/// <summary>
+/// Represents the acknowledgment publish outcome returned by relay endpoints.
+/// </summary>
+public sealed record WebRtcCommandAckPublishResultViewModel(
+    string SessionId,
+    string CommandId,
+    bool Accepted,
+    string? Error = null);
+
+/// <summary>
 /// Represents one bulk session-close result returned by cleanup actions.
 /// </summary>
 public sealed record SessionBulkCloseResultViewModel(

@@ -81,7 +81,8 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
             organizationId: accepted.OrganizationId);
         aggregate.MoveTo(SessionState.Active);
         _sessions[accepted.SessionId] = aggregate;
-        TryAssignSessionTransportProvider(accepted.SessionId, accepted.TargetEndpointId);
+        var requestedTransportProvider = ParseRequestedTransportProvider(accepted.TransportProvider);
+        TryAssignSessionTransportProvider(accepted.SessionId, accepted.TargetEndpointId, requestedTransportProvider);
         await _sessionStore.UpsertAsync(ToSnapshot(aggregate, nowUtc), cancellationToken);
         return accepted;
     }
@@ -916,7 +917,10 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         return aggregate;
     }
 
-    private RealtimeTransportProvider? TryAssignSessionTransportProvider(string sessionId, string? endpointId)
+    private RealtimeTransportProvider? TryAssignSessionTransportProvider(
+        string sessionId,
+        string? endpointId,
+        RealtimeTransportProvider? requestedProvider = null)
     {
         if (_realtimeTransportFactory is null)
         {
@@ -929,7 +933,7 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                 new RealtimeTransportRoutePolicyContext(
                     EndpointId: endpointId,
                     SessionProvider: null,
-                    RequestedProvider: null));
+                    RequestedProvider: requestedProvider));
             _sessionTransportProviders[sessionId] = resolution.Provider;
             return resolution.Provider;
         }
@@ -938,6 +942,21 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
             _sessionTransportProviders.TryRemove(sessionId, out _);
             return null;
         }
+    }
+
+    private static RealtimeTransportProvider? ParseRequestedTransportProvider(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        if (RealtimeTransportProviderParser.TryParse(token, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"Unknown transport provider '{token}'.");
     }
 
     private static SessionSnapshot ToSnapshot(SessionAggregate aggregate, DateTimeOffset nowUtc)
