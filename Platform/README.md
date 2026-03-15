@@ -127,6 +127,10 @@ Default ControlPlane API:
   - `POST /api/v1/sessions/{sessionId}/control/force-takeover`
   - `POST /api/v1/sessions/{sessionId}/control/release`
   - `GET /api/v1/collaboration/sessions/{sessionId}/control/dashboard`
+- transport diagnostics/signaling:
+  - `GET /api/v1/sessions/{sessionId}/transport/health?provider={uart|webrtc}`
+  - `POST /api/v1/sessions/{sessionId}/transport/webrtc/signals`
+  - `GET /api/v1/sessions/{sessionId}/transport/webrtc/signals?recipientPeerId={peerId}&afterSequence={n}&limit={n}`
 - command journal:
 - `GET /api/v1/sessions/{sessionId}/commands/journal`
   - `GET /api/v1/commands?sessionId={sessionId}`
@@ -180,6 +184,10 @@ Useful environment variables:
 - `HIDBRIDGE_POLICY_REVISION_MAINTENANCE_INTERVAL_SECONDS`
 - `HIDBRIDGE_POLICY_REVISION_RETENTION_DAYS`
 - `HIDBRIDGE_POLICY_REVISION_MAX_PER_ENTITY`
+- `HIDBRIDGE_TRANSPORT_PROVIDER`
+- `HIDBRIDGE_TRANSPORT_PROVIDER_OVERRIDES` (example: `endpoint_local_demo=uart;endpoint_remote_lab=webrtc`)
+- `HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY`
+- `HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE`
 
 UART key-mode notes:
 - If `HIDBRIDGE_UART_HMAC_KEY` is not set but `HIDBRIDGE_UART_MASTER_SECRET` is set, bootstrap HMAC key defaults to `HIDBRIDGE_UART_MASTER_SECRET`.

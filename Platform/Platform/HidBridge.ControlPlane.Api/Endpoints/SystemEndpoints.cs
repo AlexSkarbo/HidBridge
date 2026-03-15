@@ -31,6 +31,8 @@ public static class SystemEndpoints
                 "/api/v1/agents",
                 "/api/v1/endpoints",
                 "/api/v1/sessions",
+                "/api/v1/sessions/{sessionId}/transport/health",
+                "/api/v1/sessions/{sessionId}/transport/webrtc/signals",
                 "/api/v1/events/audit",
                 "/api/v1/events/telemetry",
                 "/api/v1/runtime/uart",

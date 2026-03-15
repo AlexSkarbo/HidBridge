@@ -103,6 +103,18 @@ public enum CommandChannel
 }
 
 /// <summary>
+/// Represents one normalized WebRTC signaling message type.
+/// </summary>
+public enum WebRtcSignalKind
+{
+    Offer,
+    Answer,
+    IceCandidate,
+    Bye,
+    Heartbeat,
+}
+
+/// <summary>
 /// Represents the delivery or execution outcome of a command.
 /// </summary>
 public enum CommandStatus
@@ -357,6 +369,35 @@ public sealed record CommandJournalEntryBody(
     string? ParticipantId = null,
     string? PrincipalId = null,
     string? ShareId = null);
+
+/// <summary>
+/// Carries one WebRTC signaling message persisted for one session.
+/// </summary>
+public sealed record WebRtcSignalMessageBody(
+    string SessionId,
+    int Sequence,
+    WebRtcSignalKind Kind,
+    string SenderPeerId,
+    string? RecipientPeerId,
+    string Payload,
+    string? Mid = null,
+    int? MLineIndex = null,
+    DateTimeOffset? CreatedAtUtc = null);
+
+/// <summary>
+/// Carries one transport health report for a session route.
+/// </summary>
+public sealed record SessionTransportHealthBody(
+    string SessionId,
+    string AgentId,
+    string EndpointId,
+    string Provider,
+    string ProviderSource,
+    bool Connected,
+    string Status,
+    IReadOnlyDictionary<string, object?> Metrics,
+    CommandJournalEntryBody? LastCommandAck = null,
+    DateTimeOffset? ReportedAtUtc = null);
 
 /// <summary>
 /// Represents one normalized timeline item built from audit, telemetry, and command journal records.

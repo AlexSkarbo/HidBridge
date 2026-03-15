@@ -144,6 +144,7 @@ builder.Services.AddSingleton<ProjectionQueryService>();
 builder.Services.AddSingleton<ReplayArchiveDiagnosticsService>();
 builder.Services.AddSingleton<PolicyGovernanceDiagnosticsService>();
 builder.Services.AddSingleton<PolicyGovernanceManagementService>();
+builder.Services.AddSingleton<WebRtcSignalingService>();
 
 var uartPort = builder.Configuration["HIDBRIDGE_UART_PORT"] ?? "COM6";
 var uartMasterSecret = builder.Configuration["HIDBRIDGE_UART_MASTER_SECRET"] ?? string.Empty;
@@ -229,6 +230,7 @@ app.MapScalarApiReference("/scalar");
 app.MapSystemEndpoints();
 app.MapInventoryEndpoints();
 app.MapSessionEndpoints();
+app.MapTransportEndpoints();
 app.MapCollaborationEndpoints();
 app.MapInvitationEndpoints();
 app.MapControlEndpoints();
