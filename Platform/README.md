@@ -188,6 +188,7 @@ Useful environment variables:
 - `HIDBRIDGE_TRANSPORT_PROVIDER_OVERRIDES` (example: `endpoint_local_demo=uart;endpoint_remote_lab=webrtc`)
 - `HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY`
 - `HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE`
+- `HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR` (default: `true`; retries once via default provider when WebRTC route returns transport error and no explicit `transportProvider` override was requested)
 
 UART key-mode notes:
 - If `HIDBRIDGE_UART_HMAC_KEY` is not set but `HIDBRIDGE_UART_MASTER_SECRET` is set, bootstrap HMAC key defaults to `HIDBRIDGE_UART_MASTER_SECRET`.

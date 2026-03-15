@@ -77,6 +77,8 @@ var webRtcRequireCapability = bool.TryParse(builder.Configuration["HIDBRIDGE_WEB
     && parsedWebRtcRequireCapability;
 var webRtcEnableConnectorBridge = !bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE"], out var parsedWebRtcEnableConnectorBridge)
     || parsedWebRtcEnableConnectorBridge;
+var transportFallbackToDefaultOnWebRtcError = !bool.TryParse(builder.Configuration["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"], out var parsedTransportFallbackToDefaultOnWebRtcError)
+    || parsedTransportFallbackToDefaultOnWebRtcError;
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
 builder.Services.AddAuthorization();
@@ -117,6 +119,10 @@ builder.Services.AddSingleton(new WebRtcTransportRuntimeOptions
 {
     RequireDataChannelCapability = webRtcRequireCapability,
     EnableConnectorBridge = webRtcEnableConnectorBridge,
+});
+builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
+{
+    EnableDefaultProviderFallbackOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
 });
 builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new ConnectorBackedRealtimeTransport(

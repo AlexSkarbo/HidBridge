@@ -162,6 +162,101 @@ public sealed class DispatchCommandUseCaseTests
         Assert.Equal("Rejected", events.Telemetry[0].Metrics["transportErrorKind"]?.ToString());
     }
 
+    [Fact]
+    public async Task ExecuteAsync_FallsBackToDefaultProvider_WhenWebRtcRouteReturnsTransportError()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var uart = new FakeRealtimeTransport(
+            RealtimeTransportProvider.Uart,
+            new CommandAckBody("cmd-fallback", CommandStatus.Applied));
+        var webrtc = new FakeRealtimeTransport(
+            RealtimeTransportProvider.WebRtcDataChannel,
+            new CommandAckBody(
+                "cmd-fallback",
+                CommandStatus.Rejected,
+                new ErrorInfo(ErrorDomain.Transport, "E_TRANSPORT_DISCONNECTED", "not connected", true)));
+        var factory = new FakeRealtimeTransportFactory(
+            RealtimeTransportProvider.Uart,
+            new Dictionary<string, RealtimeTransportProvider>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["endpoint-1"] = RealtimeTransportProvider.WebRtcDataChannel,
+            },
+            uart,
+            webrtc);
+        var events = new RecordingEventWriter();
+        var useCase = new DispatchCommandUseCase(new NullConnectorRegistry(), events, factory);
+
+        var ack = await useCase.ExecuteAsync(
+            "agent-1",
+            new CommandRequestBody(
+                CommandId: "cmd-fallback",
+                SessionId: "session-fallback",
+                Channel: CommandChannel.Hid,
+                Action: "keyboard.text",
+                Args: new Dictionary<string, object?> { ["text"] = "hello" },
+                TimeoutMs: 250,
+                IdempotencyKey: "cmd-fallback"),
+            endpointId: "endpoint-1",
+            sessionTransportProvider: null,
+            cancellationToken);
+
+        Assert.Equal(CommandStatus.Applied, ack.Status);
+        Assert.NotNull(ack.Metrics);
+        Assert.Equal(1, ack.Metrics!["transportFallbackAttempted"]);
+        Assert.Equal(1, ack.Metrics["transportFallbackApplied"]);
+        Assert.Equal(1, webrtc.ConnectCount);
+        Assert.Equal(1, uart.ConnectCount);
+        Assert.Single(events.Telemetry);
+        Assert.Equal("Uart", events.Telemetry[0].Metrics["transportProvider"]?.ToString());
+        Assert.Equal("fallback-default", events.Telemetry[0].Metrics["transportProviderSource"]?.ToString());
+        Assert.Equal("True", events.Telemetry[0].Metrics["transportFallbackAttempted"]?.ToString());
+        Assert.Equal("True", events.Telemetry[0].Metrics["transportFallbackSucceeded"]?.ToString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotFallback_WhenProviderOverrideIsExplicit()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var uart = new FakeRealtimeTransport(
+            RealtimeTransportProvider.Uart,
+            new CommandAckBody("cmd-override-no-fallback", CommandStatus.Applied));
+        var webrtc = new FakeRealtimeTransport(
+            RealtimeTransportProvider.WebRtcDataChannel,
+            new CommandAckBody(
+                "cmd-override-no-fallback",
+                CommandStatus.Rejected,
+                new ErrorInfo(ErrorDomain.Transport, "E_TRANSPORT_DISCONNECTED", "not connected", true)));
+        var factory = new FakeRealtimeTransportFactory(RealtimeTransportProvider.Uart, endpointProviders: null, uart, webrtc);
+        var events = new RecordingEventWriter();
+        var useCase = new DispatchCommandUseCase(new NullConnectorRegistry(), events, factory);
+
+        var ack = await useCase.ExecuteAsync(
+            "agent-1",
+            new CommandRequestBody(
+                CommandId: "cmd-override-no-fallback",
+                SessionId: "session-override-no-fallback",
+                Channel: CommandChannel.Hid,
+                Action: "keyboard.text",
+                Args: new Dictionary<string, object?>
+                {
+                    ["text"] = "hello",
+                    ["transportProvider"] = "webrtc",
+                },
+                TimeoutMs: 250,
+                IdempotencyKey: "cmd-override-no-fallback"),
+            endpointId: "endpoint-1",
+            sessionTransportProvider: null,
+            cancellationToken);
+
+        Assert.Equal(CommandStatus.Rejected, ack.Status);
+        Assert.Equal(1, webrtc.ConnectCount);
+        Assert.Equal(0, uart.ConnectCount);
+        Assert.Single(events.Telemetry);
+        Assert.Equal("WebRtcDataChannel", events.Telemetry[0].Metrics["transportProvider"]?.ToString());
+        Assert.Equal("request", events.Telemetry[0].Metrics["transportProviderSource"]?.ToString());
+        Assert.Equal("False", events.Telemetry[0].Metrics["transportFallbackAttempted"]?.ToString());
+    }
+
     private sealed class NullConnectorRegistry : IConnectorRegistry
     {
         public Task RegisterAsync(IConnector connector, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -256,10 +351,12 @@ public sealed class DispatchCommandUseCaseTests
         public RealtimeTransportProvider Provider { get; }
 
         public RealtimeTransportProvider? LastConnectedProvider { get; private set; }
+        public int ConnectCount { get; private set; }
 
         public Task ConnectAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken)
         {
             LastConnectedProvider = Provider;
+            ConnectCount++;
             return Task.CompletedTask;
         }
 
