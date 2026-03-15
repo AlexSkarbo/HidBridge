@@ -73,6 +73,16 @@ public sealed class ApiRuntimeSettings
     public required bool UartUsesMasterSecret { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether WebRTC transport requires endpoint capability advertisement.
+    /// </summary>
+    public required bool WebRtcRequireCapability { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether WebRTC command dispatch bridges through connector execution.
+    /// </summary>
+    public required bool WebRtcEnableConnectorBridge { get; init; }
+
+    /// <summary>
     /// Gets the local agent identifier.
     /// </summary>
     public required string AgentId { get; init; }

@@ -1,6 +1,8 @@
 using HidBridge.Abstractions;
 using HidBridge.Contracts;
 using System.Runtime.CompilerServices;
+using System.Collections.Concurrent;
+using System.IO;
 
 namespace HidBridge.Application;
 
@@ -19,6 +21,22 @@ public sealed class RealtimeTransportRuntimeOptions
     /// </summary>
     public IReadOnlyDictionary<string, RealtimeTransportProvider> EndpointProviders { get; init; }
         = new Dictionary<string, RealtimeTransportProvider>(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Carries runtime options for the WebRTC DataChannel transport adapter.
+/// </summary>
+public sealed class WebRtcTransportRuntimeOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the adapter requires endpoint capability advertisement.
+    /// </summary>
+    public bool RequireDataChannelCapability { get; init; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether command dispatch is bridged through connector execute path.
+    /// </summary>
+    public bool EnableConnectorBridge { get; init; } = true;
 }
 
 /// <summary>
@@ -200,24 +218,94 @@ public sealed class ConnectorBackedRealtimeTransport : IRealtimeTransport
 /// </summary>
 public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
 {
+    private readonly IConnectorRegistry _connectorRegistry;
+    private readonly IEndpointSnapshotStore _endpointSnapshotStore;
+    private readonly WebRtcTransportRuntimeOptions _options;
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _connectedRoutes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Creates the WebRTC DataChannel transport adapter.
+    /// </summary>
+    public WebRtcDataChannelRealtimeTransport(
+        IConnectorRegistry connectorRegistry,
+        IEndpointSnapshotStore endpointSnapshotStore,
+        WebRtcTransportRuntimeOptions options)
+    {
+        _connectorRegistry = connectorRegistry;
+        _endpointSnapshotStore = endpointSnapshotStore;
+        _options = options;
+    }
+
     /// <inheritdoc />
     public RealtimeTransportProvider Provider => RealtimeTransportProvider.WebRtcDataChannel;
 
     /// <inheritdoc />
-    public Task ConnectAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken)
-        => Task.CompletedTask;
+    public async Task ConnectAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken)
+    {
+        var endpointSnapshot = await RequireEndpointSnapshotAsync(route.EndpointId, cancellationToken);
+        EnsureEndpointSupportsWebRtc(route, endpointSnapshot);
+
+        var connector = await _connectorRegistry.ResolveAsync(route.AgentId, cancellationToken);
+        if (connector is null)
+        {
+            throw new IOException($"Agent {route.AgentId} is not registered for WebRTC transport.");
+        }
+
+        _connectedRoutes[BuildRouteKey(route)] = DateTimeOffset.UtcNow;
+    }
 
     /// <inheritdoc />
-    public Task<CommandAckBody> SendCommandAsync(RealtimeTransportRouteContext route, CommandRequestBody command, CancellationToken cancellationToken)
-        => Task.FromResult(
-            new CommandAckBody(
+    public async Task<CommandAckBody> SendCommandAsync(RealtimeTransportRouteContext route, CommandRequestBody command, CancellationToken cancellationToken)
+    {
+        if (!_connectedRoutes.ContainsKey(BuildRouteKey(route)))
+        {
+            return new CommandAckBody(
+                command.CommandId,
+                CommandStatus.Rejected,
+                new ErrorInfo(
+                    ErrorDomain.Transport,
+                    "E_TRANSPORT_DISCONNECTED",
+                    "WebRTC transport route is not connected.",
+                    true));
+        }
+
+        if (!_options.EnableConnectorBridge)
+        {
+            return new CommandAckBody(
                 command.CommandId,
                 CommandStatus.Rejected,
                 new ErrorInfo(
                     ErrorDomain.Transport,
                     "E_TRANSPORT_NOT_IMPLEMENTED",
-                    "WebRTC DataChannel transport provider is not implemented yet.",
-                    false)));
+                    "WebRTC connector bridge is disabled.",
+                    false));
+        }
+
+        var connector = await _connectorRegistry.ResolveAsync(route.AgentId, cancellationToken);
+        if (connector is null)
+        {
+            return new CommandAckBody(
+                command.CommandId,
+                CommandStatus.Rejected,
+                new ErrorInfo(
+                    ErrorDomain.Transport,
+                    "E_TRANSPORT_DISCONNECTED",
+                    $"Agent {route.AgentId} is not registered.",
+                    true));
+        }
+
+        var result = await connector.ExecuteAsync(command, cancellationToken);
+        var metrics = result.Metrics is null
+            ? new Dictionary<string, double>()
+            : new Dictionary<string, double>(result.Metrics);
+        metrics["transportBridgeMode"] = 1;
+
+        return new CommandAckBody(
+            command.CommandId,
+            result.Status,
+            result.Error,
+            metrics);
+    }
 
     /// <inheritdoc />
     public async IAsyncEnumerable<RealtimeTransportMessage> ReceiveAsync(
@@ -230,20 +318,82 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
 
     /// <inheritdoc />
     public Task CloseAsync(RealtimeTransportRouteContext route, string? reason, CancellationToken cancellationToken)
-        => Task.CompletedTask;
+    {
+        _connectedRoutes.TryRemove(BuildRouteKey(route), out _);
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
-    public Task<RealtimeTransportHealth> GetHealthAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken)
-        => Task.FromResult(
-            new RealtimeTransportHealth(
-                Provider,
-                IsConnected: false,
-                Status: "NotImplemented",
-                Metrics: new Dictionary<string, object?>
-                {
-                    ["agentId"] = route.AgentId,
-                    ["connected"] = false,
-                }));
+    public async Task<RealtimeTransportHealth> GetHealthAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken)
+    {
+        var routeKey = BuildRouteKey(route);
+        var endpointSupportsWebRtc = false;
+        var endpointId = route.EndpointId;
+        if (!string.IsNullOrWhiteSpace(endpointId))
+        {
+            var endpoint = await TryResolveEndpointSnapshotAsync(endpointId, cancellationToken);
+            endpointSupportsWebRtc = endpoint?.Capabilities.Any(IsWebRtcCapability) == true;
+        }
+
+        var connected = _connectedRoutes.ContainsKey(routeKey);
+        return new RealtimeTransportHealth(
+            Provider,
+            connected,
+            connected ? "Connected" : "Disconnected",
+            new Dictionary<string, object?>
+            {
+                ["agentId"] = route.AgentId,
+                ["endpointId"] = endpointId,
+                ["connected"] = connected,
+                ["capabilityRequired"] = _options.RequireDataChannelCapability,
+                ["endpointSupportsWebRtc"] = endpointSupportsWebRtc,
+                ["bridgeMode"] = _options.EnableConnectorBridge ? "connector-bridge" : "disabled",
+            });
+    }
+
+    private async Task<EndpointSnapshot> RequireEndpointSnapshotAsync(string? endpointId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(endpointId))
+        {
+            throw new InvalidDataException("WebRTC transport route requires endpointId.");
+        }
+
+        var endpoint = await TryResolveEndpointSnapshotAsync(endpointId, cancellationToken);
+        return endpoint
+            ?? throw new IOException($"Endpoint {endpointId} is not registered for WebRTC transport.");
+    }
+
+    private async Task<EndpointSnapshot?> TryResolveEndpointSnapshotAsync(string endpointId, CancellationToken cancellationToken)
+    {
+        var endpoints = await _endpointSnapshotStore.ListAsync(cancellationToken);
+        return endpoints.FirstOrDefault(x => string.Equals(x.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void EnsureEndpointSupportsWebRtc(RealtimeTransportRouteContext route, EndpointSnapshot endpoint)
+    {
+        if (!_options.RequireDataChannelCapability)
+        {
+            return;
+        }
+
+        if (endpoint.Capabilities.Any(IsWebRtcCapability))
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            $"Endpoint {route.EndpointId} does not advertise {CapabilityNames.TransportWebRtcDataChannelV1} capability.");
+    }
+
+    private static bool IsWebRtcCapability(CapabilityDescriptor capability)
+        => string.Equals(capability.Name, CapabilityNames.TransportWebRtcDataChannelV1, StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildRouteKey(RealtimeTransportRouteContext route)
+        => string.Join(
+            "|",
+            route.AgentId,
+            route.EndpointId ?? string.Empty,
+            route.SessionId ?? string.Empty);
 }
 
 /// <summary>

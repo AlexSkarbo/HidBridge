@@ -73,6 +73,10 @@ var transportProviderToken = builder.Configuration["HIDBRIDGE_TRANSPORT_PROVIDER
 var defaultTransportProvider = ParseTransportProvider(transportProviderToken);
 var endpointTransportProviders = ParseTransportProviderOverrides(
     builder.Configuration["HIDBRIDGE_TRANSPORT_PROVIDER_OVERRIDES"]);
+var webRtcRequireCapability = bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY"], out var parsedWebRtcRequireCapability)
+    && parsedWebRtcRequireCapability;
+var webRtcEnableConnectorBridge = !bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE"], out var parsedWebRtcEnableConnectorBridge)
+    || parsedWebRtcEnableConnectorBridge;
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
 builder.Services.AddAuthorization();
@@ -109,11 +113,20 @@ builder.Services.AddSingleton(new RealtimeTransportRuntimeOptions
     DefaultProvider = defaultTransportProvider,
     EndpointProviders = endpointTransportProviders,
 });
+builder.Services.AddSingleton(new WebRtcTransportRuntimeOptions
+{
+    RequireDataChannelCapability = webRtcRequireCapability,
+    EnableConnectorBridge = webRtcEnableConnectorBridge,
+});
 builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new ConnectorBackedRealtimeTransport(
         RealtimeTransportProvider.Uart,
         sp.GetRequiredService<IConnectorRegistry>()));
-builder.Services.AddSingleton<IRealtimeTransport>(_ => new WebRtcDataChannelRealtimeTransport());
+builder.Services.AddSingleton<IRealtimeTransport>(sp =>
+    new WebRtcDataChannelRealtimeTransport(
+        sp.GetRequiredService<IConnectorRegistry>(),
+        sp.GetRequiredService<IEndpointSnapshotStore>(),
+        sp.GetRequiredService<WebRtcTransportRuntimeOptions>()));
 builder.Services.AddSingleton<IRealtimeTransportFactory, DefaultRealtimeTransportFactory>();
 builder.Services.AddSessionOrchestrator();
 builder.Services.AddSingleton(maintenanceOptions);
@@ -182,6 +195,8 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     UartInjectTimeoutMs = uartInjectTimeoutMs,
     UartInjectRetries = uartInjectRetries,
     UartUsesMasterSecret = !string.IsNullOrWhiteSpace(uartMasterSecret),
+    WebRtcRequireCapability = webRtcRequireCapability,
+    WebRtcEnableConnectorBridge = webRtcEnableConnectorBridge,
     AgentId = agentId,
     EndpointId = endpointId,
     Maintenance = maintenanceOptions,

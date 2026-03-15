@@ -66,6 +66,11 @@ public static class SystemEndpoints
             runtimeSettings.UartInjectTimeoutMs,
             runtimeSettings.UartInjectRetries,
             runtimeSettings.UartUsesMasterSecret,
+            webRtc = new
+            {
+                runtimeSettings.WebRtcRequireCapability,
+                runtimeSettings.WebRtcEnableConnectorBridge,
+            },
             runtimeSettings.AgentId,
             runtimeSettings.EndpointId,
             runtimeSettings.PersistenceProvider,
@@ -112,7 +117,7 @@ public static class SystemEndpoints
         }))
         .WithTags(ApiEndpointTags.System)
         .WithSummary("Read active UART runtime configuration.")
-        .WithDescription("Returns the effective transport provider together with UART transport configuration, logical selector values, and active persistence settings used by the local HID bridge connector.");
+        .WithDescription("Returns the effective transport provider together with UART and WebRTC transport runtime options, logical selector values, and active persistence settings used by the local connector stack.");
 
         return endpoints;
     }

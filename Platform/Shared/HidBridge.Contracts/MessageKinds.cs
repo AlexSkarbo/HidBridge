@@ -22,6 +22,7 @@ public static class CapabilityNames
 {
     public const string HidMouseV1 = "hid.mouse.v1";
     public const string HidKeyboardV1 = "hid.keyboard.v1";
+    public const string TransportWebRtcDataChannelV1 = "transport.webrtc.datachannel.v1";
     public const string MediaPublishV1 = "media.publish.v1";
     public const string MediaSubscribeV1 = "media.subscribe.v1";
     public const string DiagnosticsTelemetryV1 = "diag.telemetry.v1";
