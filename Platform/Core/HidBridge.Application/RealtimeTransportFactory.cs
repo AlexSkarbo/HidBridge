@@ -13,6 +13,12 @@ public sealed class RealtimeTransportRuntimeOptions
     /// Gets or sets the default provider selected by runtime configuration.
     /// </summary>
     public RealtimeTransportProvider DefaultProvider { get; init; } = RealtimeTransportProvider.Uart;
+
+    /// <summary>
+    /// Gets or sets per-endpoint provider overrides.
+    /// </summary>
+    public IReadOnlyDictionary<string, RealtimeTransportProvider> EndpointProviders { get; init; }
+        = new Dictionary<string, RealtimeTransportProvider>(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -21,6 +27,7 @@ public sealed class RealtimeTransportRuntimeOptions
 public sealed class DefaultRealtimeTransportFactory : IRealtimeTransportFactory
 {
     private readonly IReadOnlyDictionary<RealtimeTransportProvider, IRealtimeTransport> _transports;
+    private readonly IReadOnlyDictionary<string, RealtimeTransportProvider> _endpointProviders;
 
     /// <summary>
     /// Creates the transport factory.
@@ -33,6 +40,8 @@ public sealed class DefaultRealtimeTransportFactory : IRealtimeTransportFactory
             .GroupBy(x => x.Provider)
             .ToDictionary(group => group.Key, group => group.First());
         _transports = map;
+        _endpointProviders = options.EndpointProviders
+            ?? new Dictionary<string, RealtimeTransportProvider>(StringComparer.OrdinalIgnoreCase);
         DefaultProvider = map.ContainsKey(options.DefaultProvider)
             ? options.DefaultProvider
             : map.Keys.FirstOrDefault(RealtimeTransportProvider.Uart);
@@ -53,6 +62,47 @@ public sealed class DefaultRealtimeTransportFactory : IRealtimeTransportFactory
         var available = string.Join(", ", _transports.Keys.OrderBy(x => x));
         throw new InvalidOperationException(
             $"Transport provider '{selected}' is not registered. Available providers: {available}.");
+    }
+
+    /// <inheritdoc />
+    public RealtimeTransportRouteResolution ResolveRoute(RealtimeTransportRoutePolicyContext context)
+    {
+        var endpointProvider = ResolveEndpointProvider(context.EndpointId);
+        var expectedProvider = context.SessionProvider ?? endpointProvider ?? DefaultProvider;
+        var selectedProvider = context.RequestedProvider ?? expectedProvider;
+        var hasBoundRoute = context.SessionProvider is not null || endpointProvider is not null;
+
+        if (hasBoundRoute
+            && context.RequestedProvider is not null
+            && context.RequestedProvider != expectedProvider)
+        {
+            throw new InvalidOperationException(
+                $"Transport route conflict: requested provider '{context.RequestedProvider}' does not match expected provider '{expectedProvider}'.");
+        }
+
+        _ = Resolve(selectedProvider);
+
+        var source = context.RequestedProvider is not null
+            ? "request"
+            : context.SessionProvider is not null
+                ? "session"
+                : endpointProvider is not null
+                    ? "endpoint"
+                    : "default";
+
+        return new RealtimeTransportRouteResolution(selectedProvider, source);
+    }
+
+    private RealtimeTransportProvider? ResolveEndpointProvider(string? endpointId)
+    {
+        if (string.IsNullOrWhiteSpace(endpointId))
+        {
+            return null;
+        }
+
+        return _endpointProviders.TryGetValue(endpointId, out var provider)
+            ? provider
+            : null;
     }
 }
 

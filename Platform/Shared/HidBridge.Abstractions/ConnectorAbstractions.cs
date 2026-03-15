@@ -62,6 +62,21 @@ public sealed record RealtimeTransportRouteContext(
     string? AttachmentId = null);
 
 /// <summary>
+/// Captures one normalized routing-policy input used to resolve the transport provider.
+/// </summary>
+public sealed record RealtimeTransportRoutePolicyContext(
+    string? EndpointId = null,
+    RealtimeTransportProvider? SessionProvider = null,
+    RealtimeTransportProvider? RequestedProvider = null);
+
+/// <summary>
+/// Represents one routing-policy resolution result.
+/// </summary>
+public sealed record RealtimeTransportRouteResolution(
+    RealtimeTransportProvider Provider,
+    string Source);
+
+/// <summary>
 /// Represents one normalized transport message payload.
 /// </summary>
 public sealed record RealtimeTransportMessage(
@@ -129,6 +144,11 @@ public interface IRealtimeTransportFactory
     /// Resolves one concrete transport provider.
     /// </summary>
     IRealtimeTransport Resolve(RealtimeTransportProvider? provider = null);
+
+    /// <summary>
+    /// Resolves one deterministic route provider from session, endpoint, and request policy inputs.
+    /// </summary>
+    RealtimeTransportRouteResolution ResolveRoute(RealtimeTransportRoutePolicyContext context);
 }
 
 /// <summary>

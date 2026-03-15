@@ -71,6 +71,8 @@ var policyRevisionLifecycleOptions = new PolicyRevisionLifecycleOptions
 };
 var transportProviderToken = builder.Configuration["HIDBRIDGE_TRANSPORT_PROVIDER"] ?? "uart";
 var defaultTransportProvider = ParseTransportProvider(transportProviderToken);
+var endpointTransportProviders = ParseTransportProviderOverrides(
+    builder.Configuration["HIDBRIDGE_TRANSPORT_PROVIDER_OVERRIDES"]);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
 builder.Services.AddAuthorization();
@@ -105,6 +107,7 @@ builder.Services.AddConnectorHost();
 builder.Services.AddSingleton(new RealtimeTransportRuntimeOptions
 {
     DefaultProvider = defaultTransportProvider,
+    EndpointProviders = endpointTransportProviders,
 });
 builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new ConnectorBackedRealtimeTransport(
@@ -244,6 +247,33 @@ static RealtimeTransportProvider ParseTransportProvider(string? value)
     }
 
     return RealtimeTransportProvider.Uart;
+}
+
+static IReadOnlyDictionary<string, RealtimeTransportProvider> ParseTransportProviderOverrides(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return new Dictionary<string, RealtimeTransportProvider>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    var map = new Dictionary<string, RealtimeTransportProvider>(StringComparer.OrdinalIgnoreCase);
+    foreach (var entry in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        var parts = entry.Split('=', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]))
+        {
+            continue;
+        }
+
+        if (!RealtimeTransportProviderParser.TryParse(parts[1], out var provider))
+        {
+            continue;
+        }
+
+        map[parts[0]] = provider;
+    }
+
+    return map;
 }
 
 static IReadOnlyList<PolicyBootstrapAssignment> ParseBootstrapAssignments(string? value)

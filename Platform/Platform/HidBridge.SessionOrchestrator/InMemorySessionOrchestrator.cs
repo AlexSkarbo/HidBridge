@@ -19,6 +19,8 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     private readonly ICommandJournalStore _commandJournalStore;
     private readonly ISessionStore _sessionStore;
     private readonly SessionMaintenanceOptions _options;
+    private readonly IRealtimeTransportFactory? _realtimeTransportFactory;
+    private readonly ConcurrentDictionary<string, RealtimeTransportProvider> _sessionTransportProviders = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Creates the in-memory session orchestrator with a transient in-memory session store.
@@ -37,7 +39,8 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         IEventWriter eventWriter,
         ICommandJournalStore commandJournalStore,
         ISessionStore sessionStore,
-        SessionMaintenanceOptions? options = null)
+        SessionMaintenanceOptions? options = null,
+        IRealtimeTransportFactory? realtimeTransportFactory = null)
     {
         _openSessionUseCase = openSessionUseCase;
         _dispatchCommandUseCase = dispatchCommandUseCase;
@@ -45,6 +48,7 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         _commandJournalStore = commandJournalStore;
         _sessionStore = sessionStore;
         _options = options ?? new SessionMaintenanceOptions();
+        _realtimeTransportFactory = realtimeTransportFactory;
     }
 
     /// <summary>
@@ -77,6 +81,7 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
             organizationId: accepted.OrganizationId);
         aggregate.MoveTo(SessionState.Active);
         _sessions[accepted.SessionId] = aggregate;
+        TryAssignSessionTransportProvider(accepted.SessionId, accepted.TargetEndpointId);
         await _sessionStore.UpsertAsync(ToSnapshot(aggregate, nowUtc), cancellationToken);
         return accepted;
     }
@@ -87,6 +92,7 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     public async Task<SessionCloseBody> CloseAsync(SessionCloseBody request, CancellationToken cancellationToken)
     {
         _sessions.TryRemove(request.SessionId, out _);
+        _sessionTransportProviders.TryRemove(request.SessionId, out _);
         await _sessionStore.RemoveAsync(request.SessionId, cancellationToken);
         await _eventWriter.WriteAuditAsync(new AuditEventBody("session", $"Session {request.SessionId} closed", request.SessionId, new Dictionary<string, object?>
         {
@@ -101,9 +107,18 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     public async Task<CommandAckBody> DispatchAsync(CommandRequestBody request, CancellationToken cancellationToken)
     {
         var session = await ResolveSessionAsync(request.SessionId, cancellationToken);
+        RealtimeTransportProvider? sessionTransportProvider = null;
         if (session is not null)
         {
             SessionAuthorizationPolicy.EnsureInSessionScope(session, request.TenantId, request.OrganizationId, request.OperatorRoles);
+            if (_sessionTransportProviders.TryGetValue(session.SessionId, out var resolvedSessionProvider))
+            {
+                sessionTransportProvider = resolvedSessionProvider;
+            }
+            else
+            {
+                sessionTransportProvider = TryAssignSessionTransportProvider(session.SessionId, session.EndpointId);
+            }
         }
 
         var principalId = request.Args.TryGetValue("principalId", out var principalValue)
@@ -147,7 +162,12 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                     SessionAuthorizationPolicy.EnsureCanDispatch(session, principalId, participantId, request.OperatorRoles, DateTimeOffset.UtcNow);
                 }
 
-                ack = await _dispatchCommandUseCase.ExecuteAsync(agentId, request, cancellationToken);
+                ack = await _dispatchCommandUseCase.ExecuteAsync(
+                    agentId,
+                    request,
+                    session?.EndpointId,
+                    sessionTransportProvider,
+                    cancellationToken);
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -892,7 +912,32 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
             snapshot.OrganizationId);
         aggregate.MoveTo(snapshot.State);
         _sessions[snapshot.SessionId] = aggregate;
+        TryAssignSessionTransportProvider(snapshot.SessionId, snapshot.EndpointId);
         return aggregate;
+    }
+
+    private RealtimeTransportProvider? TryAssignSessionTransportProvider(string sessionId, string? endpointId)
+    {
+        if (_realtimeTransportFactory is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var resolution = _realtimeTransportFactory.ResolveRoute(
+                new RealtimeTransportRoutePolicyContext(
+                    EndpointId: endpointId,
+                    SessionProvider: null,
+                    RequestedProvider: null));
+            _sessionTransportProviders[sessionId] = resolution.Provider;
+            return resolution.Provider;
+        }
+        catch
+        {
+            _sessionTransportProviders.TryRemove(sessionId, out _);
+            return null;
+        }
     }
 
     private static SessionSnapshot ToSnapshot(SessionAggregate aggregate, DateTimeOffset nowUtc)
