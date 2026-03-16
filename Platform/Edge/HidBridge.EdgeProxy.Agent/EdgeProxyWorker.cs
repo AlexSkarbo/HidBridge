@@ -24,6 +24,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     private int? _lastCommandSequence;
     private int? _lastSignalSequence;
     private string _accessToken;
+    private bool _peerOnline;
 
     public EdgeProxyWorker(
         IHttpClientFactory httpClientFactory,
@@ -51,30 +52,89 @@ public sealed class EdgeProxyWorker : BackgroundService
             _accessToken = await RequestTokenAsync(stoppingToken);
         }
 
-        await MarkPeerOnlineAsync(stoppingToken);
+        _logger.LogInformation(
+            "Edge proxy started. Session={SessionId}, Peer={PeerId}, Endpoint={EndpointId}, ControlWs={ControlWsUrl}",
+            _options.SessionId,
+            _options.PeerId,
+            _options.EndpointId,
+            _options.ControlWsUrl);
 
-        _logger.LogInformation("Edge proxy started. Session={SessionId}, Peer={PeerId}, Endpoint={EndpointId}", _options.SessionId, _options.PeerId, _options.EndpointId);
-
-        try
+        var consecutiveFailures = 0;
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
+                if (!_peerOnline)
+                {
+                    await MarkPeerOnlineAsync(stoppingToken);
+                    _peerOnline = true;
+                    if (consecutiveFailures > 0)
+                    {
+                        _logger.LogInformation("Edge proxy recovered after {FailureCount} transient failures.", consecutiveFailures);
+                    }
+                }
+
                 await PublishHeartbeatAsync(stoppingToken);
                 await PollAndProcessCommandsAsync(stoppingToken);
+                consecutiveFailures = 0;
                 await Task.Delay(_options.PollIntervalMs, stoppingToken);
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                consecutiveFailures++;
+                var backoff = ComputeReconnectDelay(consecutiveFailures);
+
+                _logger.LogWarning(
+                    ex,
+                    "Edge proxy transient failure #{FailureCount}. Reconnect backoff={BackoffMs}ms.",
+                    consecutiveFailures,
+                    (int)backoff.TotalMilliseconds);
+
+                if (_peerOnline && consecutiveFailures >= _options.TransientFailureThresholdForOffline)
+                {
+                    try
+                    {
+                        await MarkPeerOfflineAsync(stoppingToken);
+                        _peerOnline = false;
+                        _logger.LogWarning("Edge proxy marked peer offline after {FailureCount} transient failures.", consecutiveFailures);
+                    }
+                    catch (Exception offlineEx)
+                    {
+                        _logger.LogWarning(offlineEx, "Failed to mark peer offline after transient failures.");
+                    }
+                }
+
+                await Task.Delay(backoff, stoppingToken);
+            }
         }
-        finally
+
+        if (_peerOnline)
         {
             try
             {
                 await MarkPeerOfflineAsync(CancellationToken.None);
+                _peerOnline = false;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to mark peer offline.");
             }
         }
+    }
+
+    private TimeSpan ComputeReconnectDelay(int consecutiveFailures)
+    {
+        var exponent = Math.Clamp(consecutiveFailures - 1, 0, 12);
+        var baseDelay = _options.ReconnectBackoffMinMs * Math.Pow(2, exponent);
+        var capped = Math.Min(baseDelay, _options.ReconnectBackoffMaxMs);
+        var jitter = _options.ReconnectBackoffJitterMs > 0
+            ? Random.Shared.Next(0, _options.ReconnectBackoffJitterMs + 1)
+            : 0;
+        return TimeSpan.FromMilliseconds(capped + jitter);
     }
 
     private async Task PublishHeartbeatAsync(CancellationToken cancellationToken)

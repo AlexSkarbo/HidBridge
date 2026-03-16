@@ -35,6 +35,10 @@ public sealed class EdgeProxyOptions
     public int HeartbeatIntervalSec { get; set; } = 10;
     public int CommandTimeoutMs { get; set; } = 10000;
     public int HttpTimeoutSec { get; set; } = 30;
+    public int ReconnectBackoffMinMs { get; set; } = 500;
+    public int ReconnectBackoffMaxMs { get; set; } = 5000;
+    public int ReconnectBackoffJitterMs { get; set; } = 250;
+    public int TransientFailureThresholdForOffline { get; set; } = 2;
 
     public void Normalize()
     {
@@ -44,6 +48,10 @@ public sealed class EdgeProxyOptions
         HeartbeatIntervalSec = Math.Max(3, HeartbeatIntervalSec);
         CommandTimeoutMs = Math.Max(1000, CommandTimeoutMs);
         HttpTimeoutSec = Math.Max(5, HttpTimeoutSec);
+        ReconnectBackoffMinMs = Math.Max(100, ReconnectBackoffMinMs);
+        ReconnectBackoffMaxMs = Math.Max(ReconnectBackoffMinMs, ReconnectBackoffMaxMs);
+        ReconnectBackoffJitterMs = Math.Max(0, ReconnectBackoffJitterMs);
+        TransientFailureThresholdForOffline = Math.Max(1, TransientFailureThresholdForOffline);
     }
 
     public bool IsValid(out string error)
