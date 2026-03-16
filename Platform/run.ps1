@@ -5,6 +5,10 @@ param(
     [switch]$RequireDeviceAck,
     [int]$KeyboardInterfaceSelector = -1,
     [int]$StaleAfterMinutes = -1,
+    [switch]$IncludeWebRtcEdgeAgentSmoke,
+    [string]$WebRtcControlHealthUrl,
+    [int]$WebRtcRequestTimeoutSec = -1,
+    [int]$WebRtcControlHealthAttempts = -1,
     [string]$ControlHealthUrl,
     [int]$RequestTimeoutSec = -1,
     [int]$ControlHealthAttempts = -1,
@@ -66,8 +70,25 @@ if ($null -ne $ForwardArgs) {
 }
 
 if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteSpace($BaseUrl)) {
-    $effectiveForwardArgs.Add("-BaseUrl") | Out-Null
-    $effectiveForwardArgs.Add($BaseUrl) | Out-Null
+    $tasksWithBaseUrl = @(
+        "demo-seed",
+        "demo-gate",
+        "uart-diagnostics",
+        "webrtc-relay-smoke",
+        "webrtc-peer-adapter",
+        "close-failed-rooms",
+        "close-stale-rooms"
+    )
+
+    if ($tasksWithBaseUrl -contains $Task) {
+        $parsedBaseUrl = $null
+        if (-not [Uri]::TryCreate($BaseUrl, [UriKind]::Absolute, [ref]$parsedBaseUrl)) {
+            throw "BaseUrl must be an absolute URL for task '$Task'."
+        }
+
+        $effectiveForwardArgs.Add("-BaseUrl") | Out-Null
+        $effectiveForwardArgs.Add($BaseUrl) | Out-Null
+    }
 }
 
 if ($RequireDeviceAck) {
@@ -90,6 +111,25 @@ if ($PSBoundParameters.ContainsKey("StaleAfterMinutes")) {
 
     $effectiveForwardArgs.Add("-StaleAfterMinutes") | Out-Null
     $effectiveForwardArgs.Add([string]$StaleAfterMinutes) | Out-Null
+}
+
+if ($IncludeWebRtcEdgeAgentSmoke) {
+    $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentSmoke") | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("WebRtcControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($WebRtcControlHealthUrl)) {
+    $effectiveForwardArgs.Add("-WebRtcControlHealthUrl") | Out-Null
+    $effectiveForwardArgs.Add($WebRtcControlHealthUrl) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("WebRtcRequestTimeoutSec") -and $WebRtcRequestTimeoutSec -gt 0) {
+    $effectiveForwardArgs.Add("-WebRtcRequestTimeoutSec") | Out-Null
+    $effectiveForwardArgs.Add([string]$WebRtcRequestTimeoutSec) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("WebRtcControlHealthAttempts") -and $WebRtcControlHealthAttempts -gt 0) {
+    $effectiveForwardArgs.Add("-WebRtcControlHealthAttempts") | Out-Null
+    $effectiveForwardArgs.Add([string]$WebRtcControlHealthAttempts) | Out-Null
 }
 
 if ($PSBoundParameters.ContainsKey("ControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($ControlHealthUrl)) {
