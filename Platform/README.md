@@ -332,6 +332,8 @@ Manual demo seed only:
 
 Manual demo gate only:
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093`
+- WebRTC relay gate mode (requires active `webrtc-stack` session env + control health):
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -TransportProvider webrtc-datachannel -ControlHealthUrl http://127.0.0.1:28092/health -OutputJsonPath Platform/.logs/demo-gate-webrtc.result.json`
 - optional report output:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/demo-gate.result.json`
 - strict UART ack mode:

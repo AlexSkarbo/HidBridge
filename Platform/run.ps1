@@ -3,6 +3,7 @@ param(
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
+    [string]$TransportProvider,
     [int]$KeyboardInterfaceSelector = -1,
     [int]$StaleAfterMinutes = -1,
     [switch]$IncludeWebRtcEdgeAgentSmoke,
@@ -93,6 +94,11 @@ if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteS
 
 if ($RequireDeviceAck) {
     $effectiveForwardArgs.Add("-RequireDeviceAck") | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("TransportProvider") -and -not [string]::IsNullOrWhiteSpace($TransportProvider)) {
+    $effectiveForwardArgs.Add("-TransportProvider") | Out-Null
+    $effectiveForwardArgs.Add($TransportProvider) | Out-Null
 }
 
 if ($PSBoundParameters.ContainsKey("KeyboardInterfaceSelector") -and $KeyboardInterfaceSelector -ge 0) {

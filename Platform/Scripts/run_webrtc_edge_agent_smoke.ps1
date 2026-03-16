@@ -23,6 +23,7 @@ if (-not (Test-Path $terminalBScript)) {
     -ControlHealthUrl $ControlHealthUrl `
     -RequestTimeoutSec $RequestTimeoutSec `
     -ControlHealthAttempts $ControlHealthAttempts `
+    -AutoCreateSessionIfMissing `
     -SkipTransportHealthCheck `
     -OutputJsonPath $OutputJsonPath
 
