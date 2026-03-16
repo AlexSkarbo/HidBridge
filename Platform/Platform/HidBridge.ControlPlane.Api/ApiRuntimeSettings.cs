@@ -73,6 +73,16 @@ public sealed class ApiRuntimeSettings
     public required bool UartUsesMasterSecret { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether UART health probes avoid opening the serial port.
+    /// </summary>
+    public required bool UartPassiveHealthMode { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether UART command execution releases COM handle immediately after each command.
+    /// </summary>
+    public required bool UartReleasePortAfterExecute { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether WebRTC transport requires endpoint capability advertisement.
     /// </summary>
     public required bool WebRtcRequireCapability { get; init; }

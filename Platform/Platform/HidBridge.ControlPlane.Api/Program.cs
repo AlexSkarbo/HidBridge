@@ -177,6 +177,12 @@ var uartInjectTimeoutMs = int.TryParse(builder.Configuration["HIDBRIDGE_UART_INJ
 var uartInjectRetries = int.TryParse(builder.Configuration["HIDBRIDGE_UART_INJECT_RETRIES"], out var parsedUartInjectRetries)
     ? parsedUartInjectRetries
     : 2;
+var uartPassiveHealthMode = bool.TryParse(builder.Configuration["HIDBRIDGE_UART_PASSIVE_HEALTH_MODE"], out var parsedUartPassiveHealthMode)
+    ? parsedUartPassiveHealthMode
+    : defaultTransportProvider == RealtimeTransportProvider.WebRtcDataChannel;
+var uartReleasePortAfterExecute = bool.TryParse(builder.Configuration["HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE"], out var parsedUartReleasePortAfterExecute)
+    ? parsedUartReleasePortAfterExecute
+    : uartPassiveHealthMode;
 var agentId = builder.Configuration["HIDBRIDGE_AGENT_ID"] ?? "agent_hidbridge_uart_local";
 var endpointId = builder.Configuration["HIDBRIDGE_ENDPOINT_ID"] ?? "endpoint_local_demo";
 var endpointExtraCapabilities = ParseCapabilityDescriptors(builder.Configuration["HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES"]);
@@ -205,6 +211,8 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     UartCommandTimeoutMs = uartCommandTimeoutMs,
     UartInjectTimeoutMs = uartInjectTimeoutMs,
     UartInjectRetries = uartInjectRetries,
+    UartPassiveHealthMode = uartPassiveHealthMode,
+    UartReleasePortAfterExecute = uartReleasePortAfterExecute,
     UartUsesMasterSecret = !string.IsNullOrWhiteSpace(uartMasterSecret),
     WebRtcRequireCapability = webRtcRequireCapability,
     WebRtcEnableConnectorBridge = webRtcEnableConnectorBridge,
@@ -223,7 +231,9 @@ builder.Services.AddSingleton<IConnector>(_ =>
         agentId: agentId,
         endpointId: endpointId,
         options: uartOptions,
-        extraCapabilities: endpointExtraCapabilities));
+        extraCapabilities: endpointExtraCapabilities,
+        passiveHealthMode: uartPassiveHealthMode,
+        releasePortAfterExecute: uartReleasePortAfterExecute));
 
 var app = builder.Build();
 

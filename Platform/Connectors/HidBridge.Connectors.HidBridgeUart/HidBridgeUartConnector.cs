@@ -11,7 +11,10 @@ namespace HidBridge.Connectors.HidBridgeUart;
 public sealed class HidBridgeUartConnector : IConnector
 {
     private readonly HidBridgeUartClientOptions _options;
-    private readonly Lazy<HidBridgeUartClient> _client;
+    private readonly object _clientSync = new();
+    private Lazy<HidBridgeUartClient> _client;
+    private readonly bool _passiveHealthMode;
+    private readonly bool _releasePortAfterExecute;
     private readonly SemaphoreSlim _keyInitLock = new(1, 1);
     private bool _keyInitAttempted;
     private DateTimeOffset _nextKeyInitAttemptUtc = DateTimeOffset.MinValue;
@@ -23,14 +26,24 @@ public sealed class HidBridgeUartConnector : IConnector
     /// <param name="endpointId">The endpoint identifier exposed to the control plane.</param>
     /// <param name="options">The UART transport configuration.</param>
     /// <param name="extraCapabilities">Optional extra capability descriptors to advertise for routing tests.</param>
+    /// <param name="passiveHealthMode">
+    /// When enabled, registration and heartbeat avoid opening the serial port so WebRTC peer adapters can own UART access.
+    /// </param>
+    /// <param name="releasePortAfterExecute">
+    /// When enabled, each command execution closes UART immediately after completion to avoid long-lived COM locks.
+    /// </param>
     public HidBridgeUartConnector(
         string agentId,
         string endpointId,
         HidBridgeUartClientOptions options,
-        IReadOnlyList<CapabilityDescriptor>? extraCapabilities = null)
+        IReadOnlyList<CapabilityDescriptor>? extraCapabilities = null,
+        bool passiveHealthMode = false,
+        bool releasePortAfterExecute = false)
     {
         _options = options;
-        _client = new Lazy<HidBridgeUartClient>(() => new HidBridgeUartClient(_options));
+        _passiveHealthMode = passiveHealthMode;
+        _releasePortAfterExecute = releasePortAfterExecute;
+        _client = CreateClientLazy();
         var capabilities = new List<CapabilityDescriptor>
         {
             new(CapabilityNames.HidMouseV1, "1.0"),
@@ -85,8 +98,17 @@ public sealed class HidBridgeUartConnector : IConnector
     /// </summary>
     public async Task<AgentRegisterBody> RegisterAsync(CancellationToken cancellationToken)
     {
-        await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
-        var healthSnapshot = await Client.GetHealthAsync(cancellationToken);
+        HidBridgeUartHealth healthSnapshot;
+        if (_passiveHealthMode)
+        {
+            healthSnapshot = BuildPassiveHealthSnapshot();
+        }
+        else
+        {
+            await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
+            healthSnapshot = await Client.GetHealthAsync(cancellationToken);
+        }
+
         var health = new Dictionary<string, object?>
         {
             ["transport"] = "uart-v2",
@@ -98,7 +120,9 @@ public sealed class HidBridgeUartConnector : IConnector
             ["resolvedKeyboardInterface"] = healthSnapshot.ResolvedKeyboardInterface,
             ["interfaceCount"] = healthSnapshot.InterfaceCount,
             ["isConnected"] = healthSnapshot.IsConnected,
-            ["usingDerivedKey"] = Client.IsUsingDerivedKey,
+            ["usingDerivedKey"] = IsClientUsingDerivedKey,
+            ["passiveHealthMode"] = _passiveHealthMode,
+            ["releasePortAfterExecute"] = _releasePortAfterExecute,
         };
 
         return new AgentRegisterBody(
@@ -113,8 +137,17 @@ public sealed class HidBridgeUartConnector : IConnector
     /// </summary>
     public async Task<AgentHeartbeatBody> HeartbeatAsync(CancellationToken cancellationToken)
     {
-        await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
-        var health = await Client.GetHealthAsync(cancellationToken);
+        HidBridgeUartHealth health;
+        if (_passiveHealthMode)
+        {
+            health = BuildPassiveHealthSnapshot();
+        }
+        else
+        {
+            await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
+            health = await Client.GetHealthAsync(cancellationToken);
+        }
+
         return new AgentHeartbeatBody(
             health.IsConnected ? AgentStatus.Online : AgentStatus.Degraded,
             UptimeMs: Environment.TickCount64,
@@ -123,6 +156,8 @@ public sealed class HidBridgeUartConnector : IConnector
                 ["interfaceCount"] = health.InterfaceCount,
                 ["mouseInterface"] = health.ResolvedMouseInterface,
                 ["keyboardInterface"] = health.ResolvedKeyboardInterface,
+                ["passiveHealthMode"] = _passiveHealthMode,
+                ["releasePortAfterExecute"] = _releasePortAfterExecute,
             });
     }
 
@@ -137,24 +172,25 @@ public sealed class HidBridgeUartConnector : IConnector
         };
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        ConnectorCommandResult result;
         try
         {
             await ExecuteCoreAsync(command, cancellationToken);
             sw.Stop();
             metrics["deviceAckMs"] = sw.Elapsed.TotalMilliseconds;
-            return new ConnectorCommandResult(command.CommandId, CommandStatus.Applied, Metrics: metrics);
+            result = new ConnectorCommandResult(command.CommandId, CommandStatus.Applied, Metrics: metrics);
         }
         catch (HidBridgeUartDeviceException ex)
         {
             sw.Stop();
             metrics["deviceAckMs"] = sw.Elapsed.TotalMilliseconds;
-            return new ConnectorCommandResult(command.CommandId, CommandStatus.Rejected, ex.ToErrorInfo(), metrics);
+            result = new ConnectorCommandResult(command.CommandId, CommandStatus.Rejected, ex.ToErrorInfo(), metrics);
         }
         catch (TimeoutException ex)
         {
             sw.Stop();
             metrics["deviceAckMs"] = sw.Elapsed.TotalMilliseconds;
-            return new ConnectorCommandResult(
+            result = new ConnectorCommandResult(
                 command.CommandId,
                 CommandStatus.Timeout,
                 new ErrorInfo(ErrorDomain.Transport, "E_UART_TIMEOUT", ex.Message, true),
@@ -164,15 +200,86 @@ public sealed class HidBridgeUartConnector : IConnector
         {
             sw.Stop();
             metrics["deviceAckMs"] = sw.Elapsed.TotalMilliseconds;
-            return new ConnectorCommandResult(
+            result = new ConnectorCommandResult(
                 command.CommandId,
                 CommandStatus.Rejected,
                 new ErrorInfo(ErrorDomain.Command, "E_COMMAND_EXECUTION_FAILED", ex.Message, false),
                 metrics);
         }
+        finally
+        {
+            if (_releasePortAfterExecute)
+            {
+                await ReleaseClientAfterExecuteAsync();
+            }
+        }
+
+        return result;
     }
 
-    private HidBridgeUartClient Client => _client.Value;
+    private Lazy<HidBridgeUartClient> CreateClientLazy()
+        => new(() => new HidBridgeUartClient(_options), LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private HidBridgeUartClient Client
+    {
+        get
+        {
+            lock (_clientSync)
+            {
+                return _client.Value;
+            }
+        }
+    }
+
+    private bool IsClientUsingDerivedKey
+    {
+        get
+        {
+            lock (_clientSync)
+            {
+                if (!_client.IsValueCreated)
+                {
+                    return false;
+                }
+
+                return _client.Value.IsUsingDerivedKey;
+            }
+        }
+    }
+
+    private async Task ReleaseClientAfterExecuteAsync()
+    {
+        HidBridgeUartClient? instanceToDispose = null;
+        lock (_clientSync)
+        {
+            if (!_client.IsValueCreated)
+            {
+                return;
+            }
+
+            instanceToDispose = _client.Value;
+            _client = CreateClientLazy();
+            _keyInitAttempted = false;
+            _nextKeyInitAttemptUtc = DateTimeOffset.MinValue;
+        }
+
+        if (instanceToDispose is not null)
+        {
+            await instanceToDispose.DisposeAsync();
+        }
+    }
+
+    private HidBridgeUartHealth BuildPassiveHealthSnapshot()
+        => new(
+            _options.PortName,
+            _options.BaudRate,
+            _options.MouseInterfaceSelector,
+            _options.KeyboardInterfaceSelector,
+            ResolvedMouseInterface: null,
+            ResolvedKeyboardInterface: null,
+            InterfaceCount: 0,
+            IsConnected: false,
+            SampledAt: DateTimeOffset.UtcNow);
 
     private async Task ExecuteCoreAsync(CommandRequestBody command, CancellationToken cancellationToken)
     {

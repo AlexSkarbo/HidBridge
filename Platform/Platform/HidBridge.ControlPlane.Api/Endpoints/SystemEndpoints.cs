@@ -70,6 +70,8 @@ public static class SystemEndpoints
             runtimeSettings.UartInjectTimeoutMs,
             runtimeSettings.UartInjectRetries,
             runtimeSettings.UartUsesMasterSecret,
+            runtimeSettings.UartPassiveHealthMode,
+            runtimeSettings.UartReleasePortAfterExecute,
             webRtc = new
             {
                 runtimeSettings.WebRtcRequireCapability,
