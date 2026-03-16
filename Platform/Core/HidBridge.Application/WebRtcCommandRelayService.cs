@@ -289,19 +289,40 @@ public sealed class WebRtcCommandRelayService
 
         public IReadOnlyDictionary<string, object?> GetMetrics(string? endpointId)
         {
-            var onlinePeerCount = _peers.Values.Count(peer =>
-                peer.IsOnline
-                && (string.IsNullOrWhiteSpace(endpointId)
+            var matchingPeers = _peers.Values
+                .Where(peer =>
+                    string.IsNullOrWhiteSpace(endpointId)
                     || string.IsNullOrWhiteSpace(peer.EndpointId)
-                    || string.Equals(peer.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase)));
+                    || string.Equals(peer.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(peer => peer.LastSeenAtUtc)
+                .ToArray();
+            var onlinePeerCount = matchingPeers.Count(peer => peer.IsOnline);
+            var latestPeer = matchingPeers.FirstOrDefault();
+            var latestMetadata = latestPeer?.Metadata;
             return new Dictionary<string, object?>
             {
                 ["onlinePeerCount"] = onlinePeerCount,
                 ["pendingAckCount"] = _pendingAcks.Count,
                 ["queuedCommandCount"] = _commands.Count,
                 ["lastRelayAckAtUtc"] = _lastRelayAckAtUtc,
+                ["lastPeerSeenAtUtc"] = latestPeer?.LastSeenAtUtc,
+                ["lastPeerState"] = TryReadMetadataValue(latestMetadata, "state"),
+                ["lastPeerFailureReason"] = TryReadMetadataValue(latestMetadata, "failureReason"),
+                ["lastPeerConsecutiveFailures"] = TryReadMetadataValue(latestMetadata, "consecutiveFailures"),
+                ["lastPeerReconnectBackoffMs"] = TryReadMetadataValue(latestMetadata, "reconnectBackoffMs"),
             };
+        }
+
+        private static string? TryReadMetadataValue(IReadOnlyDictionary<string, string>? metadata, string key)
+        {
+            if (metadata is null)
+            {
+                return null;
+            }
+
+            return metadata.TryGetValue(key, out var value)
+                ? value
+                : null;
         }
     }
 }
-

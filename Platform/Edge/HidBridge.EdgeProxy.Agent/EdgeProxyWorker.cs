@@ -66,7 +66,13 @@ public sealed class EdgeProxyWorker : BackgroundService
             {
                 if (!_peerOnline)
                 {
-                    await MarkPeerOnlineAsync(stoppingToken);
+                    await MarkPeerOnlineAsync(
+                        BuildPeerMetadata(
+                            state: "Connected",
+                            failureReason: null,
+                            consecutiveFailures: consecutiveFailures,
+                            reconnectBackoffMs: null),
+                        stoppingToken);
                     _peerOnline = true;
                     if (consecutiveFailures > 0)
                     {
@@ -93,6 +99,24 @@ public sealed class EdgeProxyWorker : BackgroundService
                     "Edge proxy transient failure #{FailureCount}. Reconnect backoff={BackoffMs}ms.",
                     consecutiveFailures,
                     (int)backoff.TotalMilliseconds);
+
+                if (_peerOnline)
+                {
+                    try
+                    {
+                        await MarkPeerOnlineAsync(
+                            BuildPeerMetadata(
+                                state: "Degraded",
+                                failureReason: $"{ex.GetType().Name}: {ex.Message}",
+                                consecutiveFailures: consecutiveFailures,
+                                reconnectBackoffMs: (int)backoff.TotalMilliseconds),
+                            stoppingToken);
+                    }
+                    catch (Exception degradedEx)
+                    {
+                        _logger.LogDebug(degradedEx, "Failed to publish degraded peer metadata.");
+                    }
+                }
 
                 if (_peerOnline && consecutiveFailures >= _options.TransientFailureThresholdForOffline)
                 {
@@ -241,6 +265,12 @@ public sealed class EdgeProxyWorker : BackgroundService
                     code = "E_WEBRTC_PEER_EXECUTION_FAILED",
                     message = string.IsNullOrWhiteSpace(exec.Error) ? "Peer returned non-success response." : exec.Error,
                     retryable = false,
+                    details = new Dictionary<string, object?>
+                    {
+                        ["peerId"] = _options.PeerId,
+                        ["controlWsUrl"] = _options.ControlWsUrl,
+                        ["ackSource"] = "edge-proxy-agent",
+                    },
                 },
                 metrics,
             };
@@ -257,6 +287,12 @@ public sealed class EdgeProxyWorker : BackgroundService
                     code = "E_TRANSPORT_TIMEOUT",
                     message = $"WebRTC peer timeout for action '{command.Action}'.",
                     retryable = true,
+                    details = new Dictionary<string, object?>
+                    {
+                        ["peerId"] = _options.PeerId,
+                        ["controlWsUrl"] = _options.ControlWsUrl,
+                        ["ackSource"] = "edge-proxy-agent",
+                    },
                 },
                 metrics = new Dictionary<string, double>
                 {
@@ -278,6 +314,12 @@ public sealed class EdgeProxyWorker : BackgroundService
                     code = "E_WEBRTC_PEER_ADAPTER_FAILURE",
                     message = ex.Message,
                     retryable = false,
+                    details = new Dictionary<string, object?>
+                    {
+                        ["peerId"] = _options.PeerId,
+                        ["controlWsUrl"] = _options.ControlWsUrl,
+                        ["ackSource"] = "edge-proxy-agent",
+                    },
                 },
                 metrics = new Dictionary<string, double>
                 {
@@ -428,18 +470,33 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     private async Task MarkPeerOnlineAsync(CancellationToken cancellationToken)
+        => await MarkPeerOnlineAsync(metadata: null, cancellationToken);
+
+    private async Task MarkPeerOnlineAsync(
+        IReadOnlyDictionary<string, string>? metadata,
+        CancellationToken cancellationToken)
     {
+        var effectiveMetadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["adapter"] = "edge-proxy-agent",
+            ["controlWsUrl"] = _options.ControlWsUrl,
+            ["principalId"] = _options.PrincipalId,
+        };
+
+        if (metadata is not null)
+        {
+            foreach (var pair in metadata)
+            {
+                effectiveMetadata[pair.Key] = pair.Value;
+            }
+        }
+
         await SendAsync(HttpMethod.Post,
             $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(_options.PeerId)}/online",
             new
             {
                 endpointId = _options.EndpointId,
-                metadata = new
-                {
-                    adapter = "edge-proxy-agent",
-                    controlWsUrl = _options.ControlWsUrl,
-                    principalId = _options.PrincipalId,
-                },
+                metadata = effectiveMetadata,
             },
             cancellationToken);
     }
@@ -573,6 +630,29 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         response.EnsureSuccessStatusCode();
         return response;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildPeerMetadata(
+        string state,
+        string? failureReason,
+        int consecutiveFailures,
+        int? reconnectBackoffMs)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["state"] = state,
+            ["consecutiveFailures"] = consecutiveFailures.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["updatedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
+        };
+        if (!string.IsNullOrWhiteSpace(failureReason))
+        {
+            metadata["failureReason"] = failureReason;
+        }
+        if (reconnectBackoffMs.HasValue)
+        {
+            metadata["reconnectBackoffMs"] = reconnectBackoffMs.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return metadata;
     }
 
     private sealed class CollectionEnvelope<T>
