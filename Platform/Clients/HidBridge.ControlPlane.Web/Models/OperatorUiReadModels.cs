@@ -469,7 +469,8 @@ public sealed record ErrorInfoViewModel(
     string Domain,
     string Code,
     string Message,
-    bool Retryable);
+    bool Retryable,
+    IReadOnlyDictionary<string, object?>? Details = null);
 
 /// <summary>
 /// Represents one share grant request issued from the session room.

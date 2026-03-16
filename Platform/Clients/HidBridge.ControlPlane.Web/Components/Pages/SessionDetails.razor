@@ -1,6 +1,7 @@
 @page "/sessions/{SessionId}"
 @attribute [Authorize(Policy = OperatorPolicies.Viewer)]
 @implements IAsyncDisposable
+@using System.Text.Json
 @inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
 @inject OperatorIdentityContext Identity
 @inject OperatorText T
@@ -170,8 +171,16 @@
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportConnectivity"]</div><div class="hid-detail-value">@(_transportHealth.Connected ? T["Yes"] : T["No"])</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportStatus"]</div><div class="hid-detail-value">@_transportHealth.Status</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["ReportedAt"]</div><div class="hid-detail-value">@FormatTime(_transportHealth.ReportedAtUtc)</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMetricsCount"]</div><div class="hid-detail-value">@(_transportHealth.Metrics?.Count ?? 0)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportOnlinePeers"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "onlinePeerCount")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPendingAcks"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "pendingAckCount")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerState"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "lastPeerState")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth.LastCommandAck)</div></div>
                         </div>
+
+                        @if (!string.Equals(GetTransportMetricValue(_transportHealth, "lastPeerFailureReason"), "—", StringComparison.Ordinal))
+                        {
+                            <div class="hid-meta-note">@T["TransportPeerFailureReason"]: @GetTransportMetricValue(_transportHealth, "lastPeerFailureReason")</div>
+                        }
 
                         @if (_transportHealth.LastCommandAck is null)
                         {
@@ -186,10 +195,15 @@
                                     <span>@T["CommandId"]: @_transportHealth.LastCommandAck.CommandId</span>
                                     <span>@T["Channel"]: @_transportHealth.LastCommandAck.Channel</span>
                                     <span>@T["LastCommand"]: @FormatTime(_transportHealth.LastCommandAck.CompletedAtUtc ?? _transportHealth.LastCommandAck.CreatedAtUtc)</span>
+                                    <span>@T["LastAckRoute"]: @GetAckRoute(_transportHealth.LastCommandAck)</span>
                                 </div>
                                 @if (_transportHealth.LastCommandAck.Error is not null)
                                 {
                                     <div class="hid-meta-note">@_transportHealth.LastCommandAck.Error.Code · @_transportHealth.LastCommandAck.Error.Message</div>
+                                    @if (_transportHealth.LastCommandAck.Error.Details is not null && _transportHealth.LastCommandAck.Error.Details.Count > 0)
+                                    {
+                                        <div class="hid-meta-note">@T["ErrorDetails"]: @FormatErrorDetails(_transportHealth.LastCommandAck.Error.Details)</div>
+                                    }
                                 }
                             </div>
                         }
@@ -1275,6 +1289,91 @@
         }
 
         return string.Format(T["LeaseRemainingSeconds"], Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds)));
+    }
+
+    private static string GetTransportMetricValue(SessionTransportHealthViewModel? health, string key)
+    {
+        if (health?.Metrics is null || !health.Metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return "—";
+        }
+
+        return ConvertMetricObjectToString(value);
+    }
+
+    private static string GetAckRoute(CommandJournalEntryViewModel? ack)
+    {
+        if (ack?.Metrics is null)
+        {
+            return "—";
+        }
+
+        if (ack.Metrics.TryGetValue("transportRelayMode", out var relayMode) && relayMode >= 1)
+        {
+            return "webrtc-relay";
+        }
+
+        if (ack.Metrics.TryGetValue("transportBridgeMode", out var bridgeMode) && bridgeMode >= 1)
+        {
+            return "connector-bridge";
+        }
+
+        return "direct";
+    }
+
+    private static string GetAckRoundtripMs(CommandJournalEntryViewModel? ack)
+    {
+        if (ack?.Metrics is null)
+        {
+            return "—";
+        }
+
+        if (ack.Metrics.TryGetValue("relayAdapterWsRoundtripMs", out var relayMs))
+        {
+            return $"{relayMs:0.##}";
+        }
+
+        if (ack.Metrics.TryGetValue("deviceAckMs", out var deviceAckMs))
+        {
+            return $"{deviceAckMs:0.##}";
+        }
+
+        return "—";
+    }
+
+    private static string FormatErrorDetails(IReadOnlyDictionary<string, object?>? details)
+    {
+        if (details is null || details.Count == 0)
+        {
+            return "—";
+        }
+
+        return string.Join(
+            ", ",
+            details.Select(pair => $"{pair.Key}={ConvertMetricObjectToString(pair.Value)}"));
+    }
+
+    private static string ConvertMetricObjectToString(object? value)
+    {
+        if (value is null)
+        {
+            return "—";
+        }
+
+        if (value is JsonElement element)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString() ?? "—",
+                JsonValueKind.Number => element.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.Null => "—",
+                _ => element.GetRawText(),
+            };
+        }
+
+        return value.ToString() ?? "—";
     }
 
     private static string FormatTime(DateTimeOffset? value)
