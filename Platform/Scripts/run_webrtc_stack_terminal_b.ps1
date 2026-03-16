@@ -13,6 +13,11 @@ param(
     [string]$PrincipalId = "smoke-runner",
     [string]$TenantId = "local-tenant",
     [string]$OrganizationId = "local-org",
+    [string]$EndpointId = "endpoint_local_demo",
+    [string]$Profile = "UltraLowLatency",
+    [switch]$AutoCreateSessionIfMissing,
+    [switch]$SkipControlLeaseRequest,
+    [bool]$AllowMissingControlRequestEndpoint = $true,
     [int]$LeaseSeconds = 120,
     [string]$CommandAction = "keyboard.text",
     [string]$CommandText = "",
@@ -97,6 +102,166 @@ function Test-SessionExists {
     }
 }
 
+function Get-LiveRelaySessionId {
+    param(
+        [string]$ApiBaseUrl,
+        [hashtable]$Headers,
+        [int]$RequestTimeoutSec,
+        [string]$EndpointId
+    )
+
+    $sessionsResponse = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions" -Headers $Headers -TimeoutSec $RequestTimeoutSec
+    $sessions = @()
+    if ($null -ne $sessionsResponse -and $sessionsResponse.PSObject.Properties["items"]) {
+        $sessions = @($sessionsResponse.items)
+    }
+    else {
+        $sessions = @($sessionsResponse)
+    }
+
+    foreach ($session in $sessions) {
+        if ($null -eq $session) { continue }
+        $candidateSessionId = if ($session.PSObject.Properties["sessionId"]) { [string]$session.sessionId } else { "" }
+        if ([string]::IsNullOrWhiteSpace($candidateSessionId)) { continue }
+
+        $state = if ($session.PSObject.Properties["state"]) { [string]$session.state } else { "" }
+        if ([string]::Equals($state, "Ended", [StringComparison]::OrdinalIgnoreCase) -or
+            [string]::Equals($state, "Failed", [StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($EndpointId) -and $session.PSObject.Properties["endpointId"]) {
+            $candidateEndpointId = [string]$session.endpointId
+            if (-not [string]::IsNullOrWhiteSpace($candidateEndpointId) -and
+                -not [string]::Equals($candidateEndpointId, $EndpointId, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+        }
+
+        try {
+            $health = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($candidateSessionId))/transport/health?provider=webrtc-datachannel" -Headers $Headers -TimeoutSec $RequestTimeoutSec
+            $onlinePeerCount = Get-MetricAsInt -Metrics $health.metrics -Name "onlinePeerCount"
+            if ($onlinePeerCount -ge 1) {
+                return $candidateSessionId
+            }
+        }
+        catch {
+        }
+    }
+
+    return $null
+}
+
+function Ensure-SessionExistsOrCreate {
+    param(
+        [string]$ApiBaseUrl,
+        [string]$SessionId,
+        [string]$EndpointId,
+        [string]$Profile,
+        [string]$PrincipalId,
+        [string]$TenantId,
+        [string]$OrganizationId,
+        [hashtable]$Headers,
+        [int]$RequestTimeoutSec
+    )
+
+    if (Test-SessionExists -ApiBaseUrl $ApiBaseUrl -SessionId $SessionId -Headers $Headers -RequestTimeoutSec $RequestTimeoutSec) {
+        return $SessionId
+    }
+
+    $inventory = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/dashboards/inventory" -Headers $Headers -TimeoutSec $RequestTimeoutSec
+    $endpoints = @()
+    if ($null -ne $inventory -and $inventory.PSObject.Properties["endpoints"]) {
+        $endpoints = @($inventory.endpoints)
+    }
+
+    $endpointCard = $endpoints | Where-Object {
+        $_ -and $_.PSObject.Properties["endpointId"] -and [string]$_.endpointId -eq $EndpointId
+    } | Select-Object -First 1
+
+    if ($null -eq $endpointCard) {
+        $endpointCard = $endpoints | Select-Object -First 1
+    }
+
+    if ($null -eq $endpointCard) {
+        throw "Session '$SessionId' was not found and inventory did not return any endpoint to auto-create a replacement session."
+    }
+
+    $targetEndpointId = if ($endpointCard.PSObject.Properties["endpointId"]) { [string]$endpointCard.endpointId } else { "" }
+    $targetAgentId = if ($endpointCard.PSObject.Properties["agentId"]) { [string]$endpointCard.agentId } else { "" }
+    if ([string]::IsNullOrWhiteSpace($targetEndpointId) -or [string]::IsNullOrWhiteSpace($targetAgentId)) {
+        throw "Session '$SessionId' was not found and inventory endpoint card is incomplete (endpointId/agentId missing)."
+    }
+
+    $openBody = @{
+        sessionId = $SessionId
+        profile = $Profile
+        requestedBy = $PrincipalId
+        targetAgentId = $targetAgentId
+        targetEndpointId = $targetEndpointId
+        shareMode = "Owner"
+        tenantId = $TenantId
+        organizationId = $OrganizationId
+    }
+
+    $null = Invoke-RestMethod -Method Post -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions" -Headers $Headers -TimeoutSec $RequestTimeoutSec -ContentType "application/json" -Body ($openBody | ConvertTo-Json -Depth 20)
+    return $SessionId
+}
+
+function New-ReplacementSessionId {
+    param([string]$EndpointId)
+
+    $segment = if ([string]::IsNullOrWhiteSpace($EndpointId)) { "endpoint" } else { $EndpointId.ToLowerInvariant().Replace("_", "-").Replace(" ", "-") }
+    $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 10)
+    $candidate = "room-$segment-$suffix"
+    if ($candidate.Length -le 64) {
+        return $candidate
+    }
+
+    return $candidate.Substring(0, 64)
+}
+
+function Request-ControlLease {
+    param(
+        [string]$ApiBaseUrl,
+        [string]$SessionId,
+        [hashtable]$Headers,
+        [int]$RequestTimeoutSec,
+        [string]$PrincipalId,
+        [string]$TenantId,
+        [string]$OrganizationId,
+        [int]$LeaseSeconds
+    )
+
+    $leaseBody = @{
+        participantId = "owner:$PrincipalId"
+        requestedBy = $PrincipalId
+        leaseSeconds = [Math]::Max(30, $LeaseSeconds)
+        reason = "webrtc stack terminal-b"
+        tenantId = $TenantId
+        organizationId = $OrganizationId
+    }
+
+    $leaseUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/control/request"
+    $maxAttempts = 10
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Invoke-RestMethod -Method Post -Uri $leaseUri -Headers $Headers -TimeoutSec $RequestTimeoutSec -ContentType "application/json" -Body ($leaseBody | ConvertTo-Json -Depth 10) | Out-Null
+            return
+        }
+        catch {
+            $message = $_.Exception.Message
+            $isNotFound = $message -like "*404*" -or $message -like "*Не найден*"
+            if ($isNotFound -and $attempt -lt $maxAttempts) {
+                Start-Sleep -Milliseconds 250
+                continue
+            }
+
+            throw
+        }
+    }
+}
+
 $sessionEnvPath = Join-Path $platformRoot ".logs/webrtc-peer-adapter.session.env"
 if (-not (Test-Path $sessionEnvPath)) {
     throw "Session env file was not found: $sessionEnvPath"
@@ -142,8 +307,40 @@ $authHeaders = @{
     "X-HidBridge-Role" = "operator.admin,operator.moderator,operator.viewer"
 }
 
-if (-not (Test-SessionExists -ApiBaseUrl $ApiBaseUrl -SessionId $sessionId -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec)) {
-    Write-Warning "Session '$sessionId' was not found via /api/v1/sessions/{id} lookup. Continuing; API build may hide this route by scope/profile."
+if (Test-SessionExists -ApiBaseUrl $ApiBaseUrl -SessionId $sessionId -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec) {
+    # session exists, continue
+}
+else {
+    $liveSessionId = Get-LiveRelaySessionId -ApiBaseUrl $ApiBaseUrl -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec -EndpointId $EndpointId
+    if (-not [string]::IsNullOrWhiteSpace($liveSessionId)) {
+        Write-Warning "Session '$sessionId' was not found. Reusing live relay session '$liveSessionId'."
+        $sessionId = $liveSessionId
+        @"
+SESSION_ID=$sessionId
+PEER_ID=$peerId
+"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+    }
+    elseif ($AutoCreateSessionIfMissing) {
+        Write-Warning "Session '$sessionId' was not found and no live relay session detected. Auto-creating replacement session for Terminal-B flow."
+        $sessionId = Ensure-SessionExistsOrCreate `
+            -ApiBaseUrl $ApiBaseUrl `
+            -SessionId $sessionId `
+            -EndpointId $EndpointId `
+            -Profile $Profile `
+            -PrincipalId $PrincipalId `
+            -TenantId $TenantId `
+            -OrganizationId $OrganizationId `
+            -Headers $authHeaders `
+            -RequestTimeoutSec $RequestTimeoutSec
+
+        @"
+SESSION_ID=$sessionId
+PEER_ID=$peerId
+"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+    }
+    else {
+        throw "Session '$sessionId' was not found and no live WebRTC relay session is available. Start/restart Terminal A stack first."
+    }
 }
 
 if (-not $SkipTransportHealthCheck) {
@@ -151,7 +348,23 @@ if (-not $SkipTransportHealthCheck) {
         $transportHealth = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/transport/health?provider=webrtc-datachannel" -Headers $authHeaders -TimeoutSec $RequestTimeoutSec
         $onlinePeerCount = Get-MetricAsInt -Metrics $transportHealth.metrics -Name "onlinePeerCount"
         if ($onlinePeerCount -lt 1) {
-            throw "WebRTC relay peer is offline for session '$sessionId' (onlinePeerCount=$onlinePeerCount). Restart Terminal A stack or increase -AdapterDurationSec."
+            if ($AutoCreateSessionIfMissing) {
+                $liveSessionId = Get-LiveRelaySessionId -ApiBaseUrl $ApiBaseUrl -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec -EndpointId $EndpointId
+                if (-not [string]::IsNullOrWhiteSpace($liveSessionId) -and -not [string]::Equals($liveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
+                    Write-Warning "Current session '$sessionId' has no online relay peers. Switching to live relay session '$liveSessionId'."
+                    $sessionId = $liveSessionId
+                    @"
+SESSION_ID=$sessionId
+PEER_ID=$peerId
+"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+                }
+                else {
+                    throw "WebRTC relay peer is offline for session '$sessionId' (onlinePeerCount=$onlinePeerCount). Restart Terminal A stack or increase -AdapterDurationSec."
+                }
+            }
+            else {
+                throw "WebRTC relay peer is offline for session '$sessionId' (onlinePeerCount=$onlinePeerCount). Restart Terminal A stack or increase -AdapterDurationSec."
+            }
         }
     }
     catch {
@@ -165,25 +378,85 @@ if (-not $SkipTransportHealthCheck) {
     }
 }
 
-$leaseBody = @{
-    participantId = "owner:$PrincipalId"
-    requestedBy = $PrincipalId
-    leaseSeconds = [Math]::Max(30, $LeaseSeconds)
-    reason = "webrtc stack terminal-b"
-    tenantId = $TenantId
-    organizationId = $OrganizationId
-}
-
-try {
-    $null = Invoke-RestMethod -Method Post -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/control/request" -Headers $authHeaders -TimeoutSec $RequestTimeoutSec -ContentType "application/json" -Body ($leaseBody | ConvertTo-Json -Depth 10)
-}
-catch {
-    $message = $_.Exception.Message
-    if ($message -like "*404*" -or $message -like "*Не найден*") {
-        throw "Control request endpoint returned 404 for session '$sessionId'. Ensure API is up-to-date and session is active."
+if (-not $SkipControlLeaseRequest) {
+    try {
+        Request-ControlLease `
+            -ApiBaseUrl $ApiBaseUrl `
+            -SessionId $sessionId `
+            -Headers $authHeaders `
+            -RequestTimeoutSec $RequestTimeoutSec `
+            -PrincipalId $PrincipalId `
+            -TenantId $TenantId `
+            -OrganizationId $OrganizationId `
+            -LeaseSeconds $LeaseSeconds
     }
+    catch {
+        $message = $_.Exception.Message
+        if ($message -like "*404*" -or $message -like "*Не найден*") {
+            if ($AutoCreateSessionIfMissing) {
+                $replacementSessionId = New-ReplacementSessionId -EndpointId $EndpointId
+                Write-Warning "Control request returned 404 for session '$sessionId'. Creating replacement session '$replacementSessionId' and retrying once."
 
-    throw
+                $sessionId = Ensure-SessionExistsOrCreate `
+                    -ApiBaseUrl $ApiBaseUrl `
+                    -SessionId $replacementSessionId `
+                    -EndpointId $EndpointId `
+                    -Profile $Profile `
+                    -PrincipalId $PrincipalId `
+                    -TenantId $TenantId `
+                    -OrganizationId $OrganizationId `
+                    -Headers $authHeaders `
+                    -RequestTimeoutSec $RequestTimeoutSec
+
+                @"
+SESSION_ID=$sessionId
+PEER_ID=$peerId
+"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+
+                Request-ControlLease `
+                    -ApiBaseUrl $ApiBaseUrl `
+                    -SessionId $sessionId `
+                    -Headers $authHeaders `
+                    -RequestTimeoutSec $RequestTimeoutSec `
+                    -PrincipalId $PrincipalId `
+                    -TenantId $TenantId `
+                    -OrganizationId $OrganizationId `
+                    -LeaseSeconds $LeaseSeconds
+            }
+            else {
+                $liveSessionId = Get-LiveRelaySessionId -ApiBaseUrl $ApiBaseUrl -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec -EndpointId $EndpointId
+                if (-not [string]::IsNullOrWhiteSpace($liveSessionId) -and -not [string]::Equals($liveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
+                    Write-Warning "Control request returned 404 for session '$sessionId'. Switching to live relay session '$liveSessionId' and retrying once."
+                    $sessionId = $liveSessionId
+                    @"
+SESSION_ID=$sessionId
+PEER_ID=$peerId
+"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+
+                    Request-ControlLease `
+                        -ApiBaseUrl $ApiBaseUrl `
+                        -SessionId $sessionId `
+                        -Headers $authHeaders `
+                        -RequestTimeoutSec $RequestTimeoutSec `
+                        -PrincipalId $PrincipalId `
+                        -TenantId $TenantId `
+                        -OrganizationId $OrganizationId `
+                        -LeaseSeconds $LeaseSeconds
+                }
+                else {
+                    if ($AllowMissingControlRequestEndpoint) {
+                        Write-Warning "Control request endpoint returned 404 for session '$sessionId'. Continuing without explicit lease because this API build may hide /control/request."
+                    }
+                    else {
+                        throw "Control request endpoint returned 404 for session '$sessionId'. Ensure API is up-to-date and session is active."
+                    }
+                }
+            }
+        }
+        else {
+            throw
+        }
+    }
 }
 
 $commandId = "cmd-webrtc-b-" + [DateTimeOffset]::UtcNow.ToString("HHmmss")

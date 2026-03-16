@@ -1,5 +1,7 @@
 param(
     [string]$BaseUrl = "http://127.0.0.1:18093",
+    [ValidateSet("uart", "webrtc-datachannel")]
+    [string]$TransportProvider = "uart",
     [string]$KeycloakBaseUrl = "http://127.0.0.1:18096",
     [string]$RealmName = "hidbridge-dev",
     [string]$TokenClientId = "controlplane-smoke",
@@ -17,6 +19,9 @@ param(
     [switch]$RequireDeviceAck,
     [int]$KeyboardInterfaceSelector = -1,
     [int[]]$KeyboardInterfaceCandidates = @(0, 1, 2, 3, 4, 5, 6, 7, 8),
+    [string]$ControlHealthUrl = "http://127.0.0.1:28092/health",
+    [int]$RequestTimeoutSec = 15,
+    [int]$ControlHealthAttempts = 20,
     [int]$ReadyEndpointTimeoutSec = 60,
     [int]$ReadyEndpointPollIntervalMs = 500,
     [string]$OutputJsonPath = ""
@@ -27,6 +32,59 @@ $ErrorActionPreference = "Stop"
 
 $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptsRoot "Common/KeycloakCommon.ps1")
+
+if ([string]::Equals($TransportProvider, "webrtc-datachannel", [StringComparison]::OrdinalIgnoreCase)) {
+    if ($RequireDeviceAck) {
+        Write-Warning "RequireDeviceAck is ignored for TransportProvider=webrtc-datachannel."
+    }
+
+    $terminalBScript = Join-Path $scriptsRoot "run_webrtc_stack_terminal_b.ps1"
+    if (-not (Test-Path $terminalBScript)) {
+        throw "WebRTC gate helper was not found: $terminalBScript"
+    }
+
+    $terminalBArgs = @{
+        ApiBaseUrl = $BaseUrl
+        KeycloakBaseUrl = $KeycloakBaseUrl
+        RealmName = $RealmName
+        ControlHealthUrl = $ControlHealthUrl
+        ControlHealthAttempts = [Math]::Max(1, $ControlHealthAttempts)
+        RequestTimeoutSec = [Math]::Max(1, $RequestTimeoutSec)
+        SkipControlLeaseRequest = $true
+        AllowMissingControlRequestEndpoint = $true
+        TokenClientId = $TokenClientId
+        TokenUsername = $TokenUsername
+        TokenPassword = $TokenPassword
+        PrincipalId = $PrincipalId
+        TenantId = $TenantId
+        OrganizationId = $OrganizationId
+        LeaseSeconds = [Math]::Max(30, $LeaseSeconds)
+        TimeoutMs = [Math]::Max(1000, $CommandTimeoutMs)
+        OutputJsonPath = $OutputJsonPath
+    }
+
+    & $terminalBScript @terminalBArgs
+
+    $summaryResult = $null
+    if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath) -and (Test-Path $OutputJsonPath)) {
+        $summaryResult = Get-Content -Raw -Path $OutputJsonPath | ConvertFrom-Json
+    }
+
+    Write-Host ""
+    Write-Host "=== Demo Gate Summary ==="
+    Write-Host "BaseUrl: $BaseUrl"
+    Write-Host "Transport provider: webrtc-datachannel"
+    if ($null -ne $summaryResult) {
+        Write-Host "Gate session: $($summaryResult.sessionId)"
+        Write-Host "Gate command action: $($summaryResult.commandAction)"
+        Write-Host "Gate command status: $($summaryResult.commandStatus)"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
+        Write-Host "Summary JSON: $OutputJsonPath"
+    }
+
+    exit 0
+}
 
 function Get-ErrorResponseBody {
     param([System.Exception]$Exception)
