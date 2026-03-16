@@ -15,6 +15,7 @@ build_1502/
 # Logs / runtime artifacts
 *.log
 Platform/.logs/
+Platform/Platform/.logs/
 Platform/.smoke-data/
 Platform/TestResults/
 Platform/sql-smoke-api.out.log
