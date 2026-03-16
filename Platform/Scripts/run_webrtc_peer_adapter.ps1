@@ -918,15 +918,6 @@ try {
                     $ackStatus = "Applied"
                 }
                 else {
-                    if (-not $StrictAck -and [string]::IsNullOrWhiteSpace($execError)) {
-                        $appliedCount++
-                        $ackStatus = "Applied"
-                        $metrics["relayAdapterAssumedSuccess"] = 1
-                        if (-not [string]::IsNullOrWhiteSpace($execRaw)) {
-                            Write-Warning "WebRTC peer adapter assumed success for command '$commandId' due empty ACK error. Raw response: $execRaw"
-                        }
-                    }
-                    else {
                     $rejectedCount++
                     $ackStatus = "Rejected"
                     $okValueType = if ($null -eq $execOkValue) { "<null>" } else { $execOkValue.GetType().FullName }
@@ -943,7 +934,6 @@ try {
                             }
                         } else { $execError }
                         retryable = $false
-                    }
                     }
                 }
             }

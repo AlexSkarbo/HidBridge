@@ -248,7 +248,37 @@ public static class TransportEndpoints
             {
                 caller.EnsureViewerAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
-                var status = request?.Status ?? CommandStatus.Applied;
+                if (request is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        sessionId,
+                        commandId,
+                        error = "Ack body is required and must include status.",
+                    });
+                }
+
+                if (!request.Status.HasValue)
+                {
+                    return Results.BadRequest(new
+                    {
+                        sessionId,
+                        commandId,
+                        error = "Ack status is required.",
+                    });
+                }
+
+                var status = request.Status.Value;
+                if ((status is CommandStatus.Rejected or CommandStatus.Timeout) && request.Error is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        sessionId,
+                        commandId,
+                        error = "Ack error payload is required for rejected/timeout statuses.",
+                    });
+                }
+
                 var ack = new CommandAckBody(
                     commandId,
                     status,
