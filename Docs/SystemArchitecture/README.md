@@ -1,11 +1,12 @@
 # Docs/SystemArchitecture — Index (UA)
 
-Оновлено: `2026-03-03`
+Оновлено: `2026-03-15`
 
 ## Базові документи
 
 1. Детальний системний опис:
 - `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA.md`
+  - Додано оновлення `2026-03-15`: `Global Room-Centric Multi-Agent Fabric` (розділ 20)
 
 2. Executive summary:
 - `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA_Executive.md`
@@ -24,37 +25,40 @@
 4. Цільова чиста модульна агентна архітектура (Meet-подібна collaboration модель):
 - `Docs/SystemArchitecture/HidBridge_Clean_Modular_Agent_Architecture_UA.md`
 
-5. Стратегія модернізації структури репозиторію:
+5. Product model для device-oriented агентів (конкретні приклади: Tapo C220 / PC Resident / Edge Proxy exp-022):
+- `Docs/SystemArchitecture/HidBridge_Agent_ProductModel_UA.md`
+
+6. Стратегія модернізації структури репозиторію:
 - `Docs/SystemArchitecture/Repository_Modernization_Strategy_UA.md`
 
-6. Поетапний план впровадження persistence layer:
+7. Поетапний план впровадження persistence layer:
 - `Docs/SystemArchitecture/HidBridge_Persistence_Rollout_Plan_UA.md`
 
-7. Відкриті питання дизайну web shell:
+8. Відкриті питання дизайну web shell:
 - `Docs/SystemArchitecture/HidBridge_ControlPlane_Web_Design_Questions_UA.md`
 
-8. Identity / SSO baseline:
+9. Identity / SSO baseline:
 - `Docs/SystemArchitecture/HidBridge_Identity_SSO_Baseline_UA.md`
 
-9. External IdP integration baseline:
+10. External IdP integration baseline:
 - `Docs/SystemArchitecture/HidBridge_External_IdP_Integration_Baseline_UA.md`
 
-10. Google/Keycloak practical runbook:
+11. Google/Keycloak practical runbook:
 - `Docs/SystemArchitecture/HidBridge_Google_Keycloak_Runbook_UA.md`
 - EN mirror:
   - `Docs/SystemArchitecture/HidBridge_Google_Keycloak_Runbook_EN.md`
 
-11. Keycloak claim mapping runbook:
+12. Keycloak claim mapping runbook:
 - `Docs/SystemArchitecture/HidBridge_Keycloak_Claim_Mapping_Runbook_UA.md`
 - EN mirror:
   - `Docs/SystemArchitecture/HidBridge_Keycloak_Claim_Mapping_Runbook_EN.md`
 
-12. Keycloak UI click-by-click claim mapping runbook:
+13. Keycloak UI click-by-click claim mapping runbook:
 - `Docs/SystemArchitecture/HidBridge_Keycloak_UI_Claim_Mapping_Clickpath_UA.md`
 - EN mirror:
   - `Docs/SystemArchitecture/HidBridge_Keycloak_UI_Claim_Mapping_Clickpath_EN.md`
 
-13. Bearer rollout profile:
+14. Bearer rollout profile:
 - `Docs/SystemArchitecture/HidBridge_Bearer_Rollout_Profile_UA.md`
 
 ## Поточний статус реалізації

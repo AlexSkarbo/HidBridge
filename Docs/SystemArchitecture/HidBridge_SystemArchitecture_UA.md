@@ -1058,3 +1058,146 @@ UI/UX напрямок наступного етапу:
 - login/logout між `HidBridge.ControlPlane.Web` і `Keycloak` перевірено локально;
 - централізований SSO baseline підтверджено практично;
 - наступний practical step: `Google` як перший external IdP у `Keycloak`, далі той самий onboarding pattern для інших провайдерів.
+
+## 20. Оновлення цільової архітектури `2026-03-15` — Global Room-Centric Multi-Agent Fabric
+
+Цей розділ фіксує обов'язкову цільову модель для наступної ітерації:  
+`Agent = повноцінна кінцева точка`, `Adapter = транспортний посередник`, `Core = оркестратор`.
+
+## 20.1 Нормативні інваріанти системи
+
+1. `Room` є центральною realtime-сутністю співпраці, а не обгорткою навколо одного девайса.
+2. Один `Agent` може обслуговувати `1..N` цільових пристроїв.
+3. Один `Device` може бути прикріплений (`attachment`) до `1..N` кімнат.
+4. В одній кімнаті одночасно можуть бути:
+   - багато учасників;
+   - багато пристроїв;
+   - багато агентів/endpoint-ів.
+5. Кімнат може бути багато; система має підтримувати одночасно багато активних room.
+6. Географія не обмежується одним майданчиком: агенти і пристрої можуть бути в різних країнах/регіонах.
+7. Перегляд і керування розділені:
+   - багато учасників можуть дивитися;
+   - active control на конкретний device визначається lease/policy.
+8. `Core` не має напряму працювати з COM/HID/драйверами пристроїв.
+
+## 20.2 Ролі компонентів (операційна модель)
+
+### Agent (пристроє-орієнтований endpoint-додаток)
+
+`Agent` — окремий повноцінний пристроє-орієнтований застосунок на edge-вузлі (на самому target device або на сусідньому host/gateway), який:
+
+1. взаємодіє з фізичним пристроєм;
+2. реалізує потрібні для конкретного device домени (media/control/telemetry/інше);
+3. має локальний інтерфейс для налаштування/діагностики;
+4. публікує capabilities/health/presence у Core;
+5. виконує команди і повертає ACK/event telemetry.
+
+### Adapter (посередник між Agent і Core)
+
+`Adapter` — транспортний шар інтеграції між Agent і Core:
+
+1. маршрутизація команд/подій;
+2. protocol mapping (webrtc/ws/uart/gateway);
+3. retry/backoff/queue semantics;
+4. health reporting і reconnect;
+5. без direct ownership бізнес-стану room/session/policy;
+6. не замінює Agent і не реалізує повний device-facing функціонал.
+
+### Core (Control Plane)
+
+`Core` (`API + Web + Identity + Persistence`) відповідає за:
+
+1. room/session/participant/device attachment lifecycle;
+2. policy/lease/access enforcement;
+3. transport route selection;
+4. audit/telemetry storage;
+5. UX orchestration для операторів.
+
+## 20.3 Де повинні жити agent-застосунки та експерименти в репозиторії
+
+Нормативна схема для коду:
+
+1. Production device-oriented agents (окремі застосунки за типом цільового пристрою або доменом):
+   - `Platform/Edge/Agents/HidBridge.Agent.DeviceHost.Pc`
+   - `Platform/Edge/Agents/HidBridge.Agent.DeviceHost.Camera`
+   - `Platform/Edge/Agents/HidBridge.Agent.DeviceHost.Robot`
+   - `Platform/Edge/Agents/HidBridge.Agent.DeviceHost.Cnc`
+   - `Platform/Edge/Agents/HidBridge.Agent.DeviceHost.Drone`
+   - `Platform/Edge/Agents/HidBridge.Agent.DeviceHost.IoT`
+   - `Platform/Edge/Agents/HidBridge.Agent.Common` (shared contracts/runtime parts)
+2. Transport adapters:
+   - `Platform/Edge/Adapters/HidBridge.Adapter.CoreBridge`
+   - `Platform/Edge/Adapters/HidBridge.Adapter.Transport.WebRtc`
+   - `Platform/Edge/Adapters/HidBridge.Adapter.Transport.Uart`
+3. Експериментальні стенди/симулятори:
+   - `WebRtcTests/exp-022-datachanneldotnet` (залишити як PoC/simulator, не production endpoint).
+
+Поточний `PowerShell` adapter (`Platform/Scripts/run_webrtc_peer_adapter.ps1`) розглядається як тимчасовий migration bridge і має бути замінений на довгоживучий сервіс у `Platform/Edge/Adapters/*`.
+
+## 20.4 Deployment-модель (обов'язкова)
+
+### Control Plane (containerized)
+
+Запускається в Docker:
+
+1. `HidBridge.ControlPlane.Api`
+2. `HidBridge.ControlPlane.Web`
+3. `Keycloak`
+4. `PostgreSQL`
+5. опційно event bus/cache (`Redis`/`NATS`) для масштабування relay/event path.
+
+### Edge Plane (distributed)
+
+Запускається поза Control Plane контейнерами, на edge вузлах:
+
+1. один або кілька device-oriented agent apps (за типом device/доменом)
+2. один або кілька transport adapters для зв'язку з Core
+3. локальні device connectors (COM/HID/capture/camera/robot/CNC/drone APIs)
+
+Це дозволяє масштабувати edge незалежно від Core та не блокувати API доступом до локального hardware.
+
+## 20.5 End-to-end контур взаємодії учасника з target device
+
+1. Учасник у Web UI входить у room.
+2. Отримує/запитує control lease на конкретний device.
+3. Команда йде: `Web -> API -> route resolver -> adapter -> agent -> device`.
+4. ACK повертається: `device -> agent -> adapter -> API -> Web`.
+5. Media/telemetry йдуть паралельно у room-context.
+6. Для кожної команди є audit trail + error code + latency метрики.
+
+## 20.6 Multi-room / multi-agent / global scaling вимоги
+
+1. Agent registry має бути `tenant/org scoped`.
+2. Route selection має враховувати:
+   - endpoint capability;
+   - online/offline/degraded health;
+   - policy constraints;
+   - requested transport provider.
+3. Command delivery має бути:
+   - idempotent;
+   - retry-safe;
+   - auditable;
+   - deterministic по error semantics.
+4. Session/read-model має явно показувати:
+   - active controller;
+   - room state reason;
+   - transport health;
+   - online peers/agents per endpoint.
+
+## 20.7 Міграційний policy для exp-022 і script adapter
+
+1. `exp-022` лишається тестовим симулятором для transport/ack перевірок.
+2. Production потік не повинен залежати від `exp-022`.
+3. Script adapter дозволений тільки як тимчасовий dev harness.
+4. Після появи `Agent.Runtime + Adapter services`:
+   - demo-flow/webrtc-stack мають запускати service-based edge runtime;
+   - PoC scripts переводяться у compatibility profile або архівуються.
+
+## 20.8 Definition of Done для цього архітектурного переходу
+
+1. Учасник керує target device з Web UI без ручного запуску PS adapter.
+2. Agent runtime працює як довгоживучий сервіс на віддаленому edge-хості.
+3. API/Web працюють у Docker незалежно від edge-processes.
+4. Multi-device в room і multi-room одночасно проходять e2e тести.
+5. ACK/status semantics стабільні (`Applied/Rejected/Timeout`) без евристик.
+6. Наявні спостережуваність та audit докази для transport/media/control path.

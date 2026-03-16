@@ -338,6 +338,41 @@ Manual WebRTC relay smoke (peer queue + ack + transport health):
 - if relay smoke reports `endpointSupportsWebRtc=false`, restart API with endpoint capability override:
   - `setx HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES "transport.webrtc.datachannel.v1@1.0"` (new terminal required), or
   - in current shell: `$env:HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES="transport.webrtc.datachannel.v1@1.0"` then restart API.
+- when running external WebRTC peer adapter (`exp-022`) against the same UART port, enable passive UART health mode to avoid API-side COM lock during registration/heartbeat:
+  - `$env:HIDBRIDGE_UART_PASSIVE_HEALTH_MODE="true"` (then restart API)
+  - `$env:HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE="true"` (recommended together with passive mode)
+
+Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
+- preferred stack launcher (starts API/Web + exp-022 + service-based edge proxy agent):
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
+- the stack now launches `Platform/Edge/HidBridge.EdgeProxy.Agent` (dotnet worker) instead of the legacy PowerShell adapter runtime.
+- manual direct run of service-based edge proxy agent:
+  - `dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj`
+  - required env vars:
+    - `HIDBRIDGE_EDGE_PROXY_BASEURL`
+    - `HIDBRIDGE_EDGE_PROXY_SESSIONID`
+    - `HIDBRIDGE_EDGE_PROXY_PEERID`
+    - `HIDBRIDGE_EDGE_PROXY_ENDPOINTID`
+    - `HIDBRIDGE_EDGE_PROXY_CONTROLWSURL`
+- legacy script adapter is kept only as compatibility harness during migration.
+- task entry:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`
+- direct wrapper:
+  - `powershell -ExecutionPolicy Bypass -File Platform/run_webrtc_peer_adapter.ps1 -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
+- behavior:
+  - auto-creates session when `-SessionId` is missing (reuses ready endpoint; provider=`webrtc-datachannel`)
+  - marks peer online via `/transport/webrtc/peers/{peerId}/online`
+  - sends heartbeat signals via `/transport/webrtc/signals`
+  - polls relay queue via `/transport/webrtc/commands`
+  - executes command payloads through exp-022 websocket (`/ws/control`)
+  - publishes ack via `/transport/webrtc/commands/{commandId}/ack`
+  - marks peer offline on exit
+- useful options:
+  - `-ControlWsUrl ws://127.0.0.1:18092/ws/control`
+  - `-DurationSec 120` (run loop for bounded duration)
+  - `-SingleRun` (single poll/ack pass)
+  - `-EnsureSession $false` (fail fast instead of auto-creating session)
+  - `-OutputJsonPath Platform/.logs/webrtc-peer-adapter.result.json`
 
 Manual UART diagnostics (selector sweep):
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093`
