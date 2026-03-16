@@ -16,7 +16,11 @@ param(
     [switch]$ReuseRunningServices,
     [switch]$EnableCallerContextScope,
     [switch]$RequireDemoGateDeviceAck,
-    [int]$DemoGateKeyboardInterfaceSelector = -1
+    [int]$DemoGateKeyboardInterfaceSelector = -1,
+    [switch]$IncludeWebRtcEdgeAgentSmoke,
+    [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
+    [int]$WebRtcRequestTimeoutSec = 15,
+    [int]$WebRtcControlHealthAttempts = 20
 )
 
 Set-StrictMode -Version Latest
@@ -40,6 +44,7 @@ $ciLocalScript = Join-Path $scriptsRoot "run_ci_local.ps1"
 $fullScript = Join-Path $scriptsRoot "run_full.ps1"
 $demoSeedScript = Join-Path $scriptsRoot "run_demo_seed.ps1"
 $demoGateScript = Join-Path $scriptsRoot "run_demo_gate.ps1"
+$webrtcEdgeAgentSmokeScript = Join-Path $scriptsRoot "run_webrtc_edge_agent_smoke.ps1"
 $apiProjectPath = Join-Path $repoRoot "Platform/Platform/HidBridge.ControlPlane.Api/HidBridge.ControlPlane.Api.csproj"
 $webProjectPath = Join-Path $repoRoot "Platform/Clients/HidBridge.ControlPlane.Web/HidBridge.ControlPlane.Web.csproj"
 $apiUri = [Uri]$ApiBaseUrl
@@ -54,6 +59,18 @@ else {
 $realmName = "hidbridge-dev"
 if ($authUri.AbsolutePath -match "^/realms/([^/]+)$") {
     $realmName = $matches[1]
+}
+
+if ($IncludeWebRtcEdgeAgentSmoke -and -not $ReuseRunningServices) {
+    throw "WebRTC Edge Agent Smoke requires '-ReuseRunningServices' so demo-flow does not restart API/Web and invalidate the active WebRTC stack session. Start webrtc-stack first, then re-run demo-flow with both switches."
+}
+
+if ($IncludeWebRtcEdgeAgentSmoke -and -not $SkipCiLocal) {
+    throw "WebRTC Edge Agent Smoke requires '-SkipCiLocal' in demo-flow. CI Local can restart/replace API runtime and invalidate active WebRTC stack peer/session state."
+}
+
+if ($IncludeWebRtcEdgeAgentSmoke -and -not $SkipDemoGate) {
+    throw "WebRTC Edge Agent Smoke requires '-SkipDemoGate' in demo-flow. Default demo-gate expects an idle reusable endpoint, while WebRTC stack keeps the endpoint occupied by an active relay session."
 }
 
 function Add-DemoResult {
@@ -150,6 +167,10 @@ function Start-DemoService {
 
     if (Test-TcpPort -TargetHost $TargetHost -TargetPort $Port) {
         if ($ReuseRunningService) {
+            if ($UseHealthProbe -and -not (Test-ApiHealth -BaseUrl $BaseUrl)) {
+                throw "$Name reuse requested but health probe failed at $BaseUrl/health. Ensure runtime is running and healthy, or run without -ReuseRunningServices."
+            }
+
             $sw.Stop()
             Add-DemoResult -Name $Name -Status "PASS" -Seconds $sw.Elapsed.TotalSeconds -ExitCode 0 -LogPath $stdoutLog
             Write-Host "PASS  $Name"
@@ -371,6 +392,16 @@ try {
             }
 
             Invoke-LoggedScript -Results $results -Name "Demo Gate" -LogRoot $logRoot -ScriptPath $demoGateScript -Parameters $demoGateParameters -StopOnFailure
+        }
+
+        if ($IncludeWebRtcEdgeAgentSmoke) {
+            Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Smoke" -LogRoot $logRoot -ScriptPath $webrtcEdgeAgentSmokeScript -Parameters @{
+                ApiBaseUrl = $ApiBaseUrl
+                ControlHealthUrl = $WebRtcControlHealthUrl
+                RequestTimeoutSec = [Math]::Max(1, $WebRtcRequestTimeoutSec)
+                ControlHealthAttempts = [Math]::Max(1, $WebRtcControlHealthAttempts)
+                OutputJsonPath = (Join-Path $logRoot "webrtc-edge-agent-smoke.result.json")
+            } -StopOnFailure
         }
 
         $webEnvironment = @{
