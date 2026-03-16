@@ -1,10 +1,13 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "close-failed-rooms", "close-stale-rooms")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "close-failed-rooms", "close-stale-rooms")]
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
     [int]$KeyboardInterfaceSelector = -1,
     [int]$StaleAfterMinutes = -1,
+    [string]$ControlHealthUrl,
+    [int]$RequestTimeoutSec = -1,
+    [int]$ControlHealthAttempts = -1,
     [string]$OutputJsonPath,
     [string]$InterfaceSelectorsCsv,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -38,6 +41,7 @@ $scriptMap = @{
     "webrtc-peer-adapter" = "run_webrtc_peer_adapter.ps1"
     "webrtc-stack" = "run_webrtc_stack.ps1"
     "webrtc-stack-terminal-b" = "run_webrtc_stack_terminal_b.ps1"
+    "webrtc-edge-agent-smoke" = "run_webrtc_edge_agent_smoke.ps1"
     "close-failed-rooms" = "run_close_failed_rooms.ps1"
     "close-stale-rooms" = "run_close_stale_rooms.ps1"
 }
@@ -61,7 +65,7 @@ if ($null -ne $ForwardArgs) {
     }
 }
 
-if ($PSBoundParameters.ContainsKey("BaseUrl")) {
+if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteSpace($BaseUrl)) {
     $effectiveForwardArgs.Add("-BaseUrl") | Out-Null
     $effectiveForwardArgs.Add($BaseUrl) | Out-Null
 }
@@ -70,7 +74,7 @@ if ($RequireDeviceAck) {
     $effectiveForwardArgs.Add("-RequireDeviceAck") | Out-Null
 }
 
-if ($PSBoundParameters.ContainsKey("KeyboardInterfaceSelector")) {
+if ($PSBoundParameters.ContainsKey("KeyboardInterfaceSelector") -and $KeyboardInterfaceSelector -ge 0) {
     if ($KeyboardInterfaceSelector -lt 0 -or $KeyboardInterfaceSelector -gt 255) {
         throw "KeyboardInterfaceSelector must be between 0 and 255."
     }
@@ -88,12 +92,27 @@ if ($PSBoundParameters.ContainsKey("StaleAfterMinutes")) {
     $effectiveForwardArgs.Add([string]$StaleAfterMinutes) | Out-Null
 }
 
-if ($PSBoundParameters.ContainsKey("OutputJsonPath")) {
+if ($PSBoundParameters.ContainsKey("ControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($ControlHealthUrl)) {
+    $effectiveForwardArgs.Add("-ControlHealthUrl") | Out-Null
+    $effectiveForwardArgs.Add($ControlHealthUrl) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("RequestTimeoutSec") -and $RequestTimeoutSec -gt 0) {
+    $effectiveForwardArgs.Add("-RequestTimeoutSec") | Out-Null
+    $effectiveForwardArgs.Add([string]$RequestTimeoutSec) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("ControlHealthAttempts") -and $ControlHealthAttempts -gt 0) {
+    $effectiveForwardArgs.Add("-ControlHealthAttempts") | Out-Null
+    $effectiveForwardArgs.Add([string]$ControlHealthAttempts) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("OutputJsonPath") -and -not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
     $effectiveForwardArgs.Add("-OutputJsonPath") | Out-Null
     $effectiveForwardArgs.Add($OutputJsonPath) | Out-Null
 }
 
-if ($PSBoundParameters.ContainsKey("InterfaceSelectorsCsv")) {
+if ($PSBoundParameters.ContainsKey("InterfaceSelectorsCsv") -and -not [string]::IsNullOrWhiteSpace($InterfaceSelectorsCsv)) {
     $effectiveForwardArgs.Add("-InterfaceSelectorsCsv") | Out-Null
     $effectiveForwardArgs.Add($InterfaceSelectorsCsv) | Out-Null
 }

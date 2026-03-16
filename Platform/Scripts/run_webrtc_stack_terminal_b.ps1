@@ -1,4 +1,5 @@
 param(
+    [Alias("BaseUrl")]
     [string]$ApiBaseUrl = "http://127.0.0.1:18093",
     [string]$KeycloakBaseUrl = "http://127.0.0.1:18096",
     [string]$RealmName = "hidbridge-dev",
