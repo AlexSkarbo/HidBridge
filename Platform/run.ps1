@@ -166,14 +166,14 @@ if ($PSBoundParameters.ContainsKey("ControlHealthAttempts") -and $ControlHealthA
 }
 
 if ($SkipTransportHealthCheck) {
-    $tasksWithTransportHealthCheckSwitch = @("webrtc-edge-agent-smoke", "demo-gate", "demo-flow")
+    $tasksWithTransportHealthCheckSwitch = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
     if ($tasksWithTransportHealthCheckSwitch -contains $Task) {
         $effectiveForwardArgs.Add("-SkipTransportHealthCheck") | Out-Null
     }
 }
 
 if ($PSBoundParameters.ContainsKey("TransportHealthAttempts") -and $TransportHealthAttempts -gt 0) {
-    $tasksWithTransportHealthAttempts = @("webrtc-edge-agent-smoke", "demo-gate", "demo-flow")
+    $tasksWithTransportHealthAttempts = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
     if ($tasksWithTransportHealthAttempts -contains $Task) {
         $effectiveForwardArgs.Add("-TransportHealthAttempts") | Out-Null
         $effectiveForwardArgs.Add([string]$TransportHealthAttempts) | Out-Null
@@ -181,7 +181,7 @@ if ($PSBoundParameters.ContainsKey("TransportHealthAttempts") -and $TransportHea
 }
 
 if ($PSBoundParameters.ContainsKey("TransportHealthDelayMs") -and $TransportHealthDelayMs -gt 0) {
-    $tasksWithTransportHealthDelay = @("webrtc-edge-agent-smoke", "demo-gate", "demo-flow")
+    $tasksWithTransportHealthDelay = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
     if ($tasksWithTransportHealthDelay -contains $Task) {
         $effectiveForwardArgs.Add("-TransportHealthDelayMs") | Out-Null
         $effectiveForwardArgs.Add([string]$TransportHealthDelayMs) | Out-Null

@@ -370,7 +370,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - readiness polling knobs: `-TransportHealthAttempts`, `-TransportHealthDelayMs`.
 - include the WebRTC smoke as part of `demo-flow`:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcControlHealthUrl "http://127.0.0.1:28092/health"`
-  - optional relay-readiness tuning for `demo-flow`/`demo-gate`/`webrtc-edge-agent-smoke`: `-TransportHealthAttempts`, `-TransportHealthDelayMs`, `-SkipTransportHealthCheck`.
+  - optional relay-readiness tuning for `demo-flow`/`demo-gate`/`webrtc-edge-agent-smoke`/`webrtc-stack-terminal-b`: `-TransportHealthAttempts`, `-TransportHealthDelayMs`, `-SkipTransportHealthCheck`.
 - the stack now launches `Platform/Edge/HidBridge.EdgeProxy.Agent` (dotnet worker) instead of the legacy PowerShell adapter runtime.
 - manual direct run of service-based edge proxy agent:
   - `dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj`

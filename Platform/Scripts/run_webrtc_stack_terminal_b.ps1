@@ -23,6 +23,8 @@ param(
     [string]$CommandText = "",
     [int]$TimeoutMs = 8000,
     [switch]$SkipTransportHealthCheck,
+    [int]$TransportHealthAttempts = 20,
+    [int]$TransportHealthDelayMs = 500,
     [string]$OutputJsonPath = ""
 )
 
@@ -61,6 +63,7 @@ function Get-HttpStatusCode {
     return $null
 }
 
+# Waits for the control-health endpoint to report ok=true.
 function Wait-ControlHealth {
     param([string]$Url, [int]$Attempts, [int]$DelayMs)
 
@@ -80,6 +83,48 @@ function Wait-ControlHealth {
     return $false
 }
 
+# Reads one property from object/dictionary safely in strict mode.
+function Get-PropertyValue {
+    param([object]$InputObject, [string]$Name)
+
+    if ($null -eq $InputObject -or [string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary] -and $InputObject.Contains($Name)) {
+        return $InputObject[$Name]
+    }
+
+    foreach ($property in $InputObject.PSObject.Properties) {
+        if ([string]::Equals($property.Name, $Name, [StringComparison]::OrdinalIgnoreCase)) {
+            return $property.Value
+        }
+    }
+
+    return $null
+}
+
+# Converts a transport-health payload into onlinePeerCount with typed fallback.
+function Get-TransportHealthOnlinePeerCount {
+    param([object]$HealthPayload)
+
+    if ($null -eq $HealthPayload) {
+        return 0
+    }
+
+    $typedOnlinePeerCount = Get-PropertyValue -InputObject $HealthPayload -Name "onlinePeerCount"
+    if ($null -ne $typedOnlinePeerCount) {
+        $parsedTypedCount = 0
+        if ([int]::TryParse([string]$typedOnlinePeerCount, [ref]$parsedTypedCount)) {
+            return $parsedTypedCount
+        }
+    }
+
+    $metrics = Get-PropertyValue -InputObject $HealthPayload -Name "metrics"
+    return Get-MetricAsInt -Metrics $metrics -Name "onlinePeerCount"
+}
+
+# Converts one metrics value to int when available.
 function Get-MetricAsInt {
     param([object]$Metrics, [string]$Name)
 
@@ -109,6 +154,7 @@ function Get-MetricAsInt {
     return 0
 }
 
+# Returns true when session lookup endpoint resolves without 404.
 function Test-SessionExists {
     param(
         [string]$ApiBaseUrl,
@@ -131,6 +177,7 @@ function Test-SessionExists {
     }
 }
 
+# Finds an active session that already has an online WebRTC relay peer.
 function Get-LiveRelaySessionId {
     param(
         [string]$ApiBaseUrl,
@@ -181,6 +228,7 @@ function Get-LiveRelaySessionId {
     return $null
 }
 
+# Creates a missing session for the target endpoint and returns its session id.
 function Ensure-SessionExistsOrCreate {
     param(
         [string]$ApiBaseUrl,
@@ -237,6 +285,7 @@ function Ensure-SessionExistsOrCreate {
     return $SessionId
 }
 
+# Generates a bounded replacement session id for retry flows.
 function New-ReplacementSessionId {
     param([string]$EndpointId)
 
@@ -250,6 +299,7 @@ function New-ReplacementSessionId {
     return $candidate.Substring(0, 64)
 }
 
+# Requests control lease with retry on eventual-consistency 404.
 function Request-ControlLease {
     param(
         [string]$ApiBaseUrl,
@@ -373,37 +423,50 @@ PEER_ID=$peerId
 }
 
 if (-not $SkipTransportHealthCheck) {
-    try {
-        $transportHealth = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/transport/health?provider=webrtc-datachannel" -Headers $authHeaders -TimeoutSec $RequestTimeoutSec
-        $onlinePeerCount = Get-MetricAsInt -Metrics $transportHealth.metrics -Name "onlinePeerCount"
-        if ($onlinePeerCount -lt 1) {
-            if ($AutoCreateSessionIfMissing) {
-                $liveSessionId = Get-LiveRelaySessionId -ApiBaseUrl $ApiBaseUrl -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec -EndpointId $EndpointId
-                if (-not [string]::IsNullOrWhiteSpace($liveSessionId) -and -not [string]::Equals($liveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
-                    Write-Warning "Current session '$sessionId' has no online relay peers. Switching to live relay session '$liveSessionId'."
-                    $sessionId = $liveSessionId
-                    @"
+    $transportReady = $false
+    $lastOnlinePeerCount = 0
+    $effectiveTransportHealthAttempts = [Math]::Max(1, $TransportHealthAttempts)
+    $effectiveTransportHealthDelayMs = [Math]::Max(100, $TransportHealthDelayMs)
+
+    for ($attempt = 1; $attempt -le $effectiveTransportHealthAttempts; $attempt++) {
+        try {
+            $transportHealth = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/transport/health?provider=webrtc-datachannel" -Headers $authHeaders -TimeoutSec $RequestTimeoutSec
+            $lastOnlinePeerCount = Get-TransportHealthOnlinePeerCount -HealthPayload $transportHealth
+            if ($lastOnlinePeerCount -ge 1) {
+                $transportReady = $true
+                break
+            }
+        }
+        catch {
+            $statusCode = Get-HttpStatusCode -Exception $_.Exception
+            if ($statusCode -eq 404) {
+                Write-Warning "Transport health endpoint is unavailable on this API build. Continuing without pre-check."
+                $transportReady = $true
+                break
+            }
+
+            throw
+        }
+
+        if ($AutoCreateSessionIfMissing) {
+            $liveSessionId = Get-LiveRelaySessionId -ApiBaseUrl $ApiBaseUrl -Headers $authHeaders -RequestTimeoutSec $RequestTimeoutSec -EndpointId $EndpointId
+            if (-not [string]::IsNullOrWhiteSpace($liveSessionId) -and -not [string]::Equals($liveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
+                Write-Warning "Current session '$sessionId' has no online relay peers. Switching to live relay session '$liveSessionId'."
+                $sessionId = $liveSessionId
+                @"
 SESSION_ID=$sessionId
 PEER_ID=$peerId
 "@ | Set-Content -Path $sessionEnvPath -Encoding ascii
-                }
-                else {
-                    throw "WebRTC relay peer is offline for session '$sessionId' (onlinePeerCount=$onlinePeerCount). Restart Terminal A stack or increase -AdapterDurationSec."
-                }
             }
-            else {
-                throw "WebRTC relay peer is offline for session '$sessionId' (onlinePeerCount=$onlinePeerCount). Restart Terminal A stack or increase -AdapterDurationSec."
-            }
+        }
+
+        if ($attempt -lt $effectiveTransportHealthAttempts) {
+            Start-Sleep -Milliseconds $effectiveTransportHealthDelayMs
         }
     }
-    catch {
-        $statusCode = Get-HttpStatusCode -Exception $_.Exception
-        if ($statusCode -eq 404) {
-            Write-Warning "Transport health endpoint is unavailable on this API build. Continuing without pre-check."
-        }
-        else {
-            throw
-        }
+
+    if (-not $transportReady) {
+        throw "WebRTC relay peer is offline for session '$sessionId' (onlinePeerCount=$lastOnlinePeerCount, attempts=$effectiveTransportHealthAttempts). Restart Terminal A stack or increase -AdapterDurationSec."
     }
 }
 
