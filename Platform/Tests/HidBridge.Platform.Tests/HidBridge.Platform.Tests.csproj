@@ -25,5 +25,7 @@
     <ProjectReference Include="..\..\Platform\HidBridge.Persistence.Sql.Migrations\HidBridge.Persistence.Sql.Migrations.csproj" />
     <ProjectReference Include="..\..\Platform\HidBridge.SessionOrchestrator\HidBridge.SessionOrchestrator.csproj" />
     <ProjectReference Include="..\..\Platform\HidBridge.ControlPlane.Api\HidBridge.ControlPlane.Api.csproj" />
+    <ProjectReference Include="..\..\Edge\HidBridge.Edge.Abstractions\HidBridge.Edge.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Edge\HidBridge.Edge.HidBridgeProtocol\HidBridge.Edge.HidBridgeProtocol.csproj" />
   </ItemGroup>
 </Project>

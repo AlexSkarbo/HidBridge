@@ -4,8 +4,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
+    <UserSecretsId>a2c0fd42-029f-47cf-84e4-9acebbbb954a</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="6.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HidBridge.Edge.Abstractions\HidBridge.Edge.Abstractions.csproj" />
+    <ProjectReference Include="..\HidBridge.Edge.HidBridgeProtocol\HidBridge.Edge.HidBridgeProtocol.csproj" />
   </ItemGroup>
 </Project>

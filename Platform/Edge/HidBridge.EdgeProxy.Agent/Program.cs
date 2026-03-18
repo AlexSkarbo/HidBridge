@@ -1,7 +1,10 @@
 using HidBridge.EdgeProxy.Agent;
+using HidBridge.Edge.Abstractions;
+using HidBridge.Edge.HidBridgeProtocol;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -21,6 +24,13 @@ builder.Services.AddHttpClient("edge-proxy")
         client.BaseAddress = new Uri(options.BaseUrl, UriKind.Absolute);
         client.Timeout = TimeSpan.FromSeconds(Math.Max(5, options.HttpTimeoutSec));
     });
+
+builder.Services.AddSingleton<IEdgeCommandExecutor>(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<EdgeProxyOptions>>().Value;
+    var logger = serviceProvider.GetRequiredService<ILogger<ControlWsCommandExecutor>>();
+    return new ControlWsCommandExecutor(options.ControlWsUrl, logger);
+});
 
 builder.Services.AddHostedService<EdgeProxyWorker>();
 

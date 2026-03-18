@@ -2,6 +2,12 @@
 
 Initial service-based replacement for the temporary PowerShell WebRTC peer adapter.
 
+Runtime layering:
+
+- `HidBridge.Edge.Abstractions` - edge execution contracts.
+- `HidBridge.Edge.HidBridgeProtocol` - exp-022 compatible control-websocket command executor.
+- `HidBridge.EdgeProxy.Agent` - orchestration loop (API relay + heartbeat + peer lifecycle).
+
 ## Purpose
 
 This worker:

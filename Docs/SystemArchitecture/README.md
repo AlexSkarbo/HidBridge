@@ -13,52 +13,55 @@
 
 ## Нормативні доповнення (Agent-first архітектура)
 
-1. Agent Contract v1:
+1. Edge Proxy Agent ADR-002:
+- `Docs/SystemArchitecture/HidBridge_EdgeProxy_Agent_ADR_002_UA.md`
+
+2. Agent Contract v1:
 - `Docs/SystemArchitecture/HidBridge_AgentContract_v1_UA.md`
 
-2. JSON Schema контракту:
+3. JSON Schema контракту:
 - `Docs/SystemArchitecture/schemas/HidBridge_AgentContract_v1_Message.schema.json`
 
-3. Карта модулів і міграції:
+4. Карта модулів і міграції:
 - `Docs/SystemArchitecture/HidBridge_ModuleArchitecture_Map_UA.md`
 
-4. Цільова чиста модульна агентна архітектура (Meet-подібна collaboration модель):
+5. Цільова чиста модульна агентна архітектура (Meet-подібна collaboration модель):
 - `Docs/SystemArchitecture/HidBridge_Clean_Modular_Agent_Architecture_UA.md`
 
-5. Product model для device-oriented агентів (конкретні приклади: Tapo C220 / PC Resident / Edge Proxy exp-022):
+6. Product model для device-oriented агентів (конкретні приклади: Tapo C220 / PC Resident / Edge Proxy exp-022):
 - `Docs/SystemArchitecture/HidBridge_Agent_ProductModel_UA.md`
 
-6. Стратегія модернізації структури репозиторію:
+7. Стратегія модернізації структури репозиторію:
 - `Docs/SystemArchitecture/Repository_Modernization_Strategy_UA.md`
 
-7. Поетапний план впровадження persistence layer:
+8. Поетапний план впровадження persistence layer:
 - `Docs/SystemArchitecture/HidBridge_Persistence_Rollout_Plan_UA.md`
 
-8. Відкриті питання дизайну web shell:
+9. Відкриті питання дизайну web shell:
 - `Docs/SystemArchitecture/HidBridge_ControlPlane_Web_Design_Questions_UA.md`
 
-9. Identity / SSO baseline:
+10. Identity / SSO baseline:
 - `Docs/SystemArchitecture/HidBridge_Identity_SSO_Baseline_UA.md`
 
-10. External IdP integration baseline:
+11. External IdP integration baseline:
 - `Docs/SystemArchitecture/HidBridge_External_IdP_Integration_Baseline_UA.md`
 
-11. Google/Keycloak practical runbook:
+12. Google/Keycloak practical runbook:
 - `Docs/SystemArchitecture/HidBridge_Google_Keycloak_Runbook_UA.md`
 - EN mirror:
   - `Docs/SystemArchitecture/HidBridge_Google_Keycloak_Runbook_EN.md`
 
-12. Keycloak claim mapping runbook:
+13. Keycloak claim mapping runbook:
 - `Docs/SystemArchitecture/HidBridge_Keycloak_Claim_Mapping_Runbook_UA.md`
 - EN mirror:
   - `Docs/SystemArchitecture/HidBridge_Keycloak_Claim_Mapping_Runbook_EN.md`
 
-13. Keycloak UI click-by-click claim mapping runbook:
+14. Keycloak UI click-by-click claim mapping runbook:
 - `Docs/SystemArchitecture/HidBridge_Keycloak_UI_Claim_Mapping_Clickpath_UA.md`
 - EN mirror:
   - `Docs/SystemArchitecture/HidBridge_Keycloak_UI_Claim_Mapping_Clickpath_EN.md`
 
-14. Bearer rollout profile:
+15. Bearer rollout profile:
 - `Docs/SystemArchitecture/HidBridge_Bearer_Rollout_Profile_UA.md`
 
 ## Поточний статус реалізації

@@ -1,9 +1,9 @@
 using System.Net.Http.Headers;
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net;
+using HidBridge.Edge.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,6 +21,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     };
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IEdgeCommandExecutor _commandExecutor;
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
     private readonly Dictionary<string, string> _callerHeaders;
@@ -35,10 +36,12 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// </summary>
     public EdgeProxyWorker(
         IHttpClientFactory httpClientFactory,
+        IEdgeCommandExecutor commandExecutor,
         IOptions<EdgeProxyOptions> options,
         ILogger<EdgeProxyWorker> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _commandExecutor = commandExecutor;
         _options = options.Value;
         _logger = logger;
         _accessToken = _options.AccessToken;
@@ -258,30 +261,54 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     /// <summary>
-    /// Executes one relay command through the local control websocket and shapes relay ACK payload.
+    /// Executes one relay command through injected edge command executor and shapes relay ACK payload.
     /// </summary>
     private async Task<object> ExecuteCommandAsync(CommandRequestBody command, CancellationToken cancellationToken)
     {
         var effectiveTimeout = Math.Max(1000, command.TimeoutMs ?? _options.CommandTimeoutMs);
-        var sw = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            var payload = ConvertPayload(command);
-            var exec = await InvokeControlWsAsync(payload, effectiveTimeout, cancellationToken);
-            sw.Stop();
+            var edgeRequest = new EdgeCommandRequest(
+                CommandId: command.CommandId,
+                Action: command.Action,
+                Args: command.Args,
+                TimeoutMs: effectiveTimeout);
+            var execution = await _commandExecutor.ExecuteAsync(edgeRequest, cancellationToken);
 
             var metrics = new Dictionary<string, double>
             {
-                ["relayAdapterWsRoundtripMs"] = sw.Elapsed.TotalMilliseconds,
+                ["relayAdapterWsRoundtripMs"] = execution.RoundtripMs,
                 ["transportRelayMode"] = 1,
             };
 
-            if (exec.Ok)
+            if (execution.IsSuccess)
             {
                 return new
                 {
                     status = "Applied",
+                    metrics,
+                };
+            }
+
+            if (execution.IsTimeout)
+            {
+                return new
+                {
+                    status = "Timeout",
+                    error = new
+                    {
+                        domain = "Transport",
+                        code = string.IsNullOrWhiteSpace(execution.ErrorCode) ? "E_TRANSPORT_TIMEOUT" : execution.ErrorCode,
+                        message = string.IsNullOrWhiteSpace(execution.ErrorMessage) ? $"WebRTC peer timeout for action '{command.Action}'." : execution.ErrorMessage,
+                        retryable = true,
+                        details = new Dictionary<string, object?>
+                        {
+                            ["peerId"] = _options.PeerId,
+                            ["controlWsUrl"] = _options.ControlWsUrl,
+                            ["ackSource"] = "edge-proxy-agent",
+                        },
+                    },
                     metrics,
                 };
             }
@@ -292,8 +319,8 @@ public sealed class EdgeProxyWorker : BackgroundService
                 error = new
                 {
                     domain = "Command",
-                    code = "E_WEBRTC_PEER_EXECUTION_FAILED",
-                    message = string.IsNullOrWhiteSpace(exec.Error) ? "Peer returned non-success response." : exec.Error,
+                    code = string.IsNullOrWhiteSpace(execution.ErrorCode) ? "E_WEBRTC_PEER_EXECUTION_FAILED" : execution.ErrorCode,
+                    message = string.IsNullOrWhiteSpace(execution.ErrorMessage) ? "Peer returned non-success response." : execution.ErrorMessage,
                     retryable = false,
                     details = new Dictionary<string, object?>
                     {
@@ -305,9 +332,8 @@ public sealed class EdgeProxyWorker : BackgroundService
                 metrics,
             };
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            sw.Stop();
             return new
             {
                 status = "Timeout",
@@ -326,14 +352,13 @@ public sealed class EdgeProxyWorker : BackgroundService
                 },
                 metrics = new Dictionary<string, double>
                 {
-                    ["relayAdapterWsRoundtripMs"] = sw.Elapsed.TotalMilliseconds,
+                    ["relayAdapterWsRoundtripMs"] = effectiveTimeout,
                     ["transportRelayMode"] = 1,
                 },
             };
         }
         catch (Exception ex)
         {
-            sw.Stop();
             _logger.LogWarning(ex, "Command failed in edge proxy adapter. CommandId={CommandId}", command.CommandId);
             return new
             {
@@ -353,283 +378,10 @@ public sealed class EdgeProxyWorker : BackgroundService
                 },
                 metrics = new Dictionary<string, double>
                 {
-                    ["relayAdapterWsRoundtripMs"] = sw.Elapsed.TotalMilliseconds,
+                    ["relayAdapterWsRoundtripMs"] = effectiveTimeout,
                     ["transportRelayMode"] = 1,
                 },
             };
-        }
-    }
-
-    /// <summary>
-    /// Converts API command envelope into the local websocket payload format.
-    /// </summary>
-    private static Dictionary<string, object?> ConvertPayload(CommandRequestBody command)
-    {
-        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = command.CommandId,
-            ["type"] = command.Action,
-        };
-
-        foreach (var pair in command.Args)
-        {
-            if (!payload.ContainsKey(pair.Key))
-            {
-                payload[pair.Key] = pair.Value;
-            }
-        }
-
-        return payload;
-    }
-
-    /// <summary>
-    /// Sends one command to local websocket control endpoint and waits for ACK response.
-    /// </summary>
-    private async Task<(bool Ok, string Error)> InvokeControlWsAsync(
-        Dictionary<string, object?> payload,
-        int timeoutMs,
-        CancellationToken cancellationToken)
-    {
-        using var socket = new ClientWebSocket();
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(Math.Max(1000, timeoutMs));
-
-        await socket.ConnectAsync(new Uri(_options.ControlWsUrl), cts.Token);
-
-        var sendJson = JsonSerializer.Serialize(payload, JsonOptions);
-        var sendBytes = Encoding.UTF8.GetBytes(sendJson);
-        await socket.SendAsync(sendBytes, WebSocketMessageType.Text, endOfMessage: true, cts.Token);
-
-        var buffer = new byte[16 * 1024];
-        var expectedId = payload.TryGetValue("id", out var idObj) ? idObj?.ToString() : null;
-
-        while (!cts.IsCancellationRequested)
-        {
-            using var ms = new MemoryStream();
-            WebSocketReceiveResult receive;
-            do
-            {
-                receive = await socket.ReceiveAsync(buffer, cts.Token);
-                if (receive.MessageType == WebSocketMessageType.Close)
-                {
-                    throw new IOException("Control websocket closed before ACK.");
-                }
-
-                ms.Write(buffer, 0, receive.Count);
-            } while (!receive.EndOfMessage);
-
-            var raw = Encoding.UTF8.GetString(ms.ToArray());
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                continue;
-            }
-
-            using var doc = JsonDocument.Parse(raw);
-            var root = doc.RootElement;
-
-            if (!TryFindAck(root, expectedId, out var ackElement, out var error))
-            {
-                continue;
-            }
-
-            var ackStatus = ParseAckIndicator(ackElement);
-            if (ackStatus.HasValue)
-            {
-                await CloseSocketQuietlyAsync(socket);
-                return (ackStatus.Value, error);
-            }
-
-            if (!string.IsNullOrWhiteSpace(error))
-            {
-                await CloseSocketQuietlyAsync(socket);
-                return (false, error);
-            }
-        }
-
-        await CloseSocketQuietlyAsync(socket);
-        throw new OperationCanceledException("Control websocket ACK timeout.");
-    }
-
-    /// <summary>
-    /// Attempts to extract ACK indicator and error text from known websocket response shapes.
-    /// </summary>
-    private static bool TryFindAck(JsonElement element, string? expectedId, out JsonElement? ackElement, out string error)
-    {
-        ackElement = null;
-        error = string.Empty;
-
-        if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray())
-            {
-                if (TryFindAck(item, expectedId, out ackElement, out error))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        var id = element.TryGetProperty("id", out var idProperty) ? idProperty.GetString() : null;
-        var idMatches = string.IsNullOrWhiteSpace(expectedId) || string.IsNullOrWhiteSpace(id) || string.Equals(expectedId, id, StringComparison.OrdinalIgnoreCase);
-
-        if (idMatches && element.TryGetProperty("ok", out var okProperty))
-        {
-            ackElement = okProperty;
-            error = ExtractErrorText(element);
-            return true;
-        }
-
-        if (idMatches && element.TryGetProperty("success", out var successProperty))
-        {
-            ackElement = successProperty;
-            error = ExtractErrorText(element);
-            return true;
-        }
-
-        if (idMatches && element.TryGetProperty("status", out var statusProperty))
-        {
-            ackElement = statusProperty;
-            error = ExtractErrorText(element);
-            return true;
-        }
-
-        if (idMatches)
-        {
-            var extractedError = ExtractErrorText(element);
-            if (!string.IsNullOrWhiteSpace(extractedError))
-            {
-                error = extractedError;
-                return true;
-            }
-        }
-
-        foreach (var propertyName in new[] { "result", "payload", "data", "ack", "response", "message" })
-        {
-            if (element.TryGetProperty(propertyName, out var nested))
-            {
-                if (TryFindAck(nested, expectedId, out ackElement, out error))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Parses ACK indicator payload into success/failure state.
-    /// </summary>
-    private static bool? ParseAckIndicator(JsonElement? indicator)
-    {
-        if (!indicator.HasValue)
-        {
-            return null;
-        }
-
-        var value = indicator.Value;
-        if (value.ValueKind is JsonValueKind.True or JsonValueKind.False)
-        {
-            return value.GetBoolean();
-        }
-
-        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var numericStatus))
-        {
-            return numericStatus != 0;
-        }
-
-        if (value.ValueKind == JsonValueKind.String)
-        {
-            var token = value.GetString();
-            if (bool.TryParse(token, out var parsed))
-            {
-                return parsed;
-            }
-
-            if (!string.IsNullOrWhiteSpace(token) && TryParseStatusToken(token, out var parsedStatus))
-            {
-                return parsedStatus;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Parses textual status tokens used by heterogeneous peer ACK contracts.
-    /// </summary>
-    private static bool TryParseStatusToken(string token, out bool status)
-    {
-        status = false;
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            return false;
-        }
-
-        switch (token.Trim().ToLowerInvariant())
-        {
-            case "ok":
-            case "success":
-            case "applied":
-            case "accepted":
-            case "done":
-                status = true;
-                return true;
-            case "error":
-            case "failed":
-            case "rejected":
-            case "timeout":
-                status = false;
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// Extracts the first non-empty error text from known peer response fields.
-    /// </summary>
-    private static string ExtractErrorText(JsonElement payload)
-    {
-        foreach (var propertyName in new[] { "error", "message", "reason", "details" })
-        {
-            if (payload.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String)
-            {
-                var value = property.GetString();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-        }
-
-        return string.Empty;
-    }
-
-    /// <summary>
-    /// Attempts graceful websocket close so peer side does not log aborted close-handshake noise.
-    /// </summary>
-    private static async Task CloseSocketQuietlyAsync(ClientWebSocket socket)
-    {
-        if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived))
-        {
-            return;
-        }
-
-        using var closeCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
-        try
-        {
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "command-ack-complete", closeCts.Token);
-        }
-        catch
-        {
-            socket.Abort();
         }
     }
 

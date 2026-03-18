@@ -2,6 +2,11 @@
   <Folder Name="/Connectors/">
     <Project Path="Connectors/HidBridge.Connectors.HidBridgeUart/HidBridge.Connectors.HidBridgeUart.csproj" />
   </Folder>
+  <Folder Name="/Edge/">
+    <Project Path="Edge/HidBridge.Edge.Abstractions/HidBridge.Edge.Abstractions.csproj" />
+    <Project Path="Edge/HidBridge.Edge.HidBridgeProtocol/HidBridge.Edge.HidBridgeProtocol.csproj" />
+    <Project Path="Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj" />
+  </Folder>
   <Folder Name="/Core/">
     <Project Path="Core/HidBridge.Application/HidBridge.Application.csproj" />
     <Project Path="Core/HidBridge.Domain/HidBridge.Domain.csproj" />
