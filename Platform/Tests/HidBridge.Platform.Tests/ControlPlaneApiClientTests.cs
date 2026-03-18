@@ -521,14 +521,26 @@ public sealed class ControlPlaneApiClientTests
             "default",
             true,
             "ok",
-            new Dictionary<string, object?>()));
+            new Dictionary<string, object?>(),
+            LastCommandAck: null,
+            ReportedAtUtc: DateTimeOffset.UtcNow,
+            OnlinePeerCount: 1,
+            LastPeerSeenAtUtc: DateTimeOffset.UtcNow,
+            LastPeerState: "Connected",
+            LastPeerFailureReason: null,
+            LastPeerConsecutiveFailures: 0,
+            LastPeerReconnectBackoffMs: 0,
+            LastRelayAckAtUtc: DateTimeOffset.UtcNow));
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
         var apiClient = new ControlPlaneApiClient(httpClient);
 
-        _ = await apiClient.GetSessionTransportHealthAsync("session-1", cancellationToken: cancellationToken);
+        var response = await apiClient.GetSessionTransportHealthAsync("session-1", cancellationToken: cancellationToken);
 
         Assert.Equal(HttpMethod.Get, handler.LastMethod);
         Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/health", handler.LastRequestUri);
+        Assert.NotNull(response);
+        Assert.Equal(1, response!.OnlinePeerCount);
+        Assert.Equal("Connected", response.LastPeerState);
     }
 
     /// <summary>

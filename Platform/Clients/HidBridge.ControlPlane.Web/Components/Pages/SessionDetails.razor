@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = OperatorPolicies.Viewer)]
 @implements IAsyncDisposable
 @using System.Text.Json
+@using System.Globalization
 @inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
 @inject OperatorIdentityContext Identity
 @inject OperatorText T
@@ -171,15 +172,22 @@
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportConnectivity"]</div><div class="hid-detail-value">@(_transportHealth.Connected ? T["Yes"] : T["No"])</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportStatus"]</div><div class="hid-detail-value">@_transportHealth.Status</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["ReportedAt"]</div><div class="hid-detail-value">@FormatTime(_transportHealth.ReportedAtUtc)</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportOnlinePeers"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "onlinePeerCount")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportOnlinePeers"]</div><div class="hid-detail-value">@GetTransportOnlinePeerCount(_transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPendingAcks"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "pendingAckCount")</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerState"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "lastPeerState")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerState"]</div><div class="hid-detail-value">@GetTransportPeerState(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerLastSeen"]</div><div class="hid-detail-value">@GetTransportPeerLastSeen(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportLastRelayAckAt"]</div><div class="hid-detail-value">@GetTransportLastRelayAckAt(_transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth.LastCommandAck)</div></div>
                         </div>
 
-                        @if (!string.Equals(GetTransportMetricValue(_transportHealth, "lastPeerFailureReason"), "—", StringComparison.Ordinal))
+                        @if (!string.Equals(GetTransportPeerFailureReason(_transportHealth), "—", StringComparison.Ordinal))
                         {
-                            <div class="hid-meta-note">@T["TransportPeerFailureReason"]: @GetTransportMetricValue(_transportHealth, "lastPeerFailureReason")</div>
+                            <div class="hid-meta-note">@T["TransportPeerFailureReason"]: @GetTransportPeerFailureReason(_transportHealth)</div>
+                        }
+
+                        @if (_transportHealth.LastPeerConsecutiveFailures.HasValue || _transportHealth.LastPeerReconnectBackoffMs.HasValue)
+                        {
+                            <div class="hid-meta-note">@T["TransportPeerStability"]: @GetTransportPeerStability(_transportHealth)</div>
                         }
 
                         @if (_transportHealth.LastCommandAck is null)
@@ -1299,6 +1307,95 @@
         }
 
         return ConvertMetricObjectToString(value);
+    }
+
+    /// <summary>
+    /// Resolves online relay peer count with typed-field preference and metric fallback.
+    /// </summary>
+    private static string GetTransportOnlinePeerCount(SessionTransportHealthViewModel? health)
+    {
+        if (health?.OnlinePeerCount is not null)
+        {
+            return health.OnlinePeerCount.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return GetTransportMetricValue(health, "onlinePeerCount");
+    }
+
+    /// <summary>
+    /// Resolves relay peer state with typed-field preference and metric fallback.
+    /// </summary>
+    private static string GetTransportPeerState(SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(health?.LastPeerState))
+        {
+            return health.LastPeerState!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerState");
+    }
+
+    /// <summary>
+    /// Resolves relay peer failure reason with typed-field preference and metric fallback.
+    /// </summary>
+    private static string GetTransportPeerFailureReason(SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(health?.LastPeerFailureReason))
+        {
+            return health.LastPeerFailureReason!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerFailureReason");
+    }
+
+    /// <summary>
+    /// Formats relay peer last-seen timestamp.
+    /// </summary>
+    private string GetTransportPeerLastSeen(SessionTransportHealthViewModel? health)
+    {
+        if (health?.LastPeerSeenAtUtc is not null)
+        {
+            return FormatTime(health.LastPeerSeenAtUtc);
+        }
+
+        return "—";
+    }
+
+    /// <summary>
+    /// Formats relay last-ack timestamp.
+    /// </summary>
+    private string GetTransportLastRelayAckAt(SessionTransportHealthViewModel? health)
+    {
+        if (health?.LastRelayAckAtUtc is not null)
+        {
+            return FormatTime(health.LastRelayAckAtUtc);
+        }
+
+        return "—";
+    }
+
+    /// <summary>
+    /// Builds compact relay stability diagnostics from typed peer-health fields.
+    /// </summary>
+    private static string GetTransportPeerStability(SessionTransportHealthViewModel? health)
+    {
+        if (health is null)
+        {
+            return "—";
+        }
+
+        var parts = new List<string>();
+        if (health.LastPeerConsecutiveFailures.HasValue)
+        {
+            parts.Add($"failures={health.LastPeerConsecutiveFailures.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        if (health.LastPeerReconnectBackoffMs.HasValue)
+        {
+            parts.Add($"backoffMs={health.LastPeerReconnectBackoffMs.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        return parts.Count == 0 ? "—" : string.Join(", ", parts);
     }
 
     private static string GetAckRoute(CommandJournalEntryViewModel? ack)

@@ -420,7 +420,14 @@ public sealed record SessionTransportHealthBody(
     string Status,
     IReadOnlyDictionary<string, object?> Metrics,
     CommandJournalEntryBody? LastCommandAck = null,
-    DateTimeOffset? ReportedAtUtc = null);
+    DateTimeOffset? ReportedAtUtc = null,
+    int? OnlinePeerCount = null,
+    DateTimeOffset? LastPeerSeenAtUtc = null,
+    string? LastPeerState = null,
+    string? LastPeerFailureReason = null,
+    int? LastPeerConsecutiveFailures = null,
+    int? LastPeerReconnectBackoffMs = null,
+    DateTimeOffset? LastRelayAckAtUtc = null);
 
 /// <summary>
 /// Represents one normalized timeline item built from audit, telemetry, and command journal records.

@@ -282,7 +282,14 @@ public sealed record SessionTransportHealthViewModel(
     string Status,
     IReadOnlyDictionary<string, object?> Metrics,
     CommandJournalEntryViewModel? LastCommandAck = null,
-    DateTimeOffset? ReportedAtUtc = null);
+    DateTimeOffset? ReportedAtUtc = null,
+    int? OnlinePeerCount = null,
+    DateTimeOffset? LastPeerSeenAtUtc = null,
+    string? LastPeerState = null,
+    string? LastPeerFailureReason = null,
+    int? LastPeerConsecutiveFailures = null,
+    int? LastPeerReconnectBackoffMs = null,
+    DateTimeOffset? LastRelayAckAtUtc = null);
 
 /// <summary>
 /// Represents one WebRTC signaling message.

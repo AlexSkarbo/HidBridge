@@ -1,6 +1,8 @@
 using HidBridge.Abstractions;
 using HidBridge.Application;
 using HidBridge.Contracts;
+using System.Globalization;
+using System.Text.Json;
 
 namespace HidBridge.ControlPlane.Api.Endpoints;
 
@@ -357,6 +359,13 @@ public static class TransportEndpoints
                 var lastCommand = (await journalStore.ListBySessionAsync(sessionId, ct))
                     .OrderByDescending(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
                     .FirstOrDefault();
+                var onlinePeerCount = TryReadMetricInt32(health.Metrics, "onlinePeerCount");
+                var lastPeerSeenAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerSeenAtUtc");
+                var lastPeerState = TryReadMetricString(health.Metrics, "lastPeerState");
+                var lastPeerFailureReason = TryReadMetricString(health.Metrics, "lastPeerFailureReason");
+                var lastPeerConsecutiveFailures = TryReadMetricInt32(health.Metrics, "lastPeerConsecutiveFailures");
+                var lastPeerReconnectBackoffMs = TryReadMetricInt32(health.Metrics, "lastPeerReconnectBackoffMs");
+                var lastRelayAckAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastRelayAckAtUtc");
                 return Results.Ok(new SessionTransportHealthBody(
                     SessionId: snapshot.SessionId,
                     AgentId: snapshot.AgentId,
@@ -367,7 +376,14 @@ public static class TransportEndpoints
                     Status: health.Status,
                     Metrics: health.Metrics,
                     LastCommandAck: lastCommand,
-                    ReportedAtUtc: DateTimeOffset.UtcNow));
+                    ReportedAtUtc: DateTimeOffset.UtcNow,
+                    OnlinePeerCount: onlinePeerCount,
+                    LastPeerSeenAtUtc: lastPeerSeenAtUtc,
+                    LastPeerState: lastPeerState,
+                    LastPeerFailureReason: lastPeerFailureReason,
+                    LastPeerConsecutiveFailures: lastPeerConsecutiveFailures,
+                    LastPeerReconnectBackoffMs: lastPeerReconnectBackoffMs,
+                    LastRelayAckAtUtc: lastRelayAckAtUtc));
             }
             catch (KeyNotFoundException ex)
             {
@@ -383,6 +399,68 @@ public static class TransportEndpoints
         .WithDescription("Resolves the deterministic transport route for a session, reads provider health, and returns the latest command journal acknowledgment for end-to-end diagnostics.");
 
         return endpoints;
+    }
+
+    /// <summary>
+    /// Reads one metric value as string from transport-health metrics.
+    /// </summary>
+    private static string? TryReadMetricString(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string text when !string.IsNullOrWhiteSpace(text) => text,
+            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+            JsonElement element => element.ToString(),
+            _ => value.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// Reads one metric value as int from transport-health metrics.
+    /// </summary>
+    private static int? TryReadMetricInt32(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int direct => direct,
+            long i64 when i64 is >= int.MinValue and <= int.MaxValue => (int)i64,
+            double dbl when dbl >= int.MinValue && dbl <= int.MaxValue => Convert.ToInt32(dbl, CultureInfo.InvariantCulture),
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetInt32(out var parsedInt32) => parsedInt32,
+            JsonElement { ValueKind: JsonValueKind.String } element when int.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedStringInt32) => parsedStringInt32,
+            _ when int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedFallbackInt32) => parsedFallbackInt32,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Reads one metric value as UTC timestamp from transport-health metrics.
+    /// </summary>
+    private static DateTimeOffset? TryReadMetricDateTimeOffset(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            DateTimeOffset dto => dto,
+            DateTime dt => new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc)),
+            JsonElement { ValueKind: JsonValueKind.String } element when DateTimeOffset.TryParse(element.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedJsonString) => parsedJsonString,
+            string text when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedString) => parsedString,
+            _ when DateTimeOffset.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedFallback) => parsedFallback,
+            _ => null,
+        };
     }
 
     private sealed record WebRtcSignalPublishBody(

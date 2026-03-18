@@ -129,6 +129,7 @@ Default ControlPlane API:
   - `GET /api/v1/collaboration/sessions/{sessionId}/control/dashboard`
 - transport diagnostics/signaling:
   - `GET /api/v1/sessions/{sessionId}/transport/health?provider={uart|webrtc}`
+    - response now includes typed relay peer readiness fields when available: `onlinePeerCount`, `lastPeerSeenAtUtc`, `lastPeerState`, `lastPeerFailureReason`, `lastPeerConsecutiveFailures`, `lastPeerReconnectBackoffMs`, `lastRelayAckAtUtc`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/signals`
   - `GET /api/v1/sessions/{sessionId}/transport/webrtc/signals?recipientPeerId={peerId}&afterSequence={n}&limit={n}`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/online`
