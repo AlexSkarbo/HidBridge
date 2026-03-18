@@ -153,6 +153,11 @@ public sealed class WebRtcCommandRelayService
                 ["pendingAckCount"] = 0,
                 ["queuedCommandCount"] = 0,
                 ["lastRelayAckAtUtc"] = null,
+                ["lastPeerSeenAtUtc"] = null,
+                ["lastPeerState"] = null,
+                ["lastPeerFailureReason"] = null,
+                ["lastPeerConsecutiveFailures"] = null,
+                ["lastPeerReconnectBackoffMs"] = null,
             });
         }
 

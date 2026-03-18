@@ -11,6 +11,25 @@ namespace HidBridge.Platform.Tests;
 public sealed class WebRtcCommandRelayServiceTests
 {
     [Fact]
+    public async Task GetSessionMetricsAsync_ReturnsDeterministicDefaultsForUnknownSession()
+    {
+        var service = new WebRtcCommandRelayService();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var metrics = await service.GetSessionMetricsAsync("missing-session", "endpoint-1", cancellationToken);
+
+        Assert.Equal("0", metrics["onlinePeerCount"]?.ToString());
+        Assert.Equal("0", metrics["pendingAckCount"]?.ToString());
+        Assert.Equal("0", metrics["queuedCommandCount"]?.ToString());
+        Assert.Null(metrics["lastRelayAckAtUtc"]);
+        Assert.Null(metrics["lastPeerSeenAtUtc"]);
+        Assert.Null(metrics["lastPeerState"]);
+        Assert.Null(metrics["lastPeerFailureReason"]);
+        Assert.Null(metrics["lastPeerConsecutiveFailures"]);
+        Assert.Null(metrics["lastPeerReconnectBackoffMs"]);
+    }
+
+    [Fact]
     public async Task PeerPresence_RoundtripOnlineOfflineAndMetrics()
     {
         var service = new WebRtcCommandRelayService();
@@ -33,6 +52,32 @@ public sealed class WebRtcCommandRelayServiceTests
         var offline = await service.MarkPeerOfflineAsync("session-1", "peer-1", cancellationToken);
         Assert.False(offline.IsOnline);
         Assert.False(service.HasOnlinePeer("session-1", "endpoint-1"));
+    }
+
+    [Fact]
+    public async Task PeerPresence_MetricsIncludeLatestPeerDiagnostics()
+    {
+        var service = new WebRtcCommandRelayService();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        _ = await service.MarkPeerOnlineAsync(
+            "session-1",
+            "peer-1",
+            "endpoint-1",
+            new Dictionary<string, string>
+            {
+                ["state"] = "Connected",
+                ["failureReason"] = "",
+                ["consecutiveFailures"] = "2",
+                ["reconnectBackoffMs"] = "1500",
+            },
+            cancellationToken);
+
+        var metrics = await service.GetSessionMetricsAsync("session-1", "endpoint-1", cancellationToken);
+
+        Assert.Equal("Connected", metrics["lastPeerState"]?.ToString());
+        Assert.Equal("2", metrics["lastPeerConsecutiveFailures"]?.ToString());
+        Assert.Equal("1500", metrics["lastPeerReconnectBackoffMs"]?.ToString());
+        Assert.NotNull(metrics["lastPeerSeenAtUtc"]);
     }
 
     [Fact]
@@ -67,4 +112,3 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Equal(CommandStatus.Applied, ack!.Status);
     }
 }
-
