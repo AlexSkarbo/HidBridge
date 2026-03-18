@@ -362,6 +362,7 @@ Manual WebRTC relay smoke (peer queue + ack + transport health):
 Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
 - preferred stack launcher (starts API/Web + exp-022 + service-based edge proxy agent):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
+  - stack bootstrap now waits until relay peer is reported online in API before returning summary (default timeout: `30s`, override with `-PeerReadyTimeoutSec`).
 - one-command smoke for the running stack (expects `Applied`):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-smoke -ForwardArgs @('-ControlHealthUrl','http://127.0.0.1:28092/health','-OutputJsonPath','Platform/.logs/webrtc-edge-agent-smoke.result.json')`
 - include the WebRTC smoke as part of `demo-flow`:

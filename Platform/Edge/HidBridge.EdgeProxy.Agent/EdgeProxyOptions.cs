@@ -2,6 +2,9 @@ using System.ComponentModel.DataAnnotations;
 
 namespace HidBridge.EdgeProxy.Agent;
 
+/// <summary>
+/// Configuration for the WebRTC edge proxy worker.
+/// </summary>
 public sealed class EdgeProxyOptions
 {
     [Required]
@@ -40,6 +43,9 @@ public sealed class EdgeProxyOptions
     public int ReconnectBackoffJitterMs { get; set; } = 250;
     public int TransientFailureThresholdForOffline { get; set; } = 2;
 
+    /// <summary>
+    /// Normalizes numeric and URL values to safe runtime bounds.
+    /// </summary>
     public void Normalize()
     {
         BaseUrl = BaseUrl.TrimEnd('/');
@@ -54,6 +60,11 @@ public sealed class EdgeProxyOptions
         TransientFailureThresholdForOffline = Math.Max(1, TransientFailureThresholdForOffline);
     }
 
+    /// <summary>
+    /// Validates that required connection and identity settings are present.
+    /// </summary>
+    /// <param name="error">Validation error message.</param>
+    /// <returns><see langword="true"/> when options are valid; otherwise <see langword="false"/>.</returns>
     public bool IsValid(out string error)
     {
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out _))

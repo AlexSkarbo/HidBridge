@@ -12,6 +12,10 @@ This worker:
 4. publishes ACK back to API;
 5. emits periodic heartbeat signal packets.
 
+ACK compatibility notes:
+- the worker accepts peer ACK fields `ok`, `success`, or `status` (`ok|success|applied|accepted|done` treated as success);
+- the websocket client closes with normal close handshake after ACK to reduce noisy remote `close handshake` errors.
+
 ## Environment variables
 
 All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:

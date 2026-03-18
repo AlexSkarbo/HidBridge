@@ -13,6 +13,15 @@ param(
     [string]$ControlHealthUrl,
     [int]$RequestTimeoutSec = -1,
     [int]$ControlHealthAttempts = -1,
+    [string]$ControlWsUrl,
+    [string]$UartPort,
+    [int]$UartBaud = -1,
+    [string]$UartHmacKey,
+    [int]$Exp022DurationSec = -1,
+    [int]$AdapterDurationSec = -1,
+    [int]$PeerReadyTimeoutSec = -1,
+    [string]$EndpointId,
+    [string]$PrincipalId,
     [string]$OutputJsonPath,
     [string]$InterfaceSelectorsCsv,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -151,6 +160,71 @@ if ($PSBoundParameters.ContainsKey("RequestTimeoutSec") -and $RequestTimeoutSec 
 if ($PSBoundParameters.ContainsKey("ControlHealthAttempts") -and $ControlHealthAttempts -gt 0) {
     $effectiveForwardArgs.Add("-ControlHealthAttempts") | Out-Null
     $effectiveForwardArgs.Add([string]$ControlHealthAttempts) | Out-Null
+}
+
+if ($PSBoundParameters.ContainsKey("ControlWsUrl") -and -not [string]::IsNullOrWhiteSpace($ControlWsUrl)) {
+    $tasksWithControlWsUrl = @("webrtc-stack", "webrtc-peer-adapter")
+    if ($tasksWithControlWsUrl -contains $Task) {
+        $effectiveForwardArgs.Add("-ControlWsUrl") | Out-Null
+        $effectiveForwardArgs.Add($ControlWsUrl) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("UartPort") -and -not [string]::IsNullOrWhiteSpace($UartPort)) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-UartPort") | Out-Null
+        $effectiveForwardArgs.Add($UartPort) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("UartBaud") -and $UartBaud -gt 0) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-UartBaud") | Out-Null
+        $effectiveForwardArgs.Add([string]$UartBaud) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("UartHmacKey") -and -not [string]::IsNullOrWhiteSpace($UartHmacKey)) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-UartHmacKey") | Out-Null
+        $effectiveForwardArgs.Add($UartHmacKey) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("Exp022DurationSec") -and $Exp022DurationSec -gt 0) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-Exp022DurationSec") | Out-Null
+        $effectiveForwardArgs.Add([string]$Exp022DurationSec) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("AdapterDurationSec") -and $AdapterDurationSec -gt 0) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-AdapterDurationSec") | Out-Null
+        $effectiveForwardArgs.Add([string]$AdapterDurationSec) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec") -and $PeerReadyTimeoutSec -gt 0) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-PeerReadyTimeoutSec") | Out-Null
+        $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("EndpointId") -and -not [string]::IsNullOrWhiteSpace($EndpointId)) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-EndpointId") | Out-Null
+        $effectiveForwardArgs.Add($EndpointId) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("PrincipalId") -and -not [string]::IsNullOrWhiteSpace($PrincipalId)) {
+    $tasksWithPrincipalId = @("webrtc-stack", "webrtc-peer-adapter", "demo-gate")
+    if ($tasksWithPrincipalId -contains $Task) {
+        $effectiveForwardArgs.Add("-PrincipalId") | Out-Null
+        $effectiveForwardArgs.Add($PrincipalId) | Out-Null
+    }
 }
 
 if ($PSBoundParameters.ContainsKey("OutputJsonPath") -and -not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {

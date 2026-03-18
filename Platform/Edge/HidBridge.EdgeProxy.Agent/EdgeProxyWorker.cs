@@ -10,6 +10,9 @@ using Microsoft.Extensions.Options;
 
 namespace HidBridge.EdgeProxy.Agent;
 
+/// <summary>
+/// Bridges WebRTC relay command envelopes from ControlPlane API to a local control websocket endpoint.
+/// </summary>
 public sealed class EdgeProxyWorker : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -27,6 +30,9 @@ public sealed class EdgeProxyWorker : BackgroundService
     private string _accessToken;
     private bool _peerOnline;
 
+    /// <summary>
+    /// Initializes a new <see cref="EdgeProxyWorker"/> instance.
+    /// </summary>
     public EdgeProxyWorker(
         IHttpClientFactory httpClientFactory,
         IOptions<EdgeProxyOptions> options,
@@ -46,6 +52,10 @@ public sealed class EdgeProxyWorker : BackgroundService
         };
     }
 
+    /// <summary>
+    /// Runs the worker loop:
+    /// publish peer presence, heartbeat, relay poll, command execute, and command ACK.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (string.IsNullOrWhiteSpace(_accessToken))
@@ -151,6 +161,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Computes an exponential reconnect backoff with bounded jitter.
+    /// </summary>
     private TimeSpan ComputeReconnectDelay(int consecutiveFailures)
     {
         var exponent = Math.Clamp(consecutiveFailures - 1, 0, 12);
@@ -162,6 +175,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         return TimeSpan.FromMilliseconds(capped + jitter);
     }
 
+    /// <summary>
+    /// Publishes heartbeat signal packets and advances inbound signal cursor.
+    /// </summary>
     private async Task PublishHeartbeatAsync(CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -204,6 +220,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         _lastHeartbeatAtUtc = now;
     }
 
+    /// <summary>
+    /// Polls command envelopes, executes each command, and posts ACK payloads back to relay queue.
+    /// </summary>
     private async Task PollAndProcessCommandsAsync(CancellationToken cancellationToken)
     {
         var query = $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/commands?peerId={Uri.EscapeDataString(_options.PeerId)}&limit={_options.BatchLimit}";
@@ -238,6 +257,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Executes one relay command through the local control websocket and shapes relay ACK payload.
+    /// </summary>
     private async Task<object> ExecuteCommandAsync(CommandRequestBody command, CancellationToken cancellationToken)
     {
         var effectiveTimeout = Math.Max(1000, command.TimeoutMs ?? _options.CommandTimeoutMs);
@@ -338,6 +360,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Converts API command envelope into the local websocket payload format.
+    /// </summary>
     private static Dictionary<string, object?> ConvertPayload(CommandRequestBody command)
     {
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -357,6 +382,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         return payload;
     }
 
+    /// <summary>
+    /// Sends one command to local websocket control endpoint and waits for ACK response.
+    /// </summary>
     private async Task<(bool Ok, string Error)> InvokeControlWsAsync(
         Dictionary<string, object?> payload,
         int timeoutMs,
@@ -399,44 +427,42 @@ public sealed class EdgeProxyWorker : BackgroundService
             using var doc = JsonDocument.Parse(raw);
             var root = doc.RootElement;
 
-            if (!TryFindAck(root, expectedId, out var okElement, out var error))
+            if (!TryFindAck(root, expectedId, out var ackElement, out var error))
             {
                 continue;
             }
 
-            if (okElement.HasValue && okElement.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            var ackStatus = ParseAckIndicator(ackElement);
+            if (ackStatus.HasValue)
             {
-                return (okElement.Value.GetBoolean(), error);
-            }
-
-            if (okElement.HasValue && okElement.Value.ValueKind == JsonValueKind.String)
-            {
-                var token = okElement.Value.GetString();
-                if (bool.TryParse(token, out var parsed))
-                {
-                    return (parsed, error);
-                }
+                await CloseSocketQuietlyAsync(socket);
+                return (ackStatus.Value, error);
             }
 
             if (!string.IsNullOrWhiteSpace(error))
             {
+                await CloseSocketQuietlyAsync(socket);
                 return (false, error);
             }
         }
 
+        await CloseSocketQuietlyAsync(socket);
         throw new OperationCanceledException("Control websocket ACK timeout.");
     }
 
-    private static bool TryFindAck(JsonElement element, string? expectedId, out JsonElement? okElement, out string error)
+    /// <summary>
+    /// Attempts to extract ACK indicator and error text from known websocket response shapes.
+    /// </summary>
+    private static bool TryFindAck(JsonElement element, string? expectedId, out JsonElement? ackElement, out string error)
     {
-        okElement = null;
+        ackElement = null;
         error = string.Empty;
 
         if (element.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in element.EnumerateArray())
             {
-                if (TryFindAck(item, expectedId, out okElement, out error))
+                if (TryFindAck(item, expectedId, out ackElement, out error))
                 {
                     return true;
                 }
@@ -454,20 +480,40 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         if (idMatches && element.TryGetProperty("ok", out var okProperty))
         {
-            okElement = okProperty;
-            if (element.TryGetProperty("error", out var errorProperty) && errorProperty.ValueKind == JsonValueKind.String)
-            {
-                error = errorProperty.GetString() ?? string.Empty;
-            }
-
+            ackElement = okProperty;
+            error = ExtractErrorText(element);
             return true;
+        }
+
+        if (idMatches && element.TryGetProperty("success", out var successProperty))
+        {
+            ackElement = successProperty;
+            error = ExtractErrorText(element);
+            return true;
+        }
+
+        if (idMatches && element.TryGetProperty("status", out var statusProperty))
+        {
+            ackElement = statusProperty;
+            error = ExtractErrorText(element);
+            return true;
+        }
+
+        if (idMatches)
+        {
+            var extractedError = ExtractErrorText(element);
+            if (!string.IsNullOrWhiteSpace(extractedError))
+            {
+                error = extractedError;
+                return true;
+            }
         }
 
         foreach (var propertyName in new[] { "result", "payload", "data", "ack", "response", "message" })
         {
             if (element.TryGetProperty(propertyName, out var nested))
             {
-                if (TryFindAck(nested, expectedId, out okElement, out error))
+                if (TryFindAck(nested, expectedId, out ackElement, out error))
                 {
                     return true;
                 }
@@ -477,9 +523,125 @@ public sealed class EdgeProxyWorker : BackgroundService
         return false;
     }
 
+    /// <summary>
+    /// Parses ACK indicator payload into success/failure state.
+    /// </summary>
+    private static bool? ParseAckIndicator(JsonElement? indicator)
+    {
+        if (!indicator.HasValue)
+        {
+            return null;
+        }
+
+        var value = indicator.Value;
+        if (value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            return value.GetBoolean();
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var numericStatus))
+        {
+            return numericStatus != 0;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var token = value.GetString();
+            if (bool.TryParse(token, out var parsed))
+            {
+                return parsed;
+            }
+
+            if (!string.IsNullOrWhiteSpace(token) && TryParseStatusToken(token, out var parsedStatus))
+            {
+                return parsedStatus;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses textual status tokens used by heterogeneous peer ACK contracts.
+    /// </summary>
+    private static bool TryParseStatusToken(string token, out bool status)
+    {
+        status = false;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        switch (token.Trim().ToLowerInvariant())
+        {
+            case "ok":
+            case "success":
+            case "applied":
+            case "accepted":
+            case "done":
+                status = true;
+                return true;
+            case "error":
+            case "failed":
+            case "rejected":
+            case "timeout":
+                status = false;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Extracts the first non-empty error text from known peer response fields.
+    /// </summary>
+    private static string ExtractErrorText(JsonElement payload)
+    {
+        foreach (var propertyName in new[] { "error", "message", "reason", "details" })
+        {
+            if (payload.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String)
+            {
+                var value = property.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Attempts graceful websocket close so peer side does not log aborted close-handshake noise.
+    /// </summary>
+    private static async Task CloseSocketQuietlyAsync(ClientWebSocket socket)
+    {
+        if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived))
+        {
+            return;
+        }
+
+        using var closeCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        try
+        {
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "command-ack-complete", closeCts.Token);
+        }
+        catch
+        {
+            socket.Abort();
+        }
+    }
+
+    /// <summary>
+    /// Convenience overload that publishes online peer state without extra metadata.
+    /// </summary>
     private async Task MarkPeerOnlineAsync(CancellationToken cancellationToken)
         => await MarkPeerOnlineAsync(metadata: null, cancellationToken);
 
+    /// <summary>
+    /// Publishes online peer state with optional metadata extensions.
+    /// </summary>
     private async Task MarkPeerOnlineAsync(
         IReadOnlyDictionary<string, string>? metadata,
         CancellationToken cancellationToken)
@@ -509,6 +671,9 @@ public sealed class EdgeProxyWorker : BackgroundService
             cancellationToken);
     }
 
+    /// <summary>
+    /// Publishes offline peer state.
+    /// </summary>
     private async Task MarkPeerOfflineAsync(CancellationToken cancellationToken)
     {
         await SendAsync(HttpMethod.Post,
@@ -517,6 +682,9 @@ public sealed class EdgeProxyWorker : BackgroundService
             cancellationToken);
     }
 
+    /// <summary>
+    /// Requests OIDC access token for API calls that require bearer authorization.
+    /// </summary>
     private async Task<string> RequestTokenAsync(CancellationToken cancellationToken)
     {
         using var client = new HttpClient
@@ -547,6 +715,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         return token.AccessToken;
     }
 
+    /// <summary>
+    /// Parses collection responses from direct array or envelope shapes used across runtime endpoints.
+    /// </summary>
     private async Task<List<T>> GetCollectionAsync<T>(string relativeUrl, CancellationToken cancellationToken)
     {
         using var response = await SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
@@ -607,6 +778,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         return [];
     }
 
+    /// <summary>
+    /// Sends one API call with caller headers and bearer token refresh on 401.
+    /// </summary>
     private async Task<HttpResponseMessage> SendAsync(
         HttpMethod method,
         string relativeUrl,
@@ -650,6 +824,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         return response;
     }
 
+    /// <summary>
+    /// Builds peer metadata payload used for online/degraded state transitions.
+    /// </summary>
     private static IReadOnlyDictionary<string, string> BuildPeerMetadata(
         string state,
         string? failureReason,

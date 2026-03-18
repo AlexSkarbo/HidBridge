@@ -12,6 +12,7 @@ param(
     [string]$TokenUsername = "operator.smoke.admin",
     [string]$TokenPassword = "ChangeMe123!",
     [string]$TokenScope = "",
+    [int]$PeerReadyTimeoutSec = 30,
     [switch]$SkipIdentityReset = $true,
     [switch]$SkipCiLocal = $true,
     [switch]$SkipRuntimeBootstrap,
@@ -39,6 +40,7 @@ $exp022Stderr = Join-Path $logRoot "exp022.stderr.log"
 $adapterStdout = Join-Path $logRoot "webrtc-peer-adapter.stdout.log"
 $adapterStderr = Join-Path $logRoot "webrtc-peer-adapter.stderr.log"
 
+# Stops process instances whose command line contains at least one requested token.
 function Stop-MatchingProcesses {
     param([string]$Name, [string[]]$Needle)
 
@@ -76,6 +78,7 @@ function Stop-MatchingProcesses {
     }
 }
 
+# Waits until an HTTP health endpoint returns one of the expected "ok" shapes.
 function Wait-HttpHealth {
     param(
         [string]$Uri,
@@ -114,6 +117,7 @@ function Wait-HttpHealth {
     return $false
 }
 
+# Normalizes collection-style API responses to a plain array.
 function Get-CollectionItems {
     param([object]$Response)
 
@@ -127,6 +131,98 @@ function Get-CollectionItems {
     return @($Response)
 }
 
+# Returns the latest tail from a log file for failure diagnostics.
+function Get-LogTail {
+    param(
+        [string]$Path,
+        [int]$LineCount = 40
+    )
+
+    if (-not (Test-Path -Path $Path -PathType Leaf)) {
+        return "<log file not found: $Path>"
+    }
+
+    try {
+        return ((Get-Content -Path $Path -Tail $LineCount -ErrorAction Stop) -join [Environment]::NewLine)
+    }
+    catch {
+        return "<failed to read log tail: $($_.Exception.Message)>"
+    }
+}
+
+# Checks whether a spawned process is still running.
+function Test-ProcessAlive {
+    param([System.Diagnostics.Process]$Process)
+
+    if ($null -eq $Process) {
+        return $false
+    }
+
+    try {
+        return (-not $Process.HasExited)
+    }
+    catch {
+        return $false
+    }
+}
+
+# Waits until the relay peer is visible as online in API session peer list.
+function Wait-RelayPeerOnline {
+    param(
+        [string]$ApiBaseUrl,
+        [string]$SessionId,
+        [string]$PeerId,
+        [hashtable]$AuthHeaders,
+        [int]$TimeoutSec = 30,
+        [int]$DelayMs = 500,
+        [System.Diagnostics.Process]$AdapterProcess,
+        [System.Diagnostics.Process]$Exp022Process,
+        [string]$AdapterStdErrPath,
+        [string]$Exp022StdErrPath
+    )
+
+    $deadlineUtc = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Max(5, $TimeoutSec))
+    $peersUrl = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/transport/webrtc/peers"
+
+    while ([DateTimeOffset]::UtcNow -lt $deadlineUtc) {
+        if (-not (Test-ProcessAlive -Process $AdapterProcess)) {
+            $adapterTail = Get-LogTail -Path $AdapterStdErrPath
+            throw "Edge proxy agent exited before relay peer became online.`nAdapter stderr tail:`n$adapterTail"
+        }
+
+        if (-not (Test-ProcessAlive -Process $Exp022Process)) {
+            $expTail = Get-LogTail -Path $Exp022StdErrPath
+            throw "exp-022 exited before relay peer became online.`nexp-022 stderr tail:`n$expTail"
+        }
+
+        try {
+            $response = Invoke-RestMethod -Method Get -Uri $peersUrl -Headers $AuthHeaders -TimeoutSec 5
+            $peers = @(Get-CollectionItems -Response $response)
+            $peer = $peers | Where-Object { [string]$_.peerId -eq $PeerId } | Select-Object -First 1
+            if ($null -ne $peer) {
+                $isOnline = $false
+                if ($peer -is [System.Collections.IDictionary] -and $peer.Contains("isOnline")) {
+                    $isOnline = [bool]$peer["isOnline"]
+                }
+                elseif ($peer.PSObject.Properties["isOnline"]) {
+                    $isOnline = [bool]$peer.isOnline
+                }
+
+                if ($isOnline) {
+                    return $true
+                }
+            }
+        }
+        catch {
+        }
+
+        Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMs))
+    }
+
+    return $false
+}
+
+# Obtains bearer token for stack bootstrapping calls.
 function Get-OidcAccessToken {
     param(
         [string]$KeycloakBaseUrl,
@@ -155,6 +251,7 @@ function Get-OidcAccessToken {
     return $token
 }
 
+# Asserts COM port can be opened before runtime startup.
 function Assert-UartPortAvailable {
     param([string]$Port, [int]$Baud)
 
@@ -382,6 +479,24 @@ foreach ($name in $edgeEnvRestore.Keys) {
     [Environment]::SetEnvironmentVariable($name, $edgeEnvRestore[$name], [EnvironmentVariableTarget]::Process)
 }
 
+$peerReady = Wait-RelayPeerOnline `
+    -ApiBaseUrl $ApiBaseUrl `
+    -SessionId $session `
+    -PeerId $peerId `
+    -AuthHeaders $authHeaders `
+    -TimeoutSec $PeerReadyTimeoutSec `
+    -DelayMs 500 `
+    -AdapterProcess $adapterProcess `
+    -Exp022Process $exp022Process `
+    -AdapterStdErrPath $adapterStderr `
+    -Exp022StdErrPath $exp022Stderr
+
+if (-not $peerReady) {
+    $adapterTail = Get-LogTail -Path $adapterStderr
+    $expTail = Get-LogTail -Path $exp022Stderr
+    throw "WebRTC relay peer '$peerId' did not become online within $PeerReadyTimeoutSec seconds.`nAdapter stderr tail:`n$adapterTail`n`nexp-022 stderr tail:`n$expTail"
+}
+
 $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     webBaseUrl = $WebBaseUrl
@@ -389,6 +504,8 @@ $summary = [pscustomobject]@{
     runtimeBootstrapSkipped = [bool]$SkipRuntimeBootstrap
     sessionId = $session
     peerId = $peerId
+    peerReady = $peerReady
+    peerReadyTimeoutSec = $PeerReadyTimeoutSec
     exp022Pid = $exp022Process.Id
     adapterPid = $adapterProcess.Id
     sessionEnvPath = $sessionEnvPath
@@ -406,6 +523,7 @@ Write-Host "Web:            $WebBaseUrl"
 Write-Host "Control WS:     $ControlWsUrl"
 Write-Host "Session:        $session"
 Write-Host "Peer:           $peerId"
+Write-Host "Peer ready:     $peerReady"
 Write-Host "exp-022 PID:    $($exp022Process.Id)"
 Write-Host "Adapter PID:    $($adapterProcess.Id)"
 Write-Host "Session env:    $sessionEnvPath"
