@@ -92,6 +92,35 @@ function Get-ErrorResponseBody {
     }
 }
 
+# Extracts HTTP status code from a web exception when possible.
+function Get-HttpStatusCode {
+    param([System.Exception]$Exception)
+
+    if ($null -eq $Exception) {
+        return $null
+    }
+
+    try {
+        $responseProperty = $Exception.PSObject.Properties["Response"]
+        $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
+        if ($null -ne $response) {
+            $statusCodeProperty = $response.PSObject.Properties["StatusCode"]
+            if ($null -ne $statusCodeProperty -and $null -ne $statusCodeProperty.Value) {
+                return [int]$statusCodeProperty.Value
+            }
+        }
+    }
+    catch {
+    }
+
+    $message = [string]$Exception.Message
+    if ($message -match "\((\d{3})\)") {
+        return [int]$matches[1]
+    }
+
+    return $null
+}
+
 function Request-AdapterAccessTokenFromCredentials {
     param()
 
@@ -671,8 +700,8 @@ try {
         $sessionExists = $true
     }
     catch {
-        $message = $_.Exception.Message
-        if ($message -like "*404*" -or $message -like "*Не найден*") {
+        $statusCode = Get-HttpStatusCode -Exception $_.Exception
+        if ($statusCode -eq 404) {
             $sessionExists = $false
         }
         else {
