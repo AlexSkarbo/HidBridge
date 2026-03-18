@@ -38,32 +38,35 @@ if ([string]::Equals($TransportProvider, "webrtc-datachannel", [StringComparison
         Write-Warning "RequireDeviceAck is ignored for TransportProvider=webrtc-datachannel."
     }
 
-    $terminalBScript = Join-Path $scriptsRoot "run_webrtc_stack_terminal_b.ps1"
-    if (-not (Test-Path $terminalBScript)) {
-        throw "WebRTC gate helper was not found: $terminalBScript"
+    $webrtcSmokeScript = Join-Path $scriptsRoot "run_webrtc_edge_agent_smoke.ps1"
+    if (-not (Test-Path $webrtcSmokeScript)) {
+        throw "WebRTC gate helper was not found: $webrtcSmokeScript"
     }
 
-    $terminalBArgs = @{
+    $webrtcSmokeArgs = @{
         ApiBaseUrl = $BaseUrl
         KeycloakBaseUrl = $KeycloakBaseUrl
         RealmName = $RealmName
         ControlHealthUrl = $ControlHealthUrl
         ControlHealthAttempts = [Math]::Max(1, $ControlHealthAttempts)
         RequestTimeoutSec = [Math]::Max(1, $RequestTimeoutSec)
-        SkipControlLeaseRequest = $true
-        AllowMissingControlRequestEndpoint = $true
         TokenClientId = $TokenClientId
         TokenUsername = $TokenUsername
         TokenPassword = $TokenPassword
-        PrincipalId = $PrincipalId
-        TenantId = $TenantId
-        OrganizationId = $OrganizationId
-        LeaseSeconds = [Math]::Max(30, $LeaseSeconds)
-        TimeoutMs = [Math]::Max(1000, $CommandTimeoutMs)
+        TimeoutMs = [Math]::Max(8000, $CommandTimeoutMs)
         OutputJsonPath = $OutputJsonPath
     }
+    if ($PSBoundParameters.ContainsKey("PrincipalId") -and -not [string]::IsNullOrWhiteSpace($PrincipalId)) {
+        $webrtcSmokeArgs["PrincipalId"] = $PrincipalId
+    }
+    if ($PSBoundParameters.ContainsKey("TenantId") -and -not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $webrtcSmokeArgs["TenantId"] = $TenantId
+    }
+    if ($PSBoundParameters.ContainsKey("OrganizationId") -and -not [string]::IsNullOrWhiteSpace($OrganizationId)) {
+        $webrtcSmokeArgs["OrganizationId"] = $OrganizationId
+    }
 
-    & $terminalBScript @terminalBArgs
+    & $webrtcSmokeScript @webrtcSmokeArgs
 
     $summaryResult = $null
     if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath) -and (Test-Path $OutputJsonPath)) {

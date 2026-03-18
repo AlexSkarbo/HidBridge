@@ -14,6 +14,7 @@ param(
     [string]$TokenScope = "",
     [switch]$SkipIdentityReset = $true,
     [switch]$SkipCiLocal = $true,
+    [switch]$SkipRuntimeBootstrap,
     [switch]$StopExisting
 )
 
@@ -195,13 +196,19 @@ function Assert-UartPortAvailable {
 }
 
 if ($StopExisting) {
-    Stop-MatchingProcesses -Name "dotnet.exe" -Needle @(
-        "HidBridge.ControlPlane.Api",
-        "HidBridge.ControlPlane.Web",
+    $dotnetNeedles = @(
         "exp-022-datachanneldotnet",
         "HidBridge.EdgeProxy.Agent",
         "run_webrtc_stack.ps1"
     )
+    if (-not $SkipRuntimeBootstrap) {
+        $dotnetNeedles = @(
+            "HidBridge.ControlPlane.Api",
+            "HidBridge.ControlPlane.Web"
+        ) + $dotnetNeedles
+    }
+
+    Stop-MatchingProcesses -Name "dotnet.exe" -Needle $dotnetNeedles
     Stop-MatchingProcesses -Name "pwsh.exe" -Needle @(
         "exp-022-datachanneldotnet",
         "HidBridge.EdgeProxy.Agent",
@@ -216,37 +223,39 @@ if ($StopExisting) {
 
 Assert-UartPortAvailable -Port $UartPort -Baud $UartBaud
 
-$demoFlowParameters = @{
-    ApiBaseUrl = $ApiBaseUrl
-    WebBaseUrl = $WebBaseUrl
-    SkipDemoGate = $true
-}
-if ($SkipIdentityReset) { $demoFlowParameters.SkipIdentityReset = $true }
-if ($SkipCiLocal) { $demoFlowParameters.SkipCiLocal = $true }
-
-$demoFlowRestore = @{
-    HIDBRIDGE_UART_PASSIVE_HEALTH_MODE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_UART_PASSIVE_HEALTH_MODE", [EnvironmentVariableTarget]::Process)
-    HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE", [EnvironmentVariableTarget]::Process)
-    HIDBRIDGE_UART_PORT = [Environment]::GetEnvironmentVariable("HIDBRIDGE_UART_PORT", [EnvironmentVariableTarget]::Process)
-    HIDBRIDGE_TRANSPORT_PROVIDER = [Environment]::GetEnvironmentVariable("HIDBRIDGE_TRANSPORT_PROVIDER", [EnvironmentVariableTarget]::Process)
-    HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR", [EnvironmentVariableTarget]::Process)
-}
-
-try {
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_UART_PASSIVE_HEALTH_MODE", "true", [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE", "true", [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_UART_PORT", "COM255", [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_TRANSPORT_PROVIDER", "webrtc-datachannel", [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR", "false", [EnvironmentVariableTarget]::Process)
-
-    & $demoFlowScript @demoFlowParameters
-    if ($LASTEXITCODE -ne 0) {
-        throw "demo-flow failed with exit code $LASTEXITCODE."
+if (-not $SkipRuntimeBootstrap) {
+    $demoFlowParameters = @{
+        ApiBaseUrl = $ApiBaseUrl
+        WebBaseUrl = $WebBaseUrl
+        SkipDemoGate = $true
     }
-}
-finally {
-    foreach ($name in $demoFlowRestore.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $demoFlowRestore[$name], [EnvironmentVariableTarget]::Process)
+    if ($SkipIdentityReset) { $demoFlowParameters.SkipIdentityReset = $true }
+    if ($SkipCiLocal) { $demoFlowParameters.SkipCiLocal = $true }
+
+    $demoFlowRestore = @{
+        HIDBRIDGE_UART_PASSIVE_HEALTH_MODE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_UART_PASSIVE_HEALTH_MODE", [EnvironmentVariableTarget]::Process)
+        HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE", [EnvironmentVariableTarget]::Process)
+        HIDBRIDGE_UART_PORT = [Environment]::GetEnvironmentVariable("HIDBRIDGE_UART_PORT", [EnvironmentVariableTarget]::Process)
+        HIDBRIDGE_TRANSPORT_PROVIDER = [Environment]::GetEnvironmentVariable("HIDBRIDGE_TRANSPORT_PROVIDER", [EnvironmentVariableTarget]::Process)
+        HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR", [EnvironmentVariableTarget]::Process)
+    }
+
+    try {
+        [Environment]::SetEnvironmentVariable("HIDBRIDGE_UART_PASSIVE_HEALTH_MODE", "true", [EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable("HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE", "true", [EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable("HIDBRIDGE_UART_PORT", "COM255", [EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable("HIDBRIDGE_TRANSPORT_PROVIDER", "webrtc-datachannel", [EnvironmentVariableTarget]::Process)
+        [Environment]::SetEnvironmentVariable("HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR", "false", [EnvironmentVariableTarget]::Process)
+
+        & $demoFlowScript @demoFlowParameters
+        if ($LASTEXITCODE -ne 0) {
+            throw "demo-flow failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        foreach ($name in $demoFlowRestore.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $demoFlowRestore[$name], [EnvironmentVariableTarget]::Process)
+        }
     }
 }
 
@@ -330,6 +339,10 @@ if (-not (Wait-HttpHealth -Uri "http://$($wsUri.Host):$($wsUri.Port)/health")) {
 @"
 SESSION_ID=$session
 PEER_ID=$peerId
+ENDPOINT_ID=$EndpointId
+PRINCIPAL_ID=$PrincipalId
+TENANT_ID=local-tenant
+ORGANIZATION_ID=local-org
 "@ | Set-Content $sessionEnvPath -Encoding ascii
 
 $edgeEnvRestore = @{
@@ -373,6 +386,7 @@ $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     webBaseUrl = $WebBaseUrl
     controlWsUrl = $ControlWsUrl
+    runtimeBootstrapSkipped = [bool]$SkipRuntimeBootstrap
     sessionId = $session
     peerId = $peerId
     exp022Pid = $exp022Process.Id

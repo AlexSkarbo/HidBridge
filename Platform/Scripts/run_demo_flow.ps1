@@ -44,6 +44,7 @@ $ciLocalScript = Join-Path $scriptsRoot "run_ci_local.ps1"
 $fullScript = Join-Path $scriptsRoot "run_full.ps1"
 $demoSeedScript = Join-Path $scriptsRoot "run_demo_seed.ps1"
 $demoGateScript = Join-Path $scriptsRoot "run_demo_gate.ps1"
+$webrtcStackScript = Join-Path $scriptsRoot "run_webrtc_stack.ps1"
 $webrtcEdgeAgentSmokeScript = Join-Path $scriptsRoot "run_webrtc_edge_agent_smoke.ps1"
 $apiProjectPath = Join-Path $repoRoot "Platform/Platform/HidBridge.ControlPlane.Api/HidBridge.ControlPlane.Api.csproj"
 $webProjectPath = Join-Path $repoRoot "Platform/Clients/HidBridge.ControlPlane.Web/HidBridge.ControlPlane.Web.csproj"
@@ -61,17 +62,9 @@ if ($authUri.AbsolutePath -match "^/realms/([^/]+)$") {
     $realmName = $matches[1]
 }
 
-if ($IncludeWebRtcEdgeAgentSmoke -and -not $ReuseRunningServices) {
-    throw "WebRTC Edge Agent Smoke requires '-ReuseRunningServices' so demo-flow does not restart API/Web and invalidate the active WebRTC stack session. Start webrtc-stack first, then re-run demo-flow with both switches."
-}
-
-if ($IncludeWebRtcEdgeAgentSmoke -and -not $SkipCiLocal) {
-    throw "WebRTC Edge Agent Smoke requires '-SkipCiLocal' in demo-flow. CI Local can restart/replace API runtime and invalidate active WebRTC stack peer/session state."
-}
-
-if ($IncludeWebRtcEdgeAgentSmoke -and -not $SkipDemoGate) {
-    throw "WebRTC Edge Agent Smoke requires '-SkipDemoGate' in demo-flow. Default demo-gate expects an idle reusable endpoint, while WebRTC stack keeps the endpoint occupied by an active relay session."
-}
+$effectiveReuseRunningServices = $ReuseRunningServices
+$effectiveSkipCiLocal = $SkipCiLocal
+$effectiveSkipDemoGate = $SkipDemoGate
 
 function Add-DemoResult {
     param(
@@ -98,6 +91,46 @@ function Test-ApiHealth {
     catch {
         return $false
     }
+}
+
+function Test-ControlHealth {
+    param(
+        [string]$Url,
+        [int]$Attempts = 5,
+        [int]$DelayMs = 500
+    )
+
+    for ($attempt = 0; $attempt -lt [Math]::Max(1, $Attempts); $attempt++) {
+        try {
+            $response = Invoke-RestMethod -Method Get -Uri $Url -TimeoutSec 2
+            if (($response.PSObject.Properties["ok"] -and [bool]$response.ok) -or ($response -is [System.Collections.IDictionary] -and $response.Contains("ok") -and [bool]$response["ok"])) {
+                return $true
+            }
+        }
+        catch {
+        }
+
+        Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMs))
+    }
+
+    return $false
+}
+
+function Convert-ControlHealthToWebSocketUrl {
+    param([string]$ControlHealthUrl)
+
+    $controlUri = [Uri]$ControlHealthUrl
+    $scheme = if ([string]::Equals($controlUri.Scheme, "https", [StringComparison]::OrdinalIgnoreCase)) { "wss" } else { "ws" }
+    $builder = [System.UriBuilder]::new($controlUri)
+    $builder.Scheme = $scheme
+    if ($builder.Path.EndsWith("/health", [StringComparison]::OrdinalIgnoreCase)) {
+        $builder.Path = $builder.Path.Substring(0, $builder.Path.Length - "/health".Length) + "/ws/control"
+    }
+    else {
+        $builder.Path = "/ws/control"
+    }
+
+    return $builder.Uri.AbsoluteUri
 }
 
 function Stop-PortListeners {
@@ -306,8 +339,25 @@ function Start-DemoService {
     throw "$Name failed to start. See logs: $stdoutLog / $stderrLog"
 }
 
+if ($IncludeWebRtcEdgeAgentSmoke) {
+    if (-not $effectiveReuseRunningServices) {
+        if (Test-ApiHealth -BaseUrl $ApiBaseUrl) {
+            Write-Warning "IncludeWebRtcEdgeAgentSmoke enabled: forcing service reuse to avoid restarting live WebRTC relay sessions."
+            $effectiveReuseRunningServices = $true
+        }
+        else {
+            Write-Warning "IncludeWebRtcEdgeAgentSmoke enabled but API is not healthy at $($ApiBaseUrl.TrimEnd('/'))/health. Starting runtime services normally (no reuse)."
+        }
+    }
+
+    if (-not $effectiveSkipCiLocal) {
+        Write-Warning "IncludeWebRtcEdgeAgentSmoke enabled: skipping CI Local to avoid replacing the active API runtime during WebRTC relay validation."
+        $effectiveSkipCiLocal = $true
+    }
+}
+
 try {
-    if (-not $ReuseRunningServices) {
+    if (-not $effectiveReuseRunningServices) {
         Stop-PortListeners -Port $apiUri.Port -Label "API"
         Stop-PortListeners -Port $webUri.Port -Label "Web"
     }
@@ -318,9 +368,11 @@ try {
     }
 
     if (-not $SkipDoctor) {
+        $doctorRequireApi = -not $IncludeWebRtcEdgeAgentSmoke
+        $doctorStartApiProbe = -not $IncludeWebRtcEdgeAgentSmoke
         Invoke-LoggedScript -Results $results -Name "Doctor" -LogRoot $logRoot -ScriptPath $doctorScript -Parameters @{
-            StartApiProbe = $true
-            RequireApi = $true
+            StartApiProbe = $doctorStartApiProbe
+            RequireApi = $doctorRequireApi
             ApiConfiguration = $Configuration
             ApiPersistenceProvider = "Sql"
             ApiConnectionString = $ConnectionString
@@ -330,7 +382,7 @@ try {
         $skipDoctorInCi = $true
     }
 
-    if (-not $SkipCiLocal) {
+    if (-not $effectiveSkipCiLocal) {
         Invoke-LoggedScript -Results $results -Name "CI Local" -LogRoot $logRoot -ScriptPath $ciLocalScript -Parameters @{
             Configuration = $Configuration
             ConnectionString = $ConnectionString
@@ -351,7 +403,7 @@ try {
 
     if (-not $SkipServiceStartup) {
         $serviceStartupAttempted = $true
-        $apiRuntime = Start-DemoService -Name "Start API" -ProjectPath $apiProjectPath -BaseUrl $ApiBaseUrl -TargetHost $apiUri.Host -Port $apiUri.Port -Category "api-runtime" -UseHealthProbe -ReuseRunningService:$ReuseRunningServices -Environment @{
+        $apiEnvironment = @{
             ASPNETCORE_ENVIRONMENT = "Development"
             ASPNETCORE_URLS = $ApiBaseUrl
             HIDBRIDGE_PERSISTENCE_PROVIDER = "Sql"
@@ -366,6 +418,16 @@ try {
             HIDBRIDGE_AUTH_CALLER_CONTEXT_REQUIRED_PREFIXES = ""
             HIDBRIDGE_AUTH_HEADER_FALLBACK_DISABLED_PATTERNS = ""
         }
+        if ($IncludeWebRtcEdgeAgentSmoke) {
+            # Keep API from holding the UART COM port while WebRTC edge stack is active.
+            $apiEnvironment["HIDBRIDGE_UART_PASSIVE_HEALTH_MODE"] = "true"
+            $apiEnvironment["HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE"] = "true"
+            $apiEnvironment["HIDBRIDGE_UART_PORT"] = "COM255"
+            $apiEnvironment["HIDBRIDGE_TRANSPORT_PROVIDER"] = "webrtc-datachannel"
+            $apiEnvironment["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"] = "false"
+        }
+
+        $apiRuntime = Start-DemoService -Name "Start API" -ProjectPath $apiProjectPath -BaseUrl $ApiBaseUrl -TargetHost $apiUri.Host -Port $apiUri.Port -Category "api-runtime" -UseHealthProbe -ReuseRunningService:$effectiveReuseRunningServices -Environment $apiEnvironment
         $runtimeServices.Add($apiRuntime) | Out-Null
         if ($apiRuntime.Process -ne $null) {
             $runtimeProcesses.Add($apiRuntime) | Out-Null
@@ -377,12 +439,51 @@ try {
             RealmName = $realmName
         } -StopOnFailure
 
-        if (-not $SkipDemoGate) {
+        $shouldBootstrapWebRtcStack = $false
+        if ($IncludeWebRtcEdgeAgentSmoke) {
+            if (-not $effectiveReuseRunningServices) {
+                $shouldBootstrapWebRtcStack = $true
+            }
+            elseif (-not (Test-ControlHealth -Url $WebRtcControlHealthUrl -Attempts ([Math]::Max(1, $WebRtcControlHealthAttempts)) -DelayMs 500)) {
+                $shouldBootstrapWebRtcStack = $true
+            }
+        }
+
+        if ($shouldBootstrapWebRtcStack) {
+            if (-not (Test-Path $webrtcStackScript)) {
+                throw "WebRTC stack bootstrap script was not found: $webrtcStackScript"
+            }
+
+            Write-Warning "Bootstrapping WebRTC edge stack automatically for demo-flow WebRTC gate."
+            $controlWsUrl = Convert-ControlHealthToWebSocketUrl -ControlHealthUrl $WebRtcControlHealthUrl
+            Invoke-LoggedScript -Results $results -Name "WebRTC Stack Bootstrap" -LogRoot $logRoot -ScriptPath $webrtcStackScript -Parameters @{
+                ApiBaseUrl = $ApiBaseUrl
+                WebBaseUrl = $WebBaseUrl
+                ControlWsUrl = $controlWsUrl
+                SkipRuntimeBootstrap = $true
+                SkipIdentityReset = $true
+                SkipCiLocal = $true
+                StopExisting = $true
+            } -StopOnFailure
+        }
+
+        if ($IncludeWebRtcEdgeAgentSmoke -and -not (Test-ControlHealth -Url $WebRtcControlHealthUrl -Attempts ([Math]::Max(1, $WebRtcControlHealthAttempts)) -DelayMs 500)) {
+            throw "WebRTC control health endpoint is still not ready after bootstrap: $WebRtcControlHealthUrl"
+        }
+
+        if (-not $effectiveSkipDemoGate) {
             $demoGateParameters = @{
                 BaseUrl = $ApiBaseUrl
                 KeycloakBaseUrl = $keycloakBaseUrl
                 RealmName = $realmName
                 OutputJsonPath = (Join-Path $logRoot "demo-gate.result.json")
+            }
+            if ($IncludeWebRtcEdgeAgentSmoke) {
+                $demoGateParameters["TransportProvider"] = "webrtc-datachannel"
+                $demoGateParameters["ControlHealthUrl"] = $WebRtcControlHealthUrl
+                $demoGateParameters["RequestTimeoutSec"] = [Math]::Max(1, $WebRtcRequestTimeoutSec)
+                $demoGateParameters["ControlHealthAttempts"] = [Math]::Max(1, $WebRtcControlHealthAttempts)
+                $demoGateParameters["PrincipalId"] = "smoke-runner"
             }
             if ($RequireDemoGateDeviceAck) {
                 $demoGateParameters["RequireDeviceAck"] = $true
@@ -395,13 +496,18 @@ try {
         }
 
         if ($IncludeWebRtcEdgeAgentSmoke) {
-            Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Smoke" -LogRoot $logRoot -ScriptPath $webrtcEdgeAgentSmokeScript -Parameters @{
-                ApiBaseUrl = $ApiBaseUrl
-                ControlHealthUrl = $WebRtcControlHealthUrl
-                RequestTimeoutSec = [Math]::Max(1, $WebRtcRequestTimeoutSec)
-                ControlHealthAttempts = [Math]::Max(1, $WebRtcControlHealthAttempts)
-                OutputJsonPath = (Join-Path $logRoot "webrtc-edge-agent-smoke.result.json")
-            } -StopOnFailure
+            if ($effectiveSkipDemoGate) {
+                Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Smoke" -LogRoot $logRoot -ScriptPath $webrtcEdgeAgentSmokeScript -Parameters @{
+                    ApiBaseUrl = $ApiBaseUrl
+                    ControlHealthUrl = $WebRtcControlHealthUrl
+                    RequestTimeoutSec = [Math]::Max(1, $WebRtcRequestTimeoutSec)
+                    ControlHealthAttempts = [Math]::Max(1, $WebRtcControlHealthAttempts)
+                    OutputJsonPath = (Join-Path $logRoot "webrtc-edge-agent-smoke.result.json")
+                } -StopOnFailure
+            }
+            else {
+                Write-Warning "Skipping standalone WebRTC Edge Agent Smoke step because Demo Gate already executed WebRTC transport validation in this run."
+            }
         }
 
         $webEnvironment = @{
@@ -426,7 +532,7 @@ try {
             $webEnvironment["Identity__Scopes__0"] = "hidbridge-caller-context-v2"
         }
 
-        $webRuntime = Start-DemoService -Name "Start Web" -ProjectPath $webProjectPath -BaseUrl $WebBaseUrl -TargetHost $webUri.Host -Port $webUri.Port -Category "web-runtime" -ReuseRunningService:$ReuseRunningServices -Environment $webEnvironment
+        $webRuntime = Start-DemoService -Name "Start Web" -ProjectPath $webProjectPath -BaseUrl $WebBaseUrl -TargetHost $webUri.Host -Port $webUri.Port -Category "web-runtime" -ReuseRunningService:$effectiveReuseRunningServices -Environment $webEnvironment
         $runtimeServices.Add($webRuntime) | Out-Null
         if ($webRuntime.Process -ne $null) {
             $runtimeProcesses.Add($webRuntime) | Out-Null
