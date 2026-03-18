@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Net;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -221,10 +222,17 @@ public sealed class EdgeProxyWorker : BackgroundService
             }
 
             var ack = await ExecuteCommandAsync(envelope.Command, cancellationToken);
-            await SendAsync(HttpMethod.Post,
+            using var ackResponse = await SendAsync(HttpMethod.Post,
                 $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/commands/{Uri.EscapeDataString(envelope.Command.CommandId)}/ack",
                 ack,
-                cancellationToken);
+                cancellationToken,
+                allowNotFound: true);
+            if (ackResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                _logger.LogDebug(
+                    "Relay ACK target was not found for command {CommandId}; it was likely expired or already acknowledged.",
+                    envelope.Command.CommandId);
+            }
 
             _lastCommandSequence = envelope.Sequence;
         }
@@ -599,7 +607,12 @@ public sealed class EdgeProxyWorker : BackgroundService
         return [];
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string relativeUrl, object? body, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method,
+        string relativeUrl,
+        object? body,
+        CancellationToken cancellationToken,
+        bool allowNotFound = false)
     {
         var client = _httpClientFactory.CreateClient("edge-proxy");
         using var request = new HttpRequestMessage(method, relativeUrl);
@@ -625,7 +638,12 @@ public sealed class EdgeProxyWorker : BackgroundService
         {
             _accessToken = await RequestTokenAsync(cancellationToken);
             response.Dispose();
-            return await SendAsync(method, relativeUrl, body, cancellationToken);
+            return await SendAsync(method, relativeUrl, body, cancellationToken, allowNotFound);
+        }
+
+        if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return response;
         }
 
         response.EnsureSuccessStatusCode();
