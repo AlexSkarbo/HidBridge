@@ -107,6 +107,37 @@ function Invoke-SmokeJson {
     }
 }
 
+# Extracts HTTP status code from a web exception when available.
+function Get-HttpStatusCode {
+    param(
+        [System.Exception]$Exception
+    )
+
+    if ($null -eq $Exception) {
+        return $null
+    }
+
+    try {
+        $responseProperty = $Exception.PSObject.Properties["Response"]
+        $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
+        if ($null -ne $response) {
+            $statusCodeProperty = $response.PSObject.Properties["StatusCode"]
+            if ($null -ne $statusCodeProperty -and $null -ne $statusCodeProperty.Value) {
+                return [int]$statusCodeProperty.Value
+            }
+        }
+    }
+    catch {
+    }
+
+    $message = [string]$Exception.Message
+    if ($message -match "\((\d{3})\)") {
+        return [int]$matches[1]
+    }
+
+    return $null
+}
+
 # Reads one property from object/dictionary without throwing in strict mode.
 function Get-PropertyValue {
     param(
@@ -195,7 +226,8 @@ function Wait-RelayTransportReady {
             }
         }
         catch {
-            if ($_.Exception.Message -like "*404*" -or $_.Exception.Message -like "*Не найден*") {
+            $statusCode = Get-HttpStatusCode -Exception $_.Exception
+            if ($statusCode -eq 404) {
                 Write-Warning "Transport health endpoint is unavailable for session '$SessionId'. Skipping transport-health readiness check."
                 return $null
             }
@@ -286,7 +318,8 @@ try {
 }
 catch {
     $message = $_.Exception.Message
-    if ($message -like "*404*" -or $message -like "*Не найден*") {
+    $statusCode = Get-HttpStatusCode -Exception $_.Exception
+    if ($statusCode -eq 404) {
         Write-Warning "Peer online endpoint is unavailable for session '$sessionId'. Continuing without explicit online mark."
     }
     else {
@@ -309,8 +342,8 @@ if (-not $SkipControlLeaseRequest) {
         $null = Invoke-SmokeJson -Method "POST" -Uri $leaseUri -Headers $authHeaders -Body $leaseBody -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
     }
     catch {
-        $message = $_.Exception.Message
-        if ($message -like "*404*" -or $message -like "*Не найден*") {
+        $statusCode = Get-HttpStatusCode -Exception $_.Exception
+        if ($statusCode -eq 404) {
             Write-Warning "Control request endpoint is unavailable for session '$sessionId'. Continuing without explicit lease."
         }
         else {
@@ -361,8 +394,8 @@ try {
         -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
 }
 catch {
-    $message = $_.Exception.Message
-    if ($message -like "*404*" -or $message -like "*Не найден*") {
+    $statusCode = Get-HttpStatusCode -Exception $_.Exception
+    if ($statusCode -eq 404) {
         throw "WebRTC edge-agent smoke command returned 404 for session '$sessionId'. Re-run webrtc-stack and retry."
     }
 
