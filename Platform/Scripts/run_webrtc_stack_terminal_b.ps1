@@ -32,6 +32,35 @@ $ErrorActionPreference = "Stop"
 $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $platformRoot = Split-Path -Parent $scriptsRoot
 
+# Reads HTTP status code from an exception response when available.
+function Get-HttpStatusCode {
+    param([System.Exception]$Exception)
+
+    if ($null -eq $Exception) {
+        return $null
+    }
+
+    try {
+        $responseProperty = $Exception.PSObject.Properties["Response"]
+        $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
+        if ($null -ne $response) {
+            $statusCodeProperty = $response.PSObject.Properties["StatusCode"]
+            if ($null -ne $statusCodeProperty -and $null -ne $statusCodeProperty.Value) {
+                return [int]$statusCodeProperty.Value
+            }
+        }
+    }
+    catch {
+    }
+
+    $message = [string]$Exception.Message
+    if ($message -match "\((\d{3})\)") {
+        return [int]$matches[1]
+    }
+
+    return $null
+}
+
 function Wait-ControlHealth {
     param([string]$Url, [int]$Attempts, [int]$DelayMs)
 
@@ -93,8 +122,8 @@ function Test-SessionExists {
         return $true
     }
     catch {
-        $message = $_.Exception.Message
-        if ($message -like "*404*" -or $message -like "*Не найден*") {
+        $statusCode = Get-HttpStatusCode -Exception $_.Exception
+        if ($statusCode -eq 404) {
             return $false
         }
 
@@ -250,8 +279,8 @@ function Request-ControlLease {
             return
         }
         catch {
-            $message = $_.Exception.Message
-            $isNotFound = $message -like "*404*" -or $message -like "*Не найден*"
+            $statusCode = Get-HttpStatusCode -Exception $_.Exception
+            $isNotFound = $statusCode -eq 404
             if ($isNotFound -and $attempt -lt $maxAttempts) {
                 Start-Sleep -Milliseconds 250
                 continue
@@ -368,8 +397,8 @@ PEER_ID=$peerId
         }
     }
     catch {
-        $message = $_.Exception.Message
-        if ($message -like "*404*" -or $message -like "*Не найден*") {
+        $statusCode = Get-HttpStatusCode -Exception $_.Exception
+        if ($statusCode -eq 404) {
             Write-Warning "Transport health endpoint is unavailable on this API build. Continuing without pre-check."
         }
         else {
@@ -391,8 +420,8 @@ if (-not $SkipControlLeaseRequest) {
             -LeaseSeconds $LeaseSeconds
     }
     catch {
-        $message = $_.Exception.Message
-        if ($message -like "*404*" -or $message -like "*Не найден*") {
+        $statusCode = Get-HttpStatusCode -Exception $_.Exception
+        if ($statusCode -eq 404) {
             if ($AutoCreateSessionIfMissing) {
                 $replacementSessionId = New-ReplacementSessionId -EndpointId $EndpointId
                 Write-Warning "Control request returned 404 for session '$sessionId'. Creating replacement session '$replacementSessionId' and retrying once."
@@ -483,8 +512,8 @@ try {
     $commandResult = Invoke-RestMethod -Method Post -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/commands" -Headers $authHeaders -TimeoutSec $RequestTimeoutSec -ContentType "application/json" -Body ($commandBody | ConvertTo-Json -Depth 20)
 }
 catch {
-    $message = $_.Exception.Message
-    if ($message -like "*404*" -or $message -like "*Не найден*") {
+    $statusCode = Get-HttpStatusCode -Exception $_.Exception
+    if ($statusCode -eq 404) {
         throw "Command dispatch returned 404 for session '$sessionId'. Session is likely stale or API routes differ from expected build."
     }
 
