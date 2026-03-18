@@ -1,7 +1,6 @@
 using HidBridge.Abstractions;
 using HidBridge.Contracts;
 using HidBridge.Transport.Uart;
-using System.Text.Json;
 
 namespace HidBridge.Connectors.HidBridgeUart;
 
@@ -284,73 +283,11 @@ public sealed class HidBridgeUartConnector : IConnector
     private async Task ExecuteCoreAsync(CommandRequestBody command, CancellationToken cancellationToken)
     {
         await EnsureDerivedKeyIfConfiguredAsync(cancellationToken);
-        var action = NormalizeAction(command.Action);
-        switch (action)
-        {
-            case "mouse.move":
-                await Client.SendMouseMoveAsync(
-                    GetInt(command.Args, "dx"),
-                    GetInt(command.Args, "dy"),
-                    GetInt(command.Args, "wheel", 0),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "mouse.wheel":
-                await Client.SendMouseMoveAsync(
-                    0,
-                    0,
-                    GetInt(command.Args, "delta"),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "mouse.button":
-                await Client.SetMouseButtonAsync(
-                    GetString(command.Args, "button"),
-                    GetBool(command.Args, "down"),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "mouse.buttons":
-                await Client.SetMouseButtonsMaskAsync(
-                    GetByte(command.Args, "mask"),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "keyboard.text":
-                await Client.SendKeyboardTextAsync(
-                    GetString(command.Args, "text"),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "keyboard.press":
-                await Client.SendKeyboardPressAsync(
-                    GetByte(command.Args, "usage"),
-                    GetByte(command.Args, "modifiers", 0),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "keyboard.shortcut":
-                await Client.SendKeyboardShortcutAsync(
-                    GetString(command.Args, "shortcut"),
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            case "keyboard.reset":
-                await Client.SendKeyboardResetAsync(
-                    cancellationToken,
-                    GetByteOrNull(command.Args, "itfSel"));
-                return;
-
-            default:
-                throw new InvalidOperationException($"Unsupported HID action '{command.Action}'.");
-        }
+        await HidBridgeUartCommandDispatcher.ExecuteAsync(
+            Client,
+            command.Action,
+            command.Args,
+            cancellationToken);
     }
 
     private async Task EnsureDerivedKeyIfConfiguredAsync(CancellationToken cancellationToken)
@@ -394,74 +331,4 @@ public sealed class HidBridgeUartConnector : IConnector
         }
     }
 
-    private static string NormalizeAction(string action)
-    {
-        return action.Trim().Replace('_', '.').ToLowerInvariant();
-    }
-
-    private static string GetString(IReadOnlyDictionary<string, object?> args, string name)
-    {
-        if (!args.TryGetValue(name, out var value) || value is null)
-        {
-            throw new InvalidOperationException($"Missing args.{name}");
-        }
-
-        return value switch
-        {
-            string text => text,
-            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString() ?? string.Empty,
-            _ => value.ToString() ?? string.Empty,
-        };
-    }
-
-    private static bool GetBool(IReadOnlyDictionary<string, object?> args, string name, bool defaultValue = false)
-    {
-        if (!args.TryGetValue(name, out var value) || value is null)
-        {
-            return defaultValue;
-        }
-
-        return value switch
-        {
-            bool flag => flag,
-            JsonElement { ValueKind: JsonValueKind.True } => true,
-            JsonElement { ValueKind: JsonValueKind.False } => false,
-            JsonElement json when json.ValueKind == JsonValueKind.Number && json.TryGetInt32(out var number) => number != 0,
-            _ when bool.TryParse(value.ToString(), out var parsed) => parsed,
-            _ => defaultValue,
-        };
-    }
-
-    private static int GetInt(IReadOnlyDictionary<string, object?> args, string name, int defaultValue = 0)
-    {
-        if (!args.TryGetValue(name, out var value) || value is null)
-        {
-            return defaultValue;
-        }
-
-        return value switch
-        {
-            int number => number,
-            long number => checked((int)number),
-            byte number => number,
-            JsonElement json when json.ValueKind == JsonValueKind.Number && json.TryGetInt32(out var number) => number,
-            _ when int.TryParse(value.ToString(), out var parsed) => parsed,
-            _ => defaultValue,
-        };
-    }
-
-    private static byte GetByte(IReadOnlyDictionary<string, object?> args, string name, byte defaultValue = 0)
-    {
-        return (byte)Math.Clamp(GetInt(args, name, defaultValue), byte.MinValue, byte.MaxValue);
-    }
-
-    private static byte? GetByteOrNull(IReadOnlyDictionary<string, object?> args, string name)
-    {
-        if (!args.ContainsKey(name))
-        {
-            return null;
-        }
-
-        return GetByte(args, name);
-    }
 }

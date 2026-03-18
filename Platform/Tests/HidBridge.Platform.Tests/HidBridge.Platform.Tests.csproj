@@ -17,6 +17,7 @@
     <ProjectReference Include="..\..\Shared\HidBridge.Contracts\HidBridge.Contracts.csproj" />
     <ProjectReference Include="..\..\Shared\HidBridge.Abstractions\HidBridge.Abstractions.csproj" />
     <ProjectReference Include="..\..\Shared\HidBridge.Hid\HidBridge.Hid.csproj" />
+    <ProjectReference Include="..\..\Shared\HidBridge.Transport.Uart\HidBridge.Transport.Uart.csproj" />
     <ProjectReference Include="..\..\Clients\HidBridge.ControlPlane.Web\HidBridge.ControlPlane.Web.csproj" />
     <ProjectReference Include="..\..\Core\HidBridge.Application\HidBridge.Application.csproj" />
     <ProjectReference Include="..\..\Platform\HidBridge.ConnectorHost\HidBridge.ConnectorHost.csproj" />
