@@ -7,6 +7,9 @@ param(
     [int]$RequestTimeoutSec = 15,
     [int]$ControlHealthAttempts = 20,
     [int]$ControlHealthDelayMs = 500,
+    [switch]$SkipTransportHealthCheck,
+    [int]$TransportHealthAttempts = 20,
+    [int]$TransportHealthDelayMs = 500,
     [string]$TokenClientId = "controlplane-smoke",
     [string]$TokenUsername = "operator.smoke.admin",
     [string]$TokenPassword = "ChangeMe123!",
@@ -28,6 +31,7 @@ $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $platformRoot = Split-Path -Parent $scriptsRoot
 $sessionEnvPath = Join-Path $platformRoot ".logs/webrtc-peer-adapter.session.env"
 
+# Waits until control health endpoint returns ok=true.
 function Wait-ControlHealth {
     param(
         [string]$Url,
@@ -49,6 +53,169 @@ function Wait-ControlHealth {
     }
 
     return $false
+}
+
+# Sends one JSON request and keeps response-body context on failures.
+function Invoke-SmokeJson {
+    param(
+        [string]$Method,
+        [string]$Uri,
+        [hashtable]$Headers,
+        [object]$Body = $null,
+        [int]$TimeoutSec = 15
+    )
+
+    try {
+        if ($null -eq $Body) {
+            return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $Headers -TimeoutSec $TimeoutSec
+        }
+
+        return Invoke-RestMethod `
+            -Method $Method `
+            -Uri $Uri `
+            -Headers $Headers `
+            -TimeoutSec $TimeoutSec `
+            -ContentType "application/json" `
+            -Body ($Body | ConvertTo-Json -Depth 20)
+    }
+    catch {
+        $responseBody = $null
+        try {
+            $response = $_.Exception.Response
+            if ($null -ne $response) {
+                $stream = $response.GetResponseStream()
+                if ($null -ne $stream) {
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    try {
+                        $responseBody = $reader.ReadToEnd()
+                    }
+                    finally {
+                        $reader.Dispose()
+                        $stream.Dispose()
+                    }
+                }
+            }
+        }
+        catch {
+        }
+
+        if ([string]::IsNullOrWhiteSpace($responseBody)) {
+            throw "HTTP $Method $Uri failed: $($_.Exception.Message)"
+        }
+
+        throw "HTTP $Method $Uri failed: $($_.Exception.Message)`n$responseBody"
+    }
+}
+
+# Reads one property from object/dictionary without throwing in strict mode.
+function Get-PropertyValue {
+    param(
+        [object]$InputObject,
+        [string]$Name
+    )
+
+    if ($null -eq $InputObject -or [string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary] -and $InputObject.Contains($Name)) {
+        return $InputObject[$Name]
+    }
+
+    foreach ($property in $InputObject.PSObject.Properties) {
+        if ([string]::Equals($property.Name, $Name, [StringComparison]::OrdinalIgnoreCase)) {
+            return $property.Value
+        }
+    }
+
+    return $null
+}
+
+# Parses a value into int when possible.
+function ConvertTo-NullableInt {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $parsed = 0
+    if ([int]::TryParse([string]$Value, [ref]$parsed)) {
+        return $parsed
+    }
+
+    return $null
+}
+
+# Polls transport health until relay peer is connected and online.
+function Wait-RelayTransportReady {
+    param(
+        [string]$ApiBaseUrl,
+        [string]$SessionId,
+        [hashtable]$Headers,
+        [int]$Attempts,
+        [int]$DelayMs,
+        [int]$TimeoutSec
+    )
+
+    $healthUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/transport/health?provider=webrtc-datachannel"
+    $lastSnapshot = $null
+
+    for ($i = 0; $i -lt $Attempts; $i++) {
+        try {
+            $health = Invoke-SmokeJson -Method "GET" -Uri $healthUri -Headers $Headers -TimeoutSec $TimeoutSec
+            $connected = [bool](Get-PropertyValue -InputObject $health -Name "connected")
+            $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $health -Name "onlinePeerCount")
+            if ($null -eq $onlinePeerCount) {
+                $metrics = Get-PropertyValue -InputObject $health -Name "metrics"
+                $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $metrics -Name "onlinePeerCount")
+            }
+
+            $peerState = [string](Get-PropertyValue -InputObject $health -Name "lastPeerState")
+            if ([string]::IsNullOrWhiteSpace($peerState)) {
+                $metrics = Get-PropertyValue -InputObject $health -Name "metrics"
+                $peerState = [string](Get-PropertyValue -InputObject $metrics -Name "lastPeerState")
+            }
+
+            $isHealthyState = [string]::IsNullOrWhiteSpace($peerState) -or
+                [string]::Equals($peerState, "Connected", [StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($peerState, "Degraded", [StringComparison]::OrdinalIgnoreCase)
+
+            $lastSnapshot = [pscustomobject]@{
+                connected = $connected
+                onlinePeerCount = $onlinePeerCount
+                lastPeerState = if ([string]::IsNullOrWhiteSpace($peerState)) { $null } else { $peerState }
+                lastPeerFailureReason = [string](Get-PropertyValue -InputObject $health -Name "lastPeerFailureReason")
+                lastPeerSeenAtUtc = [string](Get-PropertyValue -InputObject $health -Name "lastPeerSeenAtUtc")
+                lastRelayAckAtUtc = [string](Get-PropertyValue -InputObject $health -Name "lastRelayAckAtUtc")
+            }
+
+            if ($connected -and ($onlinePeerCount -ge 1) -and $isHealthyState) {
+                return $lastSnapshot
+            }
+        }
+        catch {
+            if ($_.Exception.Message -like "*404*" -or $_.Exception.Message -like "*Не найден*") {
+                Write-Warning "Transport health endpoint is unavailable for session '$SessionId'. Skipping transport-health readiness check."
+                return $null
+            }
+        }
+
+        Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMs))
+    }
+
+    if ($null -eq $lastSnapshot) {
+        throw "WebRTC transport health did not become ready within $Attempts attempts."
+    }
+
+    $onlinePeerCountText = if ($null -eq $lastSnapshot.onlinePeerCount) { "null" } else { [string]$lastSnapshot.onlinePeerCount }
+    $lastPeerStateText = if ([string]::IsNullOrWhiteSpace([string]$lastSnapshot.lastPeerState)) { "null" } else { [string]$lastSnapshot.lastPeerState }
+    $lastPeerFailureReasonText = if ([string]::IsNullOrWhiteSpace([string]$lastSnapshot.lastPeerFailureReason)) { "null" } else { [string]$lastSnapshot.lastPeerFailureReason }
+    throw ("WebRTC transport health is not ready (connected={0}, onlinePeerCount={1}, lastPeerState={2}, lastPeerFailureReason={3})." -f `
+        $lastSnapshot.connected, `
+        $onlinePeerCountText, `
+        $lastPeerStateText, `
+        $lastPeerFailureReasonText)
 }
 
 if (-not (Test-Path $sessionEnvPath)) {
@@ -115,7 +282,7 @@ if (-not [string]::IsNullOrWhiteSpace($sessionEndpointId)) {
 }
 $onlineUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/transport/webrtc/peers/$([Uri]::EscapeDataString($peerId))/online"
 try {
-    $null = Invoke-RestMethod -Method Post -Uri $onlineUri -Headers $authHeaders -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) -ContentType "application/json" -Body ($onlineBody | ConvertTo-Json -Depth 10)
+    $null = Invoke-SmokeJson -Method "POST" -Uri $onlineUri -Headers $authHeaders -Body $onlineBody -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
 }
 catch {
     $message = $_.Exception.Message
@@ -139,7 +306,7 @@ if (-not $SkipControlLeaseRequest) {
 
     $leaseUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/control/request"
     try {
-        $null = Invoke-RestMethod -Method Post -Uri $leaseUri -Headers $authHeaders -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) -ContentType "application/json" -Body ($leaseBody | ConvertTo-Json -Depth 10)
+        $null = Invoke-SmokeJson -Method "POST" -Uri $leaseUri -Headers $authHeaders -Body $leaseBody -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
     }
     catch {
         $message = $_.Exception.Message
@@ -150,6 +317,19 @@ if (-not $SkipControlLeaseRequest) {
             throw
         }
     }
+}
+
+if (-not $SkipTransportHealthCheck) {
+    $transportReadiness = Wait-RelayTransportReady `
+        -ApiBaseUrl $ApiBaseUrl `
+        -SessionId $sessionId `
+        -Headers $authHeaders `
+        -Attempts ([Math]::Max(1, $TransportHealthAttempts)) `
+        -DelayMs ([Math]::Max(100, $TransportHealthDelayMs)) `
+        -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+}
+else {
+    $transportReadiness = $null
 }
 
 $commandId = "cmd-webrtc-smoke-" + [DateTimeOffset]::UtcNow.ToString("HHmmss")
@@ -173,7 +353,12 @@ $commandBody = @{
 }
 
 try {
-    $commandResult = Invoke-RestMethod -Method Post -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/commands" -Headers $authHeaders -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) -ContentType "application/json" -Body ($commandBody | ConvertTo-Json -Depth 20)
+    $commandResult = Invoke-SmokeJson `
+        -Method "POST" `
+        -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/commands" `
+        -Headers $authHeaders `
+        -Body $commandBody `
+        -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
 }
 catch {
     $message = $_.Exception.Message
@@ -195,6 +380,7 @@ $summary = [pscustomobject]@{
     commandAction = $CommandAction
     commandStatus = $status
     commandResponse = $commandResult
+    transportReadiness = $transportReadiness
 }
 
 if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {

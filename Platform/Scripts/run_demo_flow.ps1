@@ -20,7 +20,10 @@ param(
     [switch]$IncludeWebRtcEdgeAgentSmoke,
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [int]$WebRtcRequestTimeoutSec = 15,
-    [int]$WebRtcControlHealthAttempts = 20
+    [int]$WebRtcControlHealthAttempts = 20,
+    [switch]$SkipTransportHealthCheck,
+    [int]$TransportHealthAttempts = -1,
+    [int]$TransportHealthDelayMs = -1
 )
 
 Set-StrictMode -Version Latest
@@ -484,6 +487,15 @@ try {
                 $demoGateParameters["RequestTimeoutSec"] = [Math]::Max(1, $WebRtcRequestTimeoutSec)
                 $demoGateParameters["ControlHealthAttempts"] = [Math]::Max(1, $WebRtcControlHealthAttempts)
                 $demoGateParameters["PrincipalId"] = "smoke-runner"
+                if ($SkipTransportHealthCheck) {
+                    $demoGateParameters["SkipTransportHealthCheck"] = $true
+                }
+                if ($TransportHealthAttempts -gt 0) {
+                    $demoGateParameters["TransportHealthAttempts"] = [Math]::Max(1, $TransportHealthAttempts)
+                }
+                if ($TransportHealthDelayMs -gt 0) {
+                    $demoGateParameters["TransportHealthDelayMs"] = [Math]::Max(100, $TransportHealthDelayMs)
+                }
             }
             if ($RequireDemoGateDeviceAck) {
                 $demoGateParameters["RequireDeviceAck"] = $true
@@ -502,6 +514,9 @@ try {
                     ControlHealthUrl = $WebRtcControlHealthUrl
                     RequestTimeoutSec = [Math]::Max(1, $WebRtcRequestTimeoutSec)
                     ControlHealthAttempts = [Math]::Max(1, $WebRtcControlHealthAttempts)
+                    SkipTransportHealthCheck = $SkipTransportHealthCheck
+                    TransportHealthAttempts = if ($TransportHealthAttempts -gt 0) { [Math]::Max(1, $TransportHealthAttempts) } else { 20 }
+                    TransportHealthDelayMs = if ($TransportHealthDelayMs -gt 0) { [Math]::Max(100, $TransportHealthDelayMs) } else { 500 }
                     OutputJsonPath = (Join-Path $logRoot "webrtc-edge-agent-smoke.result.json")
                 } -StopOnFailure
             }

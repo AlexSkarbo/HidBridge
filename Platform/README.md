@@ -366,8 +366,11 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - stack bootstrap now waits until relay peer is reported online in API before returning summary (default timeout: `30s`, override with `-PeerReadyTimeoutSec`).
 - one-command smoke for the running stack (expects `Applied`):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-smoke -ForwardArgs @('-ControlHealthUrl','http://127.0.0.1:28092/health','-OutputJsonPath','Platform/.logs/webrtc-edge-agent-smoke.result.json')`
+  - smoke now waits for WebRTC transport readiness by typed `/transport/health` fields before dispatching command; disable this check only for compatibility troubleshooting via `-SkipTransportHealthCheck`.
+  - readiness polling knobs: `-TransportHealthAttempts`, `-TransportHealthDelayMs`.
 - include the WebRTC smoke as part of `demo-flow`:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcControlHealthUrl "http://127.0.0.1:28092/health"`
+  - optional relay-readiness tuning for `demo-flow`/`demo-gate`/`webrtc-edge-agent-smoke`: `-TransportHealthAttempts`, `-TransportHealthDelayMs`, `-SkipTransportHealthCheck`.
 - the stack now launches `Platform/Edge/HidBridge.EdgeProxy.Agent` (dotnet worker) instead of the legacy PowerShell adapter runtime.
 - manual direct run of service-based edge proxy agent:
   - `dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj`
