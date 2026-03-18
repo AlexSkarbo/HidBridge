@@ -700,6 +700,8 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `doctor -StartApiProbe -RequireApi`
   - `run_checks.ps1 -Provider Sql`
   - `run_api_bearer_smoke.ps1`
+  - optional WebRTC edge-agent acceptance lane:
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -IncludeWebRtcEdgeAgentAcceptance -WebRtcCommandExecutor uart`
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`
 - `Platform/run_export_artifacts.ps1` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
 - additional unified launcher examples:
@@ -719,6 +721,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run_full.ps1
 What it does:
 - realm sync with backup
 - local CI (`doctor`, `checks`, `bearer smoke`)
+- optional WebRTC edge-agent acceptance (`-IncludeWebRtcEdgeAgentAcceptance`)
 - artifact export on failure
 
 Recommended operator/dev workflow:
