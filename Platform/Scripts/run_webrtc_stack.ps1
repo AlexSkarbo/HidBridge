@@ -1,6 +1,8 @@
 param(
     [string]$ApiBaseUrl = "http://127.0.0.1:18093",
     [string]$WebBaseUrl = "http://127.0.0.1:18110",
+    [ValidateSet("uart", "controlws")]
+    [string]$CommandExecutor = "uart",
     [string]$ControlWsUrl = "ws://127.0.0.1:28092/ws/control",
     [string]$UartPort = "COM6",
     [int]$UartBaud = 3000000,
@@ -29,7 +31,7 @@ $repoRoot = Split-Path -Parent $platformRoot
 
 $logRoot = New-OperationalLogRoot -PlatformRoot $platformRoot -Category "webrtc-stack"
 $session = "room-webrtc-peer-" + [DateTimeOffset]::UtcNow.ToString("yyyyMMddHHmmss")
-$peerId = "peer-local-exp022"
+$peerId = if ([string]::Equals($CommandExecutor, "uart", [StringComparison]::OrdinalIgnoreCase)) { "peer-local-uart-edge" } else { "peer-local-exp022" }
 $sessionEnvPath = Join-Path $platformRoot ".logs/webrtc-peer-adapter.session.env"
 $stackSummaryPath = Join-Path $logRoot "webrtc-stack.summary.json"
 $demoFlowScript = Join-Path $scriptsRoot "run_demo_flow.ps1"
@@ -176,9 +178,9 @@ function Wait-RelayPeerOnline {
         [int]$TimeoutSec = 30,
         [int]$DelayMs = 500,
         [System.Diagnostics.Process]$AdapterProcess,
-        [System.Diagnostics.Process]$Exp022Process,
+        [System.Diagnostics.Process]$Exp022Process = $null,
         [string]$AdapterStdErrPath,
-        [string]$Exp022StdErrPath
+        [string]$Exp022StdErrPath = ""
     )
 
     $deadlineUtc = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Max(5, $TimeoutSec))
@@ -190,7 +192,7 @@ function Wait-RelayPeerOnline {
             throw "Edge proxy agent exited before relay peer became online.`nAdapter stderr tail:`n$adapterTail"
         }
 
-        if (-not (Test-ProcessAlive -Process $Exp022Process)) {
+        if ($null -ne $Exp022Process -and -not (Test-ProcessAlive -Process $Exp022Process)) {
             $expTail = Get-LogTail -Path $Exp022StdErrPath
             throw "exp-022 exited before relay peer became online.`nexp-022 stderr tail:`n$expTail"
         }
@@ -395,8 +397,14 @@ $null = Invoke-RestMethod -Method Post -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/
     transportProvider = "webrtc-datachannel"
 } | ConvertTo-Json -Depth 10)
 
-$wsUri = [Uri]$ControlWsUrl
-$wsBind = if ($wsUri.Host -eq "localhost") { "127.0.0.1" } else { $wsUri.Host }
+$wsUri = $null
+$wsBind = ""
+$controlHealthUrlForSession = ""
+if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    $wsUri = [Uri]$ControlWsUrl
+    $wsBind = if ($wsUri.Host -eq "localhost") { "127.0.0.1" } else { $wsUri.Host }
+    $controlHealthUrlForSession = "http://$($wsUri.Host):$($wsUri.Port)/health"
+}
 
 New-Item -ItemType File -Force -Path $exp022Stdout | Out-Null
 New-Item -ItemType File -Force -Path $exp022Stderr | Out-Null
@@ -415,22 +423,25 @@ if ($null -eq $dotnet) {
     throw "dotnet.exe not found in PATH."
 }
 
-$exp022Args = @(
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", $exp022Script,
-    "-Mode", "dc-hid-poc",
-    "-UartPort", $UartPort,
-    "-UartBaud", [string]$UartBaud,
-    "-UartHmacKey", $UartHmacKey,
-    "-ControlWsBind", $wsBind,
-    "-ControlWsPort", [string]$wsUri.Port,
-    "-DurationSec", [string]$Exp022DurationSec
-)
-$exp022Process = Start-Process -FilePath $pwsh.Source -ArgumentList $exp022Args -WorkingDirectory $repoRoot -PassThru -RedirectStandardOutput $exp022Stdout -RedirectStandardError $exp022Stderr
+$exp022Process = $null
+if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    $exp022Args = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $exp022Script,
+        "-Mode", "dc-hid-poc",
+        "-UartPort", $UartPort,
+        "-UartBaud", [string]$UartBaud,
+        "-UartHmacKey", $UartHmacKey,
+        "-ControlWsBind", $wsBind,
+        "-ControlWsPort", [string]$wsUri.Port,
+        "-DurationSec", [string]$Exp022DurationSec
+    )
+    $exp022Process = Start-Process -FilePath $pwsh.Source -ArgumentList $exp022Args -WorkingDirectory $repoRoot -PassThru -RedirectStandardOutput $exp022Stdout -RedirectStandardError $exp022Stderr
 
-if (-not (Wait-HttpHealth -Uri "http://$($wsUri.Host):$($wsUri.Port)/health")) {
-    throw "exp-022 control health probe failed at http://$($wsUri.Host):$($wsUri.Port)/health."
+    if (-not (Wait-HttpHealth -Uri "http://$($wsUri.Host):$($wsUri.Port)/health")) {
+        throw "exp-022 control health probe failed at http://$($wsUri.Host):$($wsUri.Port)/health."
+    }
 }
 
 @"
@@ -440,6 +451,8 @@ ENDPOINT_ID=$EndpointId
 PRINCIPAL_ID=$PrincipalId
 TENANT_ID=local-tenant
 ORGANIZATION_ID=local-org
+COMMAND_EXECUTOR=$CommandExecutor
+CONTROL_HEALTH_URL=$controlHealthUrlForSession
 "@ | Set-Content $sessionEnvPath -Encoding ascii
 
 $edgeEnvRestore = @{
@@ -453,6 +466,13 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENSCOPE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENSCOPE", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_ACCESSTOKEN = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ACCESSTOKEN", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_UARTPORT = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_UARTBAUD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTBAUD", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_UARTHMACKEY = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTHMACKEY", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
 }
 
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_BASEURL", $ApiBaseUrl, [EnvironmentVariableTarget]::Process)
@@ -464,6 +484,13 @@ $edgeEnvRestore = @{
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", $TokenUsername, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", $TokenPassword, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ACCESSTOKEN", $accessToken, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", $CommandExecutor, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", $UartPort, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTBAUD", [string]$UartBaud, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTHMACKEY", $UartHmacKey, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE", "true", [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", "255", [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", "254", [EnvironmentVariableTarget]::Process)
 if (-not [string]::IsNullOrWhiteSpace($TokenScope)) {
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENSCOPE", $TokenScope, [EnvironmentVariableTarget]::Process)
 }
@@ -493,20 +520,25 @@ $peerReady = Wait-RelayPeerOnline `
 
 if (-not $peerReady) {
     $adapterTail = Get-LogTail -Path $adapterStderr
-    $expTail = Get-LogTail -Path $exp022Stderr
-    throw "WebRTC relay peer '$peerId' did not become online within $PeerReadyTimeoutSec seconds.`nAdapter stderr tail:`n$adapterTail`n`nexp-022 stderr tail:`n$expTail"
+    if ($null -ne $exp022Process) {
+        $expTail = Get-LogTail -Path $exp022Stderr
+        throw "WebRTC relay peer '$peerId' did not become online within $PeerReadyTimeoutSec seconds.`nAdapter stderr tail:`n$adapterTail`n`nexp-022 stderr tail:`n$expTail"
+    }
+
+    throw "WebRTC relay peer '$peerId' did not become online within $PeerReadyTimeoutSec seconds.`nAdapter stderr tail:`n$adapterTail"
 }
 
 $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     webBaseUrl = $WebBaseUrl
+    commandExecutor = $CommandExecutor
     controlWsUrl = $ControlWsUrl
     runtimeBootstrapSkipped = [bool]$SkipRuntimeBootstrap
     sessionId = $session
     peerId = $peerId
     peerReady = $peerReady
     peerReadyTimeoutSec = $PeerReadyTimeoutSec
-    exp022Pid = $exp022Process.Id
+    exp022Pid = if ($null -ne $exp022Process) { $exp022Process.Id } else { $null }
     adapterPid = $adapterProcess.Id
     sessionEnvPath = $sessionEnvPath
     exp022Stdout = $exp022Stdout
@@ -520,20 +552,29 @@ Write-Host ""
 Write-Host "=== WebRTC Stack Summary ==="
 Write-Host "API:            $ApiBaseUrl"
 Write-Host "Web:            $WebBaseUrl"
-Write-Host "Control WS:     $ControlWsUrl"
+Write-Host "Executor:       $CommandExecutor"
+if ($null -ne $exp022Process) {
+    Write-Host "Control WS:     $ControlWsUrl"
+}
 Write-Host "Session:        $session"
 Write-Host "Peer:           $peerId"
 Write-Host "Peer ready:     $peerReady"
-Write-Host "exp-022 PID:    $($exp022Process.Id)"
+if ($null -ne $exp022Process) {
+    Write-Host "exp-022 PID:    $($exp022Process.Id)"
+}
 Write-Host "Adapter PID:    $($adapterProcess.Id)"
 Write-Host "Session env:    $sessionEnvPath"
 Write-Host "Summary JSON:   $stackSummaryPath"
-Write-Host "exp-022 stdout: $exp022Stdout"
-Write-Host "exp-022 stderr: $exp022Stderr"
+if ($null -ne $exp022Process) {
+    Write-Host "exp-022 stdout: $exp022Stdout"
+    Write-Host "exp-022 stderr: $exp022Stderr"
+}
 Write-Host "adapter stdout: $adapterStdout"
 Write-Host "adapter stderr: $adapterStderr"
 Write-Host ""
 Write-Host "Stop commands:"
 Write-Host "- Stop-Process -Id $($adapterProcess.Id) -Force"
-Write-Host "- Stop-Process -Id $($exp022Process.Id) -Force"
+if ($null -ne $exp022Process) {
+    Write-Host "- Stop-Process -Id $($exp022Process.Id) -Force"
+}
 Write-Host "- Stop runtime via demo-flow output (API/Web PIDs)."

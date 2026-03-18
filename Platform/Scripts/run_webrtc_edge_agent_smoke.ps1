@@ -7,6 +7,7 @@ param(
     [int]$RequestTimeoutSec = 15,
     [int]$ControlHealthAttempts = 20,
     [int]$ControlHealthDelayMs = 500,
+    [switch]$SkipControlHealthCheck,
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = 20,
     [int]$TransportHealthDelayMs = 500,
@@ -254,10 +255,6 @@ if (-not (Test-Path $sessionEnvPath)) {
     throw "Session env file was not found: $sessionEnvPath. Start webrtc-stack first."
 }
 
-if (-not (Wait-ControlHealth -Url $ControlHealthUrl -Attempts ([Math]::Max(1, $ControlHealthAttempts)) -DelayMs ([Math]::Max(100, $ControlHealthDelayMs)))) {
-    throw "Control WS health endpoint is not ready: $ControlHealthUrl"
-}
-
 $kv = @{}
 Get-Content $sessionEnvPath | ForEach-Object {
     if ($_ -match "=") {
@@ -268,12 +265,30 @@ Get-Content $sessionEnvPath | ForEach-Object {
 
 $sessionId = [string]$kv["SESSION_ID"]
 $peerId = [string]$kv["PEER_ID"]
+$sessionCommandExecutor = [string]$kv["COMMAND_EXECUTOR"]
+$sessionControlHealthUrl = [string]$kv["CONTROL_HEALTH_URL"]
 $sessionEndpointId = [string]$kv["ENDPOINT_ID"]
 $sessionPrincipalId = [string]$kv["PRINCIPAL_ID"]
 $sessionTenantId = [string]$kv["TENANT_ID"]
 $sessionOrganizationId = [string]$kv["ORGANIZATION_ID"]
 if ([string]::IsNullOrWhiteSpace($sessionId) -or [string]::IsNullOrWhiteSpace($peerId)) {
     throw "SESSION_ID/PEER_ID not found in $sessionEnvPath"
+}
+
+if (($null -eq $PSBoundParameters["ControlHealthUrl"] -or [string]::IsNullOrWhiteSpace($PSBoundParameters["ControlHealthUrl"])) `
+    -and -not [string]::IsNullOrWhiteSpace($sessionControlHealthUrl)) {
+    $ControlHealthUrl = $sessionControlHealthUrl
+}
+
+$isUartExecutor = [string]::Equals($sessionCommandExecutor, "uart", [StringComparison]::OrdinalIgnoreCase)
+$effectiveSkipControlHealthCheck = $SkipControlHealthCheck -or $isUartExecutor
+if (-not $effectiveSkipControlHealthCheck) {
+    if (-not (Wait-ControlHealth -Url $ControlHealthUrl -Attempts ([Math]::Max(1, $ControlHealthAttempts)) -DelayMs ([Math]::Max(100, $ControlHealthDelayMs)))) {
+        throw "Control WS health endpoint is not ready: $ControlHealthUrl"
+    }
+}
+elseif ($isUartExecutor) {
+    Write-Warning "Session executor is UART; skipping control-health precheck."
 }
 
 $effectivePrincipalId = if (-not [string]::IsNullOrWhiteSpace($sessionPrincipalId)) { $sessionPrincipalId } else { $PrincipalId }
@@ -406,6 +421,7 @@ $status = [string]$commandResult.status
 $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     controlHealthUrl = $ControlHealthUrl
+    commandExecutor = if ([string]::IsNullOrWhiteSpace($sessionCommandExecutor)) { "unknown" } else { $sessionCommandExecutor }
     sessionId = $sessionId
     peerId = $peerId
     principalId = $effectivePrincipalId
@@ -428,6 +444,9 @@ if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
 
 Write-Host ""
 Write-Host "=== WebRTC Edge Agent Smoke ==="
+if (-not [string]::IsNullOrWhiteSpace($sessionCommandExecutor)) {
+    Write-Host "Executor: $sessionCommandExecutor"
+}
 Write-Host "Session:  $sessionId"
 Write-Host "Peer:     $peerId"
 Write-Host "Command:  $commandId"

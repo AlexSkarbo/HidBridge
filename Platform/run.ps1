@@ -7,15 +7,18 @@ param(
     [int]$KeyboardInterfaceSelector = -1,
     [int]$StaleAfterMinutes = -1,
     [switch]$IncludeWebRtcEdgeAgentSmoke,
+    [string]$WebRtcCommandExecutor,
     [string]$WebRtcControlHealthUrl,
     [int]$WebRtcRequestTimeoutSec = -1,
     [int]$WebRtcControlHealthAttempts = -1,
+    [switch]$SkipControlHealthCheck,
     [string]$ControlHealthUrl,
     [int]$RequestTimeoutSec = -1,
     [int]$ControlHealthAttempts = -1,
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = -1,
     [int]$TransportHealthDelayMs = -1,
+    [string]$CommandExecutor,
     [string]$ControlWsUrl,
     [string]$UartPort,
     [int]$UartBaud = -1,
@@ -135,6 +138,13 @@ if ($IncludeWebRtcEdgeAgentSmoke) {
     $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentSmoke") | Out-Null
 }
 
+if ($PSBoundParameters.ContainsKey("WebRtcCommandExecutor") -and -not [string]::IsNullOrWhiteSpace($WebRtcCommandExecutor)) {
+    if ($Task -eq "demo-flow") {
+        $effectiveForwardArgs.Add("-WebRtcCommandExecutor") | Out-Null
+        $effectiveForwardArgs.Add($WebRtcCommandExecutor) | Out-Null
+    }
+}
+
 if ($PSBoundParameters.ContainsKey("WebRtcControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($WebRtcControlHealthUrl)) {
     $effectiveForwardArgs.Add("-WebRtcControlHealthUrl") | Out-Null
     $effectiveForwardArgs.Add($WebRtcControlHealthUrl) | Out-Null
@@ -153,6 +163,13 @@ if ($PSBoundParameters.ContainsKey("WebRtcControlHealthAttempts") -and $WebRtcCo
 if ($PSBoundParameters.ContainsKey("ControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($ControlHealthUrl)) {
     $effectiveForwardArgs.Add("-ControlHealthUrl") | Out-Null
     $effectiveForwardArgs.Add($ControlHealthUrl) | Out-Null
+}
+
+if ($SkipControlHealthCheck) {
+    $tasksWithControlHealthCheckSwitch = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b")
+    if ($tasksWithControlHealthCheckSwitch -contains $Task) {
+        $effectiveForwardArgs.Add("-SkipControlHealthCheck") | Out-Null
+    }
 }
 
 if ($PSBoundParameters.ContainsKey("RequestTimeoutSec") -and $RequestTimeoutSec -gt 0) {
@@ -193,6 +210,13 @@ if ($PSBoundParameters.ContainsKey("ControlWsUrl") -and -not [string]::IsNullOrW
     if ($tasksWithControlWsUrl -contains $Task) {
         $effectiveForwardArgs.Add("-ControlWsUrl") | Out-Null
         $effectiveForwardArgs.Add($ControlWsUrl) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("CommandExecutor") -and -not [string]::IsNullOrWhiteSpace($CommandExecutor)) {
+    if ($Task -eq "webrtc-stack") {
+        $effectiveForwardArgs.Add("-CommandExecutor") | Out-Null
+        $effectiveForwardArgs.Add($CommandExecutor) | Out-Null
     }
 }
 

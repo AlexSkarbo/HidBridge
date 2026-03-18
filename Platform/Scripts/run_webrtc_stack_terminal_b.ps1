@@ -6,6 +6,7 @@ param(
     [string]$ControlHealthUrl = "http://127.0.0.1:28092/health",
     [int]$ControlHealthAttempts = 30,
     [int]$ControlHealthDelayMs = 500,
+    [switch]$SkipControlHealthCheck,
     [int]$RequestTimeoutSec = 15,
     [string]$TokenClientId = "controlplane-smoke",
     [string]$TokenUsername = "operator.smoke.admin",
@@ -356,12 +357,44 @@ Get-Content $sessionEnvPath | ForEach-Object {
 
 $sessionId = [string]$kv["SESSION_ID"]
 $peerId = [string]$kv["PEER_ID"]
+$sessionCommandExecutor = [string]$kv["COMMAND_EXECUTOR"]
+$sessionControlHealthUrl = [string]$kv["CONTROL_HEALTH_URL"]
 if ([string]::IsNullOrWhiteSpace($sessionId) -or [string]::IsNullOrWhiteSpace($peerId)) {
     throw "SESSION_ID/PEER_ID not found in $sessionEnvPath"
 }
 
-if (-not (Wait-ControlHealth -Url $ControlHealthUrl -Attempts $ControlHealthAttempts -DelayMs $ControlHealthDelayMs)) {
-    throw "Control WS health endpoint is not ready: $ControlHealthUrl"
+# Persists current session/peer context for follow-up terminal commands.
+function Write-SessionEnv {
+    param(
+        [string]$Path,
+        [string]$SessionId,
+        [string]$PeerId,
+        [string]$CommandExecutor,
+        [string]$ControlHealthUrl
+    )
+
+@"
+SESSION_ID=$SessionId
+PEER_ID=$PeerId
+COMMAND_EXECUTOR=$CommandExecutor
+CONTROL_HEALTH_URL=$ControlHealthUrl
+"@ | Set-Content -Path $Path -Encoding ascii
+}
+
+if (($null -eq $PSBoundParameters["ControlHealthUrl"] -or [string]::IsNullOrWhiteSpace($PSBoundParameters["ControlHealthUrl"])) `
+    -and -not [string]::IsNullOrWhiteSpace($sessionControlHealthUrl)) {
+    $ControlHealthUrl = $sessionControlHealthUrl
+}
+
+$isUartExecutor = [string]::Equals($sessionCommandExecutor, "uart", [StringComparison]::OrdinalIgnoreCase)
+$effectiveSkipControlHealthCheck = $SkipControlHealthCheck -or $isUartExecutor
+if (-not $effectiveSkipControlHealthCheck) {
+    if (-not (Wait-ControlHealth -Url $ControlHealthUrl -Attempts $ControlHealthAttempts -DelayMs $ControlHealthDelayMs)) {
+        throw "Control WS health endpoint is not ready: $ControlHealthUrl"
+    }
+}
+elseif ($isUartExecutor) {
+    Write-Warning "Session executor is UART; skipping control-health precheck."
 }
 
 $tokenEndpoint = "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$RealmName/protocol/openid-connect/token"
@@ -394,10 +427,7 @@ else {
     if (-not [string]::IsNullOrWhiteSpace($liveSessionId)) {
         Write-Warning "Session '$sessionId' was not found. Reusing live relay session '$liveSessionId'."
         $sessionId = $liveSessionId
-        @"
-SESSION_ID=$sessionId
-PEER_ID=$peerId
-"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+        Write-SessionEnv -Path $sessionEnvPath -SessionId $sessionId -PeerId $peerId -CommandExecutor $sessionCommandExecutor -ControlHealthUrl $ControlHealthUrl
     }
     elseif ($AutoCreateSessionIfMissing) {
         Write-Warning "Session '$sessionId' was not found and no live relay session detected. Auto-creating replacement session for Terminal-B flow."
@@ -412,10 +442,7 @@ PEER_ID=$peerId
             -Headers $authHeaders `
             -RequestTimeoutSec $RequestTimeoutSec
 
-        @"
-SESSION_ID=$sessionId
-PEER_ID=$peerId
-"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+        Write-SessionEnv -Path $sessionEnvPath -SessionId $sessionId -PeerId $peerId -CommandExecutor $sessionCommandExecutor -ControlHealthUrl $ControlHealthUrl
     }
     else {
         throw "Session '$sessionId' was not found and no live WebRTC relay session is available. Start/restart Terminal A stack first."
@@ -453,10 +480,7 @@ if (-not $SkipTransportHealthCheck) {
             if (-not [string]::IsNullOrWhiteSpace($liveSessionId) -and -not [string]::Equals($liveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
                 Write-Warning "Current session '$sessionId' has no online relay peers. Switching to live relay session '$liveSessionId'."
                 $sessionId = $liveSessionId
-                @"
-SESSION_ID=$sessionId
-PEER_ID=$peerId
-"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+                Write-SessionEnv -Path $sessionEnvPath -SessionId $sessionId -PeerId $peerId -CommandExecutor $sessionCommandExecutor -ControlHealthUrl $ControlHealthUrl
             }
         }
 
@@ -500,10 +524,7 @@ if (-not $SkipControlLeaseRequest) {
                     -Headers $authHeaders `
                     -RequestTimeoutSec $RequestTimeoutSec
 
-                @"
-SESSION_ID=$sessionId
-PEER_ID=$peerId
-"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+                Write-SessionEnv -Path $sessionEnvPath -SessionId $sessionId -PeerId $peerId -CommandExecutor $sessionCommandExecutor -ControlHealthUrl $ControlHealthUrl
 
                 Request-ControlLease `
                     -ApiBaseUrl $ApiBaseUrl `
@@ -520,10 +541,7 @@ PEER_ID=$peerId
                 if (-not [string]::IsNullOrWhiteSpace($liveSessionId) -and -not [string]::Equals($liveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
                     Write-Warning "Control request returned 404 for session '$sessionId'. Switching to live relay session '$liveSessionId' and retrying once."
                     $sessionId = $liveSessionId
-                    @"
-SESSION_ID=$sessionId
-PEER_ID=$peerId
-"@ | Set-Content -Path $sessionEnvPath -Encoding ascii
+                    Write-SessionEnv -Path $sessionEnvPath -SessionId $sessionId -PeerId $peerId -CommandExecutor $sessionCommandExecutor -ControlHealthUrl $ControlHealthUrl
 
                     Request-ControlLease `
                         -ApiBaseUrl $ApiBaseUrl `
@@ -586,6 +604,7 @@ catch {
 $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     controlHealthUrl = $ControlHealthUrl
+    commandExecutor = if ([string]::IsNullOrWhiteSpace($sessionCommandExecutor)) { "unknown" } else { $sessionCommandExecutor }
     sessionId = $sessionId
     peerId = $peerId
     principalId = $PrincipalId
@@ -608,6 +627,9 @@ if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
 
 Write-Host ""
 Write-Host "=== WebRTC Terminal-B Summary ==="
+if (-not [string]::IsNullOrWhiteSpace($sessionCommandExecutor)) {
+    Write-Host "Executor:      $sessionCommandExecutor"
+}
 Write-Host "Session:       $sessionId"
 Write-Host "Peer:          $peerId"
 Write-Host "Command:       $commandId"

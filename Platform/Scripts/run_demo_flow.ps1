@@ -18,6 +18,8 @@ param(
     [switch]$RequireDemoGateDeviceAck,
     [int]$DemoGateKeyboardInterfaceSelector = -1,
     [switch]$IncludeWebRtcEdgeAgentSmoke,
+    [ValidateSet("uart", "controlws")]
+    [string]$WebRtcCommandExecutor = "uart",
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [int]$WebRtcRequestTimeoutSec = 15,
     [int]$WebRtcControlHealthAttempts = 20,
@@ -49,6 +51,7 @@ $demoSeedScript = Join-Path $scriptsRoot "run_demo_seed.ps1"
 $demoGateScript = Join-Path $scriptsRoot "run_demo_gate.ps1"
 $webrtcStackScript = Join-Path $scriptsRoot "run_webrtc_stack.ps1"
 $webrtcEdgeAgentSmokeScript = Join-Path $scriptsRoot "run_webrtc_edge_agent_smoke.ps1"
+$webrtcSessionEnvPath = Join-Path $platformRoot ".logs/webrtc-peer-adapter.session.env"
 $apiProjectPath = Join-Path $repoRoot "Platform/Platform/HidBridge.ControlPlane.Api/HidBridge.ControlPlane.Api.csproj"
 $webProjectPath = Join-Path $repoRoot "Platform/Clients/HidBridge.ControlPlane.Web/HidBridge.ControlPlane.Web.csproj"
 $apiUri = [Uri]$ApiBaseUrl
@@ -447,7 +450,12 @@ try {
             if (-not $effectiveReuseRunningServices) {
                 $shouldBootstrapWebRtcStack = $true
             }
-            elseif (-not (Test-ControlHealth -Url $WebRtcControlHealthUrl -Attempts ([Math]::Max(1, $WebRtcControlHealthAttempts)) -DelayMs 500)) {
+            elseif ([string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+                if (-not (Test-ControlHealth -Url $WebRtcControlHealthUrl -Attempts ([Math]::Max(1, $WebRtcControlHealthAttempts)) -DelayMs 500)) {
+                    $shouldBootstrapWebRtcStack = $true
+                }
+            }
+            elseif (-not (Test-Path -Path $webrtcSessionEnvPath -PathType Leaf)) {
                 $shouldBootstrapWebRtcStack = $true
             }
         }
@@ -458,19 +466,25 @@ try {
             }
 
             Write-Warning "Bootstrapping WebRTC edge stack automatically for demo-flow WebRTC gate."
-            $controlWsUrl = Convert-ControlHealthToWebSocketUrl -ControlHealthUrl $WebRtcControlHealthUrl
-            Invoke-LoggedScript -Results $results -Name "WebRTC Stack Bootstrap" -LogRoot $logRoot -ScriptPath $webrtcStackScript -Parameters @{
+            $webrtcStackParameters = @{
                 ApiBaseUrl = $ApiBaseUrl
                 WebBaseUrl = $WebBaseUrl
-                ControlWsUrl = $controlWsUrl
+                CommandExecutor = $WebRtcCommandExecutor
                 SkipRuntimeBootstrap = $true
                 SkipIdentityReset = $true
                 SkipCiLocal = $true
                 StopExisting = $true
-            } -StopOnFailure
+            }
+            if ([string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+                $webrtcStackParameters["ControlWsUrl"] = (Convert-ControlHealthToWebSocketUrl -ControlHealthUrl $WebRtcControlHealthUrl)
+            }
+
+            Invoke-LoggedScript -Results $results -Name "WebRTC Stack Bootstrap" -LogRoot $logRoot -ScriptPath $webrtcStackScript -Parameters $webrtcStackParameters -StopOnFailure
         }
 
-        if ($IncludeWebRtcEdgeAgentSmoke -and -not (Test-ControlHealth -Url $WebRtcControlHealthUrl -Attempts ([Math]::Max(1, $WebRtcControlHealthAttempts)) -DelayMs 500)) {
+        if ($IncludeWebRtcEdgeAgentSmoke `
+            -and [string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) `
+            -and -not (Test-ControlHealth -Url $WebRtcControlHealthUrl -Attempts ([Math]::Max(1, $WebRtcControlHealthAttempts)) -DelayMs 500)) {
             throw "WebRTC control health endpoint is still not ready after bootstrap: $WebRtcControlHealthUrl"
         }
 
