@@ -6,6 +6,10 @@ param(
     [switch]$SkipDoctor,
     [switch]$SkipChecks,
     [switch]$SkipBearerSmoke,
+    [switch]$IncludeWebRtcEdgeAgentAcceptance,
+    [ValidateSet("uart", "controlws")]
+    [string]$WebRtcCommandExecutor = "uart",
+    [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [switch]$StopOnFailure,
     [switch]$ExportArtifactsOnFailure = $true,
     [switch]$IncludeSmokeDataOnFailure = $true,
@@ -33,6 +37,17 @@ try {
 
     if (-not $SkipBearerSmoke) {
         Invoke-LoggedScript -Results $results -Name "Bearer Smoke" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_api_bearer_smoke.ps1") -Parameters @{ Configuration = $Configuration; ConnectionString = $ConnectionString; Schema = $Schema; AuthAuthority = $AuthAuthority } -StopOnFailure:$StopOnFailure
+    }
+
+    if ($IncludeWebRtcEdgeAgentAcceptance) {
+        # Runs primary edge-agent acceptance path without Terminal-B manual fallback.
+        $webrtcDemoFlowParameters = @{
+            SkipIdentityReset = $true
+            IncludeWebRtcEdgeAgentSmoke = $true
+            WebRtcCommandExecutor = $WebRtcCommandExecutor
+            WebRtcControlHealthUrl = $WebRtcControlHealthUrl
+        }
+        Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Acceptance" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_demo_flow.ps1") -Parameters $webrtcDemoFlowParameters -StopOnFailure:$StopOnFailure
     }
 }
 catch {

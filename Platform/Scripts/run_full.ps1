@@ -6,6 +6,10 @@ param(
     [switch]$StopOnFailure,
     [switch]$SkipRealmSync,
     [switch]$SkipCiLocal,
+    [switch]$IncludeWebRtcEdgeAgentAcceptance,
+    [ValidateSet("uart", "controlws")]
+    [string]$WebRtcCommandExecutor = "uart",
+    [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [switch]$ExportArtifactsOnFailure = $true,
     [switch]$IncludeSmokeDataOnFailure = $true,
     [switch]$IncludeBackupsOnFailure = $true
@@ -33,6 +37,9 @@ try {
             ConnectionString = $ConnectionString
             Schema = $Schema
             AuthAuthority = $AuthAuthority
+            IncludeWebRtcEdgeAgentAcceptance = $IncludeWebRtcEdgeAgentAcceptance
+            WebRtcCommandExecutor = $WebRtcCommandExecutor
+            WebRtcControlHealthUrl = $WebRtcControlHealthUrl
             ExportArtifactsOnFailure = $ExportArtifactsOnFailure
             IncludeSmokeDataOnFailure = $IncludeSmokeDataOnFailure
             IncludeBackupsOnFailure = $IncludeBackupsOnFailure

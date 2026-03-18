@@ -7,6 +7,7 @@ param(
     [int]$KeyboardInterfaceSelector = -1,
     [int]$StaleAfterMinutes = -1,
     [switch]$IncludeWebRtcEdgeAgentSmoke,
+    [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [string]$WebRtcCommandExecutor,
     [string]$WebRtcControlHealthUrl,
     [int]$WebRtcRequestTimeoutSec = -1,
@@ -138,16 +139,27 @@ if ($IncludeWebRtcEdgeAgentSmoke) {
     $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentSmoke") | Out-Null
 }
 
+if ($IncludeWebRtcEdgeAgentAcceptance) {
+    $tasksWithWebRtcAcceptance = @("ci-local", "full")
+    if ($tasksWithWebRtcAcceptance -contains $Task) {
+        $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentAcceptance") | Out-Null
+    }
+}
+
 if ($PSBoundParameters.ContainsKey("WebRtcCommandExecutor") -and -not [string]::IsNullOrWhiteSpace($WebRtcCommandExecutor)) {
-    if ($Task -eq "demo-flow") {
+    $tasksWithWebRtcCommandExecutor = @("demo-flow", "ci-local", "full")
+    if ($tasksWithWebRtcCommandExecutor -contains $Task) {
         $effectiveForwardArgs.Add("-WebRtcCommandExecutor") | Out-Null
         $effectiveForwardArgs.Add($WebRtcCommandExecutor) | Out-Null
     }
 }
 
 if ($PSBoundParameters.ContainsKey("WebRtcControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($WebRtcControlHealthUrl)) {
-    $effectiveForwardArgs.Add("-WebRtcControlHealthUrl") | Out-Null
-    $effectiveForwardArgs.Add($WebRtcControlHealthUrl) | Out-Null
+    $tasksWithWebRtcControlHealthUrl = @("demo-flow", "ci-local", "full")
+    if ($tasksWithWebRtcControlHealthUrl -contains $Task) {
+        $effectiveForwardArgs.Add("-WebRtcControlHealthUrl") | Out-Null
+        $effectiveForwardArgs.Add($WebRtcControlHealthUrl) | Out-Null
+    }
 }
 
 if ($PSBoundParameters.ContainsKey("WebRtcRequestTimeoutSec") -and $WebRtcRequestTimeoutSec -gt 0) {
