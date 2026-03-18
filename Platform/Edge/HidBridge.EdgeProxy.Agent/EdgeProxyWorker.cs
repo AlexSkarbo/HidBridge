@@ -67,10 +67,11 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
 
         _logger.LogInformation(
-            "Edge proxy started. Session={SessionId}, Peer={PeerId}, Endpoint={EndpointId}, ControlWs={ControlWsUrl}",
+            "Edge proxy started. Session={SessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}",
             _options.SessionId,
             _options.PeerId,
             _options.EndpointId,
+            _options.GetCommandExecutorKind(),
             _options.ControlWsUrl);
 
         var consecutiveFailures = 0;

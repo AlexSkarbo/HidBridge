@@ -6,5 +6,6 @@ Current scope:
 
 - exp-022 compatible control-websocket ACK parser (`ControlWsAckParser`)
 - websocket-backed command executor (`ControlWsCommandExecutor`)
+- direct UART HID command executor (`UartHidCommandExecutor`)
 
 This project is the incremental migration target for low-level exp-022 protocol logic.

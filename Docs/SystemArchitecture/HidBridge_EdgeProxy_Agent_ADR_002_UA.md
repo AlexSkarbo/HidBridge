@@ -109,5 +109,5 @@ Edge Proxy Agent як production runtime для патерна `HDMI/USB capture
 
 - [x] затверджено canonical роль `EdgeProxy.Agent`;
 - [x] виділено план розділення на `Abstractions` + `Protocol` + `Agent`;
-- [ ] завершити прямий protocol path без runtime залежності від exp-022 control websocket;
+- [x] додано прямий UART protocol path в `HidBridge.Edge.HidBridgeProtocol` (`UartHidCommandExecutor`);
 - [ ] замкнути CI acceptance на `EdgeProxy.Agent` як primary path.

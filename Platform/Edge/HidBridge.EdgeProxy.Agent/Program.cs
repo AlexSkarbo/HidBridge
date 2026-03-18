@@ -28,8 +28,27 @@ builder.Services.AddHttpClient("edge-proxy")
 builder.Services.AddSingleton<IEdgeCommandExecutor>(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<EdgeProxyOptions>>().Value;
-    var logger = serviceProvider.GetRequiredService<ILogger<ControlWsCommandExecutor>>();
-    return new ControlWsCommandExecutor(options.ControlWsUrl, logger);
+    var executorKind = options.GetCommandExecutorKind();
+    return executorKind switch
+    {
+        EdgeProxyCommandExecutorKind.ControlWs => new ControlWsCommandExecutor(
+            options.ControlWsUrl,
+            serviceProvider.GetRequiredService<ILogger<ControlWsCommandExecutor>>()),
+        EdgeProxyCommandExecutorKind.UartHid => new UartHidCommandExecutor(
+            new UartHidCommandExecutorOptions(
+                PortName: options.UartPort,
+                BaudRate: options.UartBaud,
+                HmacKey: options.UartHmacKey,
+                MasterSecret: options.UartMasterSecret,
+                MouseInterfaceSelector: (byte)options.UartMouseInterfaceSelector,
+                KeyboardInterfaceSelector: (byte)options.UartKeyboardInterfaceSelector,
+                CommandTimeoutMs: options.UartCommandTimeoutMs,
+                InjectTimeoutMs: options.UartInjectTimeoutMs,
+                InjectRetries: options.UartInjectRetries,
+                ReleasePortAfterExecute: options.UartReleasePortAfterExecute),
+            serviceProvider.GetRequiredService<ILogger<UartHidCommandExecutor>>()),
+        _ => throw new InvalidOperationException($"Unsupported command executor kind '{executorKind}'."),
+    };
 });
 
 builder.Services.AddHostedService<EdgeProxyWorker>();

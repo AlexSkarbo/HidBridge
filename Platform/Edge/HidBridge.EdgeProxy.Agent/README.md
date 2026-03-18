@@ -5,7 +5,7 @@ Initial service-based replacement for the temporary PowerShell WebRTC peer adapt
 Runtime layering:
 
 - `HidBridge.Edge.Abstractions` - edge execution contracts.
-- `HidBridge.Edge.HidBridgeProtocol` - exp-022 compatible control-websocket command executor.
+- `HidBridge.Edge.HidBridgeProtocol` - protocol adapters (`ControlWs` + `UART HID`).
 - `HidBridge.EdgeProxy.Agent` - orchestration loop (API relay + heartbeat + peer lifecycle).
 
 ## Purpose
@@ -14,7 +14,7 @@ This worker:
 
 1. registers one WebRTC relay peer online for a room session;
 2. polls relay command envelopes from ControlPlane API;
-3. forwards commands to local control websocket endpoint (exp-022 compatible);
+3. forwards commands through configured executor (`ControlWs` or direct `UART HID`);
 4. publishes ACK back to API;
 5. emits periodic heartbeat signal packets.
 
@@ -31,6 +31,17 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 - `PEERID` (required)
 - `ENDPOINTID` (required)
 - `CONTROLWSURL` (default: `ws://127.0.0.1:28092/ws/control`)
+- `COMMANDEXECUTOR` (`controlws` default, `uart` for direct HID bridge mode)
+- `UARTPORT` (required for `COMMANDEXECUTOR=uart`)
+- `UARTBAUD` (default: `3000000`)
+- `UARTHMACKEY` (default: `changeme`)
+- `UARTMASTERSECRET` (optional, enables per-device derived key)
+- `UARTMOUSEINTERFACESELECTOR` (default: `255`)
+- `UARTKEYBOARDINTERFACESELECTOR` (default: `254`)
+- `UARTCOMMANDTIMEOUTMS` (default: `300`)
+- `UARTINJECTTIMEOUTMS` (default: `200`)
+- `UARTINJECTRETRIES` (default: `2`)
+- `UARTRELEASEPORTAFTEREXECUTE` (default: `false`)
 - `PRINCIPALID` (default: `smoke-runner`)
 - `TENANTID` / `ORGANIZATIONID`
 - `ACCESSTOKEN` (optional)

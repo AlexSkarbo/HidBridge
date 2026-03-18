@@ -27,5 +27,6 @@
     <ProjectReference Include="..\..\Platform\HidBridge.ControlPlane.Api\HidBridge.ControlPlane.Api.csproj" />
     <ProjectReference Include="..\..\Edge\HidBridge.Edge.Abstractions\HidBridge.Edge.Abstractions.csproj" />
     <ProjectReference Include="..\..\Edge\HidBridge.Edge.HidBridgeProtocol\HidBridge.Edge.HidBridgeProtocol.csproj" />
+    <ProjectReference Include="..\..\Edge\HidBridge.EdgeProxy.Agent\HidBridge.EdgeProxy.Agent.csproj" />
   </ItemGroup>
 </Project>

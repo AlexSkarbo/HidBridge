@@ -19,8 +19,63 @@ public sealed class EdgeProxyOptions
     [Required]
     public string EndpointId { get; set; } = "";
 
+    /// <summary>
+    /// Selects command execution path: <c>controlws</c> (default) or <c>uart</c>.
+    /// </summary>
+    public string CommandExecutor { get; set; } = "controlws";
+
     [Required]
     public string ControlWsUrl { get; set; } = "ws://127.0.0.1:28092/ws/control";
+
+    /// <summary>
+    /// UART serial port used when <see cref="CommandExecutor"/> is configured as <c>uart</c>.
+    /// </summary>
+    public string UartPort { get; set; } = "";
+
+    /// <summary>
+    /// UART baudrate used when <see cref="CommandExecutor"/> is configured as <c>uart</c>.
+    /// </summary>
+    public int UartBaud { get; set; } = 3000000;
+
+    /// <summary>
+    /// UART firmware HMAC key.
+    /// </summary>
+    public string UartHmacKey { get; set; } = "changeme";
+
+    /// <summary>
+    /// Optional master secret used to derive per-device UART HMAC key material.
+    /// </summary>
+    public string UartMasterSecret { get; set; } = "";
+
+    /// <summary>
+    /// Mouse interface selector (0xFF means auto-resolve mouse interface from firmware inventory).
+    /// </summary>
+    public int UartMouseInterfaceSelector { get; set; } = 0xFF;
+
+    /// <summary>
+    /// Keyboard interface selector (0xFE means auto-resolve keyboard interface from firmware inventory).
+    /// </summary>
+    public int UartKeyboardInterfaceSelector { get; set; } = 0xFE;
+
+    /// <summary>
+    /// UART command timeout in milliseconds.
+    /// </summary>
+    public int UartCommandTimeoutMs { get; set; } = 300;
+
+    /// <summary>
+    /// UART inject timeout in milliseconds.
+    /// </summary>
+    public int UartInjectTimeoutMs { get; set; } = 200;
+
+    /// <summary>
+    /// UART inject retry count.
+    /// </summary>
+    public int UartInjectRetries { get; set; } = 2;
+
+    /// <summary>
+    /// Releases serial port handle after each executed command.
+    /// </summary>
+    public bool UartReleasePortAfterExecute { get; set; }
 
     public string PrincipalId { get; set; } = "smoke-runner";
     public string TenantId { get; set; } = "local-tenant";
@@ -49,15 +104,35 @@ public sealed class EdgeProxyOptions
     public void Normalize()
     {
         BaseUrl = BaseUrl.TrimEnd('/');
+        CommandExecutor = (CommandExecutor ?? string.Empty).Trim();
         PollIntervalMs = Math.Max(100, PollIntervalMs);
         BatchLimit = Math.Clamp(BatchLimit, 1, 500);
         HeartbeatIntervalSec = Math.Max(3, HeartbeatIntervalSec);
         CommandTimeoutMs = Math.Max(1000, CommandTimeoutMs);
         HttpTimeoutSec = Math.Max(5, HttpTimeoutSec);
+        UartBaud = Math.Max(1200, UartBaud);
+        UartCommandTimeoutMs = Math.Max(50, UartCommandTimeoutMs);
+        UartInjectTimeoutMs = Math.Max(50, UartInjectTimeoutMs);
+        UartInjectRetries = Math.Clamp(UartInjectRetries, 0, 10);
+        UartMouseInterfaceSelector = Math.Clamp(UartMouseInterfaceSelector, byte.MinValue, byte.MaxValue);
+        UartKeyboardInterfaceSelector = Math.Clamp(UartKeyboardInterfaceSelector, byte.MinValue, byte.MaxValue);
         ReconnectBackoffMinMs = Math.Max(100, ReconnectBackoffMinMs);
         ReconnectBackoffMaxMs = Math.Max(ReconnectBackoffMinMs, ReconnectBackoffMaxMs);
         ReconnectBackoffJitterMs = Math.Max(0, ReconnectBackoffJitterMs);
         TransientFailureThresholdForOffline = Math.Max(1, TransientFailureThresholdForOffline);
+    }
+
+    /// <summary>
+    /// Resolves configured command executor kind.
+    /// </summary>
+    public EdgeProxyCommandExecutorKind GetCommandExecutorKind()
+    {
+        if (TryParseCommandExecutorKind(CommandExecutor, out var kind))
+        {
+            return kind;
+        }
+
+        return EdgeProxyCommandExecutorKind.ControlWs;
     }
 
     /// <summary>
@@ -73,9 +148,22 @@ public sealed class EdgeProxyOptions
             return false;
         }
 
-        if (!Uri.TryCreate(ControlWsUrl, UriKind.Absolute, out _))
+        if (!TryParseCommandExecutorKind(CommandExecutor, out var executorKind))
+        {
+            error = $"CommandExecutor '{CommandExecutor}' is not supported. Use 'controlws' or 'uart'.";
+            return false;
+        }
+
+        if (executorKind == EdgeProxyCommandExecutorKind.ControlWs &&
+            !Uri.TryCreate(ControlWsUrl, UriKind.Absolute, out _))
         {
             error = "ControlWsUrl must be an absolute URL.";
+            return false;
+        }
+
+        if (executorKind == EdgeProxyCommandExecutorKind.UartHid && string.IsNullOrWhiteSpace(UartPort))
+        {
+            error = "UartPort is required when CommandExecutor='uart'.";
             return false;
         }
 
@@ -99,5 +187,34 @@ public sealed class EdgeProxyOptions
 
         error = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Parses executor value from configuration aliases.
+    /// </summary>
+    private static bool TryParseCommandExecutorKind(string? value, out EdgeProxyCommandExecutorKind kind)
+    {
+        var normalized = (value ?? string.Empty)
+            .Trim()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+
+        switch (normalized)
+        {
+            case "":
+            case "controlws":
+            case "websocket":
+                kind = EdgeProxyCommandExecutorKind.ControlWs;
+                return true;
+            case "uart":
+            case "uarthid":
+            case "serial":
+                kind = EdgeProxyCommandExecutorKind.UartHid;
+                return true;
+            default:
+                kind = default;
+                return false;
+        }
     }
 }
