@@ -178,12 +178,22 @@
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerState"]</div><div class="hid-detail-value">@GetTransportPeerState(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerLastSeen"]</div><div class="hid-detail-value">@GetTransportPeerLastSeen(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportLastRelayAckAt"]</div><div class="hid-detail-value">@GetTransportLastRelayAckAt(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReady"]</div><div class="hid-detail-value">@GetTransportMediaReady(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaState"]</div><div class="hid-detail-value">@GetTransportMediaState(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaSource"]</div><div class="hid-detail-value">@GetTransportMediaSource(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaStreamId"]</div><div class="hid-detail-value">@GetTransportMediaStreamId(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReportedAt"]</div><div class="hid-detail-value">@GetTransportMediaReportedAt(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth?.LastCommandAck)</div></div>
                         </div>
 
                         @if (!string.Equals(GetTransportPeerFailureReason(_transportReadiness, _transportHealth), "—", StringComparison.Ordinal))
                         {
                             <div class="hid-meta-note">@T["TransportPeerFailureReason"]: @GetTransportPeerFailureReason(_transportReadiness, _transportHealth)</div>
+                        }
+
+                        @if (!string.Equals(GetTransportMediaFailureReason(_transportReadiness, _transportHealth), "—", StringComparison.Ordinal))
+                        {
+                            <div class="hid-meta-note">@T["TransportMediaFailureReason"]: @GetTransportMediaFailureReason(_transportReadiness, _transportHealth)</div>
                         }
 
                         @if (_transportHealth?.LastPeerConsecutiveFailures.HasValue == true || _transportHealth?.LastPeerReconnectBackoffMs.HasValue == true)
@@ -1468,6 +1478,140 @@
     {
         var timestamp = readiness?.LastRelayAckAtUtc ?? health?.LastRelayAckAtUtc;
         return timestamp is null ? "—" : FormatTime(timestamp);
+    }
+
+    /// <summary>
+    /// Resolves media-ready indicator with readiness-first preference and health fallback.
+    /// </summary>
+    private string GetTransportMediaReady(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        var typed = readiness?.MediaReady ?? health?.MediaReady;
+        if (typed.HasValue)
+        {
+            return typed.Value ? T["Yes"] : T["No"];
+        }
+
+        var metricValue = GetTransportMetricValue(health, "lastPeerMediaReady");
+        if (string.Equals(metricValue, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return T["Yes"];
+        }
+
+        if (string.Equals(metricValue, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            return T["No"];
+        }
+
+        if (bool.TryParse(metricValue, out var parsed))
+        {
+            return parsed ? T["Yes"] : T["No"];
+        }
+
+        return metricValue;
+    }
+
+    /// <summary>
+    /// Resolves media state with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaState(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(readiness?.MediaState))
+        {
+            return readiness.MediaState!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(health?.MediaState))
+        {
+            return health.MediaState!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerMediaState");
+    }
+
+    /// <summary>
+    /// Resolves media source descriptor with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaSource(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(readiness?.MediaSource))
+        {
+            return readiness.MediaSource!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(health?.MediaSource))
+        {
+            return health.MediaSource!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerMediaSource");
+    }
+
+    /// <summary>
+    /// Resolves media stream id with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaStreamId(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(readiness?.MediaStreamId))
+        {
+            return readiness.MediaStreamId!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(health?.MediaStreamId))
+        {
+            return health.MediaStreamId!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerMediaStreamId");
+    }
+
+    /// <summary>
+    /// Formats media-reported timestamp with readiness-first preference and health fallback.
+    /// </summary>
+    private string GetTransportMediaReportedAt(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        var timestamp = readiness?.MediaReportedAtUtc ?? health?.MediaReportedAtUtc;
+        if (timestamp is not null)
+        {
+            return FormatTime(timestamp);
+        }
+
+        var raw = GetTransportMetricValue(health, "lastPeerMediaReportedAtUtc");
+        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+        {
+            return FormatTime(parsed);
+        }
+
+        return raw;
+    }
+
+    /// <summary>
+    /// Resolves media failure reason with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaFailureReason(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(readiness?.MediaFailureReason))
+        {
+            return readiness.MediaFailureReason!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(health?.MediaFailureReason))
+        {
+            return health.MediaFailureReason!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerMediaFailureReason");
     }
 
     /// <summary>

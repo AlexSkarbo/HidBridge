@@ -137,6 +137,90 @@ public sealed class WebRtcRelayReadinessServiceTests
     }
 
     /// <summary>
+    /// Returns media_not_ready when media readiness is required but peer media probe is unhealthy.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsMediaNotReady_WhenMediaPolicyIsRequiredAndProbeIsUnhealthy()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-not-ready"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = false,
+                    ["lastPeerMediaState"] = "Unavailable",
+                    ["lastPeerMediaFailureReason"] = "capture-offline",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-not-ready",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(readiness.Ready);
+        Assert.Equal("media_not_ready", readiness.ReasonCode);
+        Assert.False(readiness.MediaReady);
+        Assert.Equal("capture-offline", readiness.MediaFailureReason);
+    }
+
+    /// <summary>
+    /// Returns ready when media readiness is required and media probe reports healthy state.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsReady_WhenMediaPolicyIsRequiredAndProbeIsHealthy()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-ready"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = true,
+                    ["lastPeerMediaState"] = "Streaming",
+                    ["lastPeerMediaStreamId"] = "stream-main",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-ready",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(readiness.Ready);
+        Assert.Equal("ready", readiness.ReasonCode);
+        Assert.True(readiness.MediaReady);
+        Assert.Equal("stream-main", readiness.MediaStreamId);
+    }
+
+    /// <summary>
     /// Creates a session snapshot used by readiness tests.
     /// </summary>
     private static SessionSnapshot CreateSession(string sessionId)

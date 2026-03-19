@@ -77,6 +77,36 @@ public sealed class EdgeProxyOptions
     /// </summary>
     public bool UartReleasePortAfterExecute { get; set; }
 
+    /// <summary>
+    /// Optional HTTP endpoint that exposes capture/media health (for example <c>http://127.0.0.1:28092/health</c>).
+    /// </summary>
+    public string MediaHealthUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Timeout for media-health probe requests in seconds.
+    /// </summary>
+    public int MediaHealthTimeoutSec { get; set; } = 3;
+
+    /// <summary>
+    /// Logical stream identifier used by readiness projections.
+    /// </summary>
+    public string MediaStreamId { get; set; } = "edge-main";
+
+    /// <summary>
+    /// Human-readable media source descriptor (for example <c>hdmi-usb-capture</c>).
+    /// </summary>
+    public string MediaSource { get; set; } = "edge-capture";
+
+    /// <summary>
+    /// Requires media probe to report ready before readiness policy can pass.
+    /// </summary>
+    public bool RequireMediaReady { get; set; } = true;
+
+    /// <summary>
+    /// Treats missing probe URL as ready (useful for control-only scenarios without capture path).
+    /// </summary>
+    public bool AssumeMediaReadyWithoutProbe { get; set; }
+
     public string PrincipalId { get; set; } = "smoke-runner";
     public string TenantId { get; set; } = "local-tenant";
     public string OrganizationId { get; set; } = "local-org";
@@ -110,6 +140,7 @@ public sealed class EdgeProxyOptions
         HeartbeatIntervalSec = Math.Max(3, HeartbeatIntervalSec);
         CommandTimeoutMs = Math.Max(1000, CommandTimeoutMs);
         HttpTimeoutSec = Math.Max(5, HttpTimeoutSec);
+        MediaHealthTimeoutSec = Math.Max(1, MediaHealthTimeoutSec);
         UartBaud = Math.Max(1200, UartBaud);
         UartCommandTimeoutMs = Math.Max(50, UartCommandTimeoutMs);
         UartInjectTimeoutMs = Math.Max(50, UartInjectTimeoutMs);
@@ -158,6 +189,13 @@ public sealed class EdgeProxyOptions
             !Uri.TryCreate(ControlWsUrl, UriKind.Absolute, out _))
         {
             error = "ControlWsUrl must be an absolute URL.";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(MediaHealthUrl) &&
+            !Uri.TryCreate(MediaHealthUrl, UriKind.Absolute, out _))
+        {
+            error = "MediaHealthUrl must be an absolute URL.";
             return false;
         }
 

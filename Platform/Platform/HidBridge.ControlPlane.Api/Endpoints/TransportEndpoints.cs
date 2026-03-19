@@ -418,6 +418,12 @@ public static class TransportEndpoints
                 var lastPeerConsecutiveFailures = TryReadMetricInt32(health.Metrics, "lastPeerConsecutiveFailures");
                 var lastPeerReconnectBackoffMs = TryReadMetricInt32(health.Metrics, "lastPeerReconnectBackoffMs");
                 var lastRelayAckAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastRelayAckAtUtc");
+                var mediaReady = TryReadMetricBoolean(health.Metrics, "lastPeerMediaReady");
+                var mediaState = TryReadMetricString(health.Metrics, "lastPeerMediaState");
+                var mediaFailureReason = TryReadMetricString(health.Metrics, "lastPeerMediaFailureReason");
+                var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
+                var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
+                var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
                 return Results.Ok(new SessionTransportHealthBody(
                     SessionId: snapshot.SessionId,
                     AgentId: snapshot.AgentId,
@@ -435,7 +441,13 @@ public static class TransportEndpoints
                     LastPeerFailureReason: lastPeerFailureReason,
                     LastPeerConsecutiveFailures: lastPeerConsecutiveFailures,
                     LastPeerReconnectBackoffMs: lastPeerReconnectBackoffMs,
-                    LastRelayAckAtUtc: lastRelayAckAtUtc));
+                    LastRelayAckAtUtc: lastRelayAckAtUtc,
+                    MediaReady: mediaReady,
+                    MediaState: mediaState,
+                    MediaFailureReason: mediaFailureReason,
+                    MediaReportedAtUtc: mediaReportedAtUtc,
+                    MediaStreamId: mediaStreamId,
+                    MediaSource: mediaSource));
             }
             catch (KeyNotFoundException ex)
             {
@@ -511,6 +523,29 @@ public static class TransportEndpoints
             JsonElement { ValueKind: JsonValueKind.String } element when DateTimeOffset.TryParse(element.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedJsonString) => parsedJsonString,
             string text when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedString) => parsedString,
             _ when DateTimeOffset.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedFallback) => parsedFallback,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Reads one metric value as boolean from transport-health metrics.
+    /// </summary>
+    private static bool? TryReadMetricBoolean(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            bool direct => direct,
+            JsonElement { ValueKind: JsonValueKind.True } => true,
+            JsonElement { ValueKind: JsonValueKind.False } => false,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetInt32(out var number) => number != 0,
+            JsonElement { ValueKind: JsonValueKind.String } element when bool.TryParse(element.GetString(), out var parsedJsonBool) => parsedJsonBool,
+            string text when bool.TryParse(text, out var parsedStringBool) => parsedStringBool,
+            _ when int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt) => parsedInt != 0,
             _ => null,
         };
     }

@@ -158,6 +158,12 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerFailureReason"] = null,
                 ["lastPeerConsecutiveFailures"] = null,
                 ["lastPeerReconnectBackoffMs"] = null,
+                ["lastPeerMediaReady"] = null,
+                ["lastPeerMediaState"] = null,
+                ["lastPeerMediaFailureReason"] = null,
+                ["lastPeerMediaReportedAtUtc"] = null,
+                ["lastPeerMediaStreamId"] = null,
+                ["lastPeerMediaSource"] = null,
             });
         }
 
@@ -315,6 +321,12 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerFailureReason"] = TryReadMetadataValue(latestMetadata, "failureReason"),
                 ["lastPeerConsecutiveFailures"] = TryReadMetadataValue(latestMetadata, "consecutiveFailures"),
                 ["lastPeerReconnectBackoffMs"] = TryReadMetadataValue(latestMetadata, "reconnectBackoffMs"),
+                ["lastPeerMediaReady"] = TryReadMetadataValue(latestMetadata, "mediaReady"),
+                ["lastPeerMediaState"] = TryReadMetadataValue(latestMetadata, "mediaState"),
+                ["lastPeerMediaFailureReason"] = TryReadMetadataValue(latestMetadata, "mediaFailureReason"),
+                ["lastPeerMediaReportedAtUtc"] = TryReadMetadataValue(latestMetadata, "mediaReportedAtUtc"),
+                ["lastPeerMediaStreamId"] = TryReadMetadataValue(latestMetadata, "mediaStreamId"),
+                ["lastPeerMediaSource"] = TryReadMetadataValue(latestMetadata, "mediaSource"),
             };
         }
 

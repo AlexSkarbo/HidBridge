@@ -130,6 +130,7 @@ Default ControlPlane API:
 - transport diagnostics/signaling:
   - `GET /api/v1/sessions/{sessionId}/transport/health?provider={uart|webrtc}`
     - response now includes typed relay peer readiness fields when available: `onlinePeerCount`, `lastPeerSeenAtUtc`, `lastPeerState`, `lastPeerFailureReason`, `lastPeerConsecutiveFailures`, `lastPeerReconnectBackoffMs`, `lastRelayAckAtUtc`
+    - response also includes typed edge media diagnostics when available: `mediaReady`, `mediaState`, `mediaFailureReason`, `mediaReportedAtUtc`, `mediaStreamId`, `mediaSource`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/signals`
   - `GET /api/v1/sessions/{sessionId}/transport/webrtc/signals?recipientPeerId={peerId}&afterSequence={n}&limit={n}`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/online`
@@ -194,6 +195,7 @@ Useful environment variables:
 - `HIDBRIDGE_TRANSPORT_PROVIDER_OVERRIDES` (example: `endpoint_local_demo=uart;endpoint_remote_lab=webrtc`)
 - `HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY`
 - `HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE`
+- `HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY` (default: `false`; when `true` readiness endpoint requires media path to be healthy)
 - `HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR` (default: `true`; retries once via default provider when WebRTC route returns transport error and no explicit `transportProvider` override was requested)
 
 WebRTC relay command path:

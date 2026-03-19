@@ -78,6 +78,8 @@ var webRtcRequireCapability = bool.TryParse(builder.Configuration["HIDBRIDGE_WEB
     && parsedWebRtcRequireCapability;
 var webRtcEnableConnectorBridge = !bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE"], out var parsedWebRtcEnableConnectorBridge)
     || parsedWebRtcEnableConnectorBridge;
+var webRtcRequireMediaReady = bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY"], out var parsedWebRtcRequireMediaReady)
+    && parsedWebRtcRequireMediaReady;
 var transportFallbackToDefaultOnWebRtcError = !bool.TryParse(builder.Configuration["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"], out var parsedTransportFallbackToDefaultOnWebRtcError)
     || parsedTransportFallbackToDefaultOnWebRtcError;
 
@@ -129,6 +131,7 @@ builder.Services.AddSingleton<WebRtcCommandRelayService>();
 builder.Services.AddSingleton(new WebRtcRelayReadinessOptions
 {
     DefaultProvider = RealtimeTransportProvider.WebRtcDataChannel,
+    RequireMediaReady = webRtcRequireMediaReady,
 });
 builder.Services.AddSingleton<WebRtcRelayReadinessService>();
 builder.Services.AddSingleton<EnsureSessionControlLeaseUseCase>();
@@ -222,6 +225,7 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     UartUsesMasterSecret = !string.IsNullOrWhiteSpace(uartMasterSecret),
     WebRtcRequireCapability = webRtcRequireCapability,
     WebRtcEnableConnectorBridge = webRtcEnableConnectorBridge,
+    WebRtcRequireMediaReady = webRtcRequireMediaReady,
     TransportFallbackToDefaultOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
     AgentId = agentId,
     EndpointId = endpointId,

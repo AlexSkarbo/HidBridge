@@ -93,6 +93,11 @@ public sealed class ApiRuntimeSettings
     public required bool WebRtcEnableConnectorBridge { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether WebRTC readiness policy requires media path readiness.
+    /// </summary>
+    public required bool WebRtcRequireMediaReady { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether transport routing falls back to the default provider after WebRTC transport errors.
     /// </summary>
     public required bool TransportFallbackToDefaultOnWebRtcError { get; init; }

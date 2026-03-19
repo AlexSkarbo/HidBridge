@@ -22,6 +22,7 @@ public sealed class EdgeProxyWorker : BackgroundService
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IEdgeCommandExecutor _commandExecutor;
+    private readonly IEdgeMediaReadinessProbe _mediaReadinessProbe;
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
     private readonly Dictionary<string, string> _callerHeaders;
@@ -37,11 +38,13 @@ public sealed class EdgeProxyWorker : BackgroundService
     public EdgeProxyWorker(
         IHttpClientFactory httpClientFactory,
         IEdgeCommandExecutor commandExecutor,
+        IEdgeMediaReadinessProbe mediaReadinessProbe,
         IOptions<EdgeProxyOptions> options,
         ILogger<EdgeProxyWorker> logger)
     {
         _httpClientFactory = httpClientFactory;
         _commandExecutor = commandExecutor;
+        _mediaReadinessProbe = mediaReadinessProbe;
         _options = options.Value;
         _logger = logger;
         _accessToken = _options.AccessToken;
@@ -81,12 +84,11 @@ public sealed class EdgeProxyWorker : BackgroundService
             {
                 if (!_peerOnline)
                 {
-                    await MarkPeerOnlineAsync(
-                        BuildPeerMetadata(
-                            state: "Connected",
-                            failureReason: null,
-                            consecutiveFailures: consecutiveFailures,
-                            reconnectBackoffMs: null),
+                    await RefreshPeerOnlineMetadataAsync(
+                        state: "Connected",
+                        failureReason: null,
+                        consecutiveFailures: consecutiveFailures,
+                        reconnectBackoffMs: null,
                         stoppingToken);
                     _peerOnline = true;
                     if (consecutiveFailures > 0)
@@ -119,12 +121,11 @@ public sealed class EdgeProxyWorker : BackgroundService
                 {
                     try
                     {
-                        await MarkPeerOnlineAsync(
-                            BuildPeerMetadata(
-                                state: "Degraded",
-                                failureReason: $"{ex.GetType().Name}: {ex.Message}",
-                                consecutiveFailures: consecutiveFailures,
-                                reconnectBackoffMs: (int)backoff.TotalMilliseconds),
+                        await RefreshPeerOnlineMetadataAsync(
+                            state: "Degraded",
+                            failureReason: $"{ex.GetType().Name}: {ex.Message}",
+                            consecutiveFailures: consecutiveFailures,
+                            reconnectBackoffMs: (int)backoff.TotalMilliseconds,
                             stoppingToken);
                     }
                     catch (Exception degradedEx)
@@ -189,6 +190,14 @@ public sealed class EdgeProxyWorker : BackgroundService
         {
             return;
         }
+
+        // Refresh peer metadata on each heartbeat tick so readiness projections include up-to-date media state.
+        await RefreshPeerOnlineMetadataAsync(
+            state: "Connected",
+            failureReason: null,
+            consecutiveFailures: 0,
+            reconnectBackoffMs: null,
+            cancellationToken);
 
         var payload = JsonSerializer.Serialize(new
         {
@@ -384,6 +393,85 @@ public sealed class EdgeProxyWorker : BackgroundService
                 },
             };
         }
+    }
+
+    /// <summary>
+    /// Recomputes peer metadata (transport + media readiness) and publishes online snapshot.
+    /// </summary>
+    private async Task RefreshPeerOnlineMetadataAsync(
+        string state,
+        string? failureReason,
+        int consecutiveFailures,
+        int? reconnectBackoffMs,
+        CancellationToken cancellationToken)
+    {
+        var metadata = new Dictionary<string, string>(
+            BuildPeerMetadata(state, failureReason, consecutiveFailures, reconnectBackoffMs),
+            StringComparer.OrdinalIgnoreCase);
+
+        var mediaSnapshot = await ReadMediaSnapshotSafeAsync(cancellationToken);
+        foreach (var pair in BuildMediaMetadata(mediaSnapshot))
+        {
+            metadata[pair.Key] = pair.Value;
+        }
+
+        await MarkPeerOnlineAsync(metadata, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads media readiness from probe and converts probe failures into deterministic degraded snapshots.
+    /// </summary>
+    private async Task<EdgeMediaReadinessSnapshot> ReadMediaSnapshotSafeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _mediaReadinessProbe.GetReadinessAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read media readiness snapshot.");
+            return new EdgeMediaReadinessSnapshot(
+                IsReady: false,
+                State: "ProbeFailed",
+                ReportedAtUtc: DateTimeOffset.UtcNow,
+                FailureReason: ex.Message,
+                StreamId: _options.MediaStreamId,
+                Source: _options.MediaSource,
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["probeErrorType"] = ex.GetType().Name,
+                });
+        }
+    }
+
+    /// <summary>
+    /// Projects media snapshot fields into peer metadata consumed by relay health/readiness services.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> BuildMediaMetadata(EdgeMediaReadinessSnapshot snapshot)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mediaReady"] = snapshot.IsReady ? "true" : "false",
+            ["mediaState"] = string.IsNullOrWhiteSpace(snapshot.State) ? "Unknown" : snapshot.State,
+            ["mediaReportedAtUtc"] = snapshot.ReportedAtUtc.ToString("O"),
+        };
+
+        if (!string.IsNullOrWhiteSpace(snapshot.FailureReason))
+        {
+            metadata["mediaFailureReason"] = snapshot.FailureReason;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.StreamId))
+        {
+            metadata["mediaStreamId"] = snapshot.StreamId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.Source))
+        {
+            metadata["mediaSource"] = snapshot.Source;
+        }
+
+        return metadata;
     }
 
     /// <summary>

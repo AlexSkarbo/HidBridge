@@ -23,4 +23,15 @@ public sealed class WebRtcRelayReadinessOptions
     /// Gets or sets provider used by default when readiness is requested without explicit override.
     /// </summary>
     public RealtimeTransportProvider DefaultProvider { get; init; } = RealtimeTransportProvider.WebRtcDataChannel;
+
+    /// <summary>
+    /// Gets or sets whether readiness policy requires media path to report ready.
+    /// </summary>
+    public bool RequireMediaReady { get; init; }
+
+    /// <summary>
+    /// Gets or sets media states considered healthy when <see cref="RequireMediaReady"/> is enabled.
+    /// </summary>
+    public IReadOnlySet<string> HealthyMediaStates { get; init; }
+        = new HashSet<string>(new[] { "Ready", "Streaming", "Connected", "Healthy" }, StringComparer.OrdinalIgnoreCase);
 }

@@ -27,6 +27,12 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Null(metrics["lastPeerFailureReason"]);
         Assert.Null(metrics["lastPeerConsecutiveFailures"]);
         Assert.Null(metrics["lastPeerReconnectBackoffMs"]);
+        Assert.Null(metrics["lastPeerMediaReady"]);
+        Assert.Null(metrics["lastPeerMediaState"]);
+        Assert.Null(metrics["lastPeerMediaFailureReason"]);
+        Assert.Null(metrics["lastPeerMediaReportedAtUtc"]);
+        Assert.Null(metrics["lastPeerMediaStreamId"]);
+        Assert.Null(metrics["lastPeerMediaSource"]);
     }
 
     [Fact]
@@ -69,6 +75,11 @@ public sealed class WebRtcCommandRelayServiceTests
                 ["failureReason"] = "",
                 ["consecutiveFailures"] = "2",
                 ["reconnectBackoffMs"] = "1500",
+                ["mediaReady"] = "true",
+                ["mediaState"] = "Streaming",
+                ["mediaReportedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
+                ["mediaStreamId"] = "stream-main",
+                ["mediaSource"] = "hdmi-usb-capture",
             },
             cancellationToken);
 
@@ -77,7 +88,12 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Equal("Connected", metrics["lastPeerState"]?.ToString());
         Assert.Equal("2", metrics["lastPeerConsecutiveFailures"]?.ToString());
         Assert.Equal("1500", metrics["lastPeerReconnectBackoffMs"]?.ToString());
+        Assert.Equal("true", metrics["lastPeerMediaReady"]?.ToString());
+        Assert.Equal("Streaming", metrics["lastPeerMediaState"]?.ToString());
+        Assert.Equal("stream-main", metrics["lastPeerMediaStreamId"]?.ToString());
+        Assert.Equal("hdmi-usb-capture", metrics["lastPeerMediaSource"]?.ToString());
         Assert.NotNull(metrics["lastPeerSeenAtUtc"]);
+        Assert.NotNull(metrics["lastPeerMediaReportedAtUtc"]);
     }
 
     [Fact]

@@ -61,6 +61,12 @@ public sealed class WebRtcRelayReadinessService
         var lastPeerFailureReason = TryReadMetricString(health.Metrics, "lastPeerFailureReason");
         var lastPeerSeenAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerSeenAtUtc");
         var lastRelayAckAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastRelayAckAtUtc");
+        var mediaReady = TryReadMetricBoolean(health.Metrics, "lastPeerMediaReady");
+        var mediaState = TryReadMetricString(health.Metrics, "lastPeerMediaState");
+        var mediaFailureReason = TryReadMetricString(health.Metrics, "lastPeerMediaFailureReason");
+        var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
+        var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
+        var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
 
         var (ready, reasonCode, reason) = ResolveReadiness(
             snapshot.State,
@@ -68,7 +74,10 @@ public sealed class WebRtcRelayReadinessService
             connected,
             onlinePeerCount,
             lastPeerState,
-            lastPeerFailureReason);
+            lastPeerFailureReason,
+            mediaReady,
+            mediaState,
+            mediaFailureReason);
         return new SessionTransportReadinessBody(
             SessionId: snapshot.SessionId,
             AgentId: snapshot.AgentId,
@@ -84,6 +93,12 @@ public sealed class WebRtcRelayReadinessService
             LastPeerFailureReason: lastPeerFailureReason,
             LastPeerSeenAtUtc: lastPeerSeenAtUtc,
             LastRelayAckAtUtc: lastRelayAckAtUtc,
+            MediaReady: mediaReady,
+            MediaState: mediaState,
+            MediaFailureReason: mediaFailureReason,
+            MediaReportedAtUtc: mediaReportedAtUtc,
+            MediaStreamId: mediaStreamId,
+            MediaSource: mediaSource,
             Metrics: health.Metrics,
             EvaluatedAtUtc: DateTimeOffset.UtcNow);
     }
@@ -97,7 +112,10 @@ public sealed class WebRtcRelayReadinessService
         bool connected,
         int onlinePeerCount,
         string? lastPeerState,
-        string? lastPeerFailureReason)
+        string? lastPeerFailureReason,
+        bool? mediaReady,
+        string? mediaState,
+        string? mediaFailureReason)
     {
         if (sessionState is SessionState.Ended or SessionState.Failed or SessionState.Terminating)
         {
@@ -128,7 +146,50 @@ public sealed class WebRtcRelayReadinessService
             return (false, "peer_state_unhealthy", $"Last peer state is '{lastPeerState}', which is outside readiness policy.{suffix}");
         }
 
+        if (_options.RequireMediaReady)
+        {
+            if (mediaReady != true)
+            {
+                var suffix = string.IsNullOrWhiteSpace(mediaFailureReason)
+                    ? string.Empty
+                    : $" Failure reason: {mediaFailureReason}";
+                return (false, "media_not_ready", $"Media capture path is not ready.{suffix}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(mediaState)
+                && !_options.HealthyMediaStates.Contains(mediaState))
+            {
+                var suffix = string.IsNullOrWhiteSpace(mediaFailureReason)
+                    ? string.Empty
+                    : $" Failure reason: {mediaFailureReason}";
+                return (false, "media_state_unhealthy", $"Media state is '{mediaState}', which is outside readiness policy.{suffix}");
+            }
+        }
+
         return (true, "ready", "WebRTC relay route is ready.");
+    }
+
+    /// <summary>
+    /// Reads a metrics dictionary value as boolean.
+    /// </summary>
+    private static bool? TryReadMetricBoolean(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            bool direct => direct,
+            JsonElement { ValueKind: JsonValueKind.True } => true,
+            JsonElement { ValueKind: JsonValueKind.False } => false,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetInt32(out var number) => number != 0,
+            JsonElement { ValueKind: JsonValueKind.String } element when bool.TryParse(element.GetString(), out var parsedJsonBool) => parsedJsonBool,
+            string text when bool.TryParse(text, out var parsedTextBool) => parsedTextBool,
+            _ when int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt) => parsedInt != 0,
+            _ => null,
+        };
     }
 
     /// <summary>

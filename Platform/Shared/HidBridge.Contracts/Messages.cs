@@ -455,7 +455,13 @@ public sealed record SessionTransportHealthBody(
     string? LastPeerFailureReason = null,
     int? LastPeerConsecutiveFailures = null,
     int? LastPeerReconnectBackoffMs = null,
-    DateTimeOffset? LastRelayAckAtUtc = null);
+    DateTimeOffset? LastRelayAckAtUtc = null,
+    bool? MediaReady = null,
+    string? MediaState = null,
+    string? MediaFailureReason = null,
+    DateTimeOffset? MediaReportedAtUtc = null,
+    string? MediaStreamId = null,
+    string? MediaSource = null);
 
 /// <summary>
 /// Carries one transport-readiness projection for WebRTC relay command routing.
@@ -475,6 +481,12 @@ public sealed record SessionTransportReadinessBody(
     string? LastPeerFailureReason = null,
     DateTimeOffset? LastPeerSeenAtUtc = null,
     DateTimeOffset? LastRelayAckAtUtc = null,
+    bool? MediaReady = null,
+    string? MediaState = null,
+    string? MediaFailureReason = null,
+    DateTimeOffset? MediaReportedAtUtc = null,
+    string? MediaStreamId = null,
+    string? MediaSource = null,
     IReadOnlyDictionary<string, object?>? Metrics = null,
     DateTimeOffset? EvaluatedAtUtc = null);
 

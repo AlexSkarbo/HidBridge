@@ -66,6 +66,19 @@ public sealed class EdgeProxyOptionsTests
         Assert.Contains("CommandExecutor", error);
     }
 
+    [Fact]
+    public void IsValid_RejectsInvalidMediaHealthUrl()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaHealthUrl = "not-a-url";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("MediaHealthUrl", error);
+    }
+
     /// <summary>
     /// Creates valid baseline options for mode-specific overrides.
     /// </summary>

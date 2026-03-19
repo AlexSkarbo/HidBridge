@@ -289,7 +289,13 @@ public sealed record SessionTransportHealthViewModel(
     string? LastPeerFailureReason = null,
     int? LastPeerConsecutiveFailures = null,
     int? LastPeerReconnectBackoffMs = null,
-    DateTimeOffset? LastRelayAckAtUtc = null);
+    DateTimeOffset? LastRelayAckAtUtc = null,
+    bool? MediaReady = null,
+    string? MediaState = null,
+    string? MediaFailureReason = null,
+    DateTimeOffset? MediaReportedAtUtc = null,
+    string? MediaStreamId = null,
+    string? MediaSource = null);
 
 /// <summary>
 /// Represents one transport readiness projection for a session route.
@@ -309,6 +315,12 @@ public sealed record SessionTransportReadinessViewModel(
     string? LastPeerFailureReason = null,
     DateTimeOffset? LastPeerSeenAtUtc = null,
     DateTimeOffset? LastRelayAckAtUtc = null,
+    bool? MediaReady = null,
+    string? MediaState = null,
+    string? MediaFailureReason = null,
+    DateTimeOffset? MediaReportedAtUtc = null,
+    string? MediaStreamId = null,
+    string? MediaSource = null,
     IReadOnlyDictionary<string, object?>? Metrics = null,
     DateTimeOffset? EvaluatedAtUtc = null);
 

@@ -24,6 +24,12 @@ builder.Services.AddHttpClient("edge-proxy")
         client.BaseAddress = new Uri(options.BaseUrl, UriKind.Absolute);
         client.Timeout = TimeSpan.FromSeconds(Math.Max(5, options.HttpTimeoutSec));
     });
+builder.Services.AddHttpClient("edge-proxy-media")
+    .ConfigureHttpClient((serviceProvider, client) =>
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<EdgeProxyOptions>>().Value;
+        client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.MediaHealthTimeoutSec));
+    });
 
 builder.Services.AddSingleton<IEdgeCommandExecutor>(serviceProvider =>
 {
@@ -52,6 +58,7 @@ builder.Services.AddSingleton<IEdgeCommandExecutor>(serviceProvider =>
 });
 
 builder.Services.AddHostedService<EdgeProxyWorker>();
+builder.Services.AddSingleton<IEdgeMediaReadinessProbe, EdgeProxyMediaReadinessProbe>();
 
 var app = builder.Build();
 app.Run();

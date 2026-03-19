@@ -17,6 +17,7 @@ This worker:
 3. forwards commands through configured executor (`ControlWs` or direct `UART HID`);
 4. publishes ACK back to API;
 5. emits periodic heartbeat signal packets.
+6. publishes typed media-readiness metadata as part of peer online snapshots.
 
 ACK compatibility notes:
 - the worker accepts peer ACK fields `ok`, `success`, or `status` (`ok|success|applied|accepted|done` treated as success);
@@ -42,6 +43,12 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 - `UARTINJECTTIMEOUTMS` (default: `200`)
 - `UARTINJECTRETRIES` (default: `2`)
 - `UARTRELEASEPORTAFTEREXECUTE` (default: `false`)
+- `MEDIAHEALTHURL` (optional, defaults to `http(s)://<control-ws-host>/health` when `CONTROLWSURL` is set)
+- `MEDIAHEALTHTIMEOUTSEC` (default: `3`)
+- `MEDIASTREAMID` (default: `edge-main`)
+- `MEDIASOURCE` (default: `edge-capture`)
+- `REQUIREMEDIAREADY` (default: `false`, used by server-side readiness policy when enabled)
+- `ASSUMEMEDIAREADYWITHOUTPROBE` (default: `false`)
 - `PRINCIPALID` (default: `smoke-runner`)
 - `TENANTID` / `ORGANIZATIONID`
 - `ACCESSTOKEN` (optional)

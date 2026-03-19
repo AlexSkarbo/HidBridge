@@ -51,6 +51,12 @@ public sealed class EdgeProxyWorkerLifecycleTests
             Assert.Contains("\"relayAdapterWsRoundtripMs\":42.5", ackPayload, StringComparison.Ordinal);
             Assert.Contains("\"transportRelayMode\":1", ackPayload, StringComparison.Ordinal);
 
+            var onlinePayload = await handler.OnlinePayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"mediaReady\":\"true\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaState\":\"Ready\"", onlinePayload, StringComparison.Ordinal);
+
             Assert.True(handler.OnlineSeen);
             Assert.True(handler.HeartbeatSeen);
             var executed = Assert.Single(executor.Executed);
@@ -146,6 +152,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
         return new EdgeProxyWorker(
             httpClientFactory,
             executor,
+            new StubEdgeMediaReadinessProbe(),
             Options.Create(options),
             NullLogger<EdgeProxyWorker>.Instance);
     }
@@ -171,6 +178,8 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
         public TaskCompletionSource<string> AckPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource<string> OnlinePayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public TaskCompletionSource<bool> OfflineTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
@@ -186,6 +195,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
             if (request.Method == HttpMethod.Post && path.EndsWith("/transport/webrtc/peers/peer-1/online", StringComparison.Ordinal))
             {
                 OnlineSeen = true;
+                OnlinePayloadTask.TrySetResult(body);
                 return JsonOk(new { ok = true });
             }
 
@@ -275,6 +285,22 @@ public sealed class EdgeProxyWorkerLifecycleTests
         {
             Executed.Add(request);
             return Task.FromResult(_resultFactory(request));
+        }
+    }
+
+    /// <summary>
+    /// Returns deterministic ready media snapshots for lifecycle tests.
+    /// </summary>
+    private sealed class StubEdgeMediaReadinessProbe : IEdgeMediaReadinessProbe
+    {
+        public Task<EdgeMediaReadinessSnapshot> GetReadinessAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new EdgeMediaReadinessSnapshot(
+                IsReady: true,
+                State: "Ready",
+                ReportedAtUtc: DateTimeOffset.UtcNow,
+                StreamId: "stream-main",
+                Source: "test-capture"));
         }
     }
 }

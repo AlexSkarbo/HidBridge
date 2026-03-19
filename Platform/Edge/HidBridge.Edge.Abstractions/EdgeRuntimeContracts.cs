@@ -58,3 +58,26 @@ public interface IEdgeMediaPublisher
     /// </summary>
     Task PublishAsync(EdgeMediaSignal signal, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Represents one typed media-readiness snapshot emitted by an edge runtime.
+/// </summary>
+public sealed record EdgeMediaReadinessSnapshot(
+    bool IsReady,
+    string State,
+    DateTimeOffset ReportedAtUtc,
+    string? FailureReason = null,
+    string? StreamId = null,
+    string? Source = null,
+    IReadOnlyDictionary<string, object?>? Metrics = null);
+
+/// <summary>
+/// Provides media-capture readiness diagnostics for edge runtime orchestration.
+/// </summary>
+public interface IEdgeMediaReadinessProbe
+{
+    /// <summary>
+    /// Reads current media readiness snapshot.
+    /// </summary>
+    Task<EdgeMediaReadinessSnapshot> GetReadinessAsync(CancellationToken cancellationToken);
+}
