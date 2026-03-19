@@ -126,6 +126,17 @@ public enum CommandStatus
 }
 
 /// <summary>
+/// Defines normalized transport message categories used by relay adapters.
+/// </summary>
+public enum TransportMessageKind
+{
+    Command,
+    Ack,
+    Event,
+    Heartbeat,
+}
+
+/// <summary>
 /// Groups errors by subsystem so they can be routed and analyzed consistently.
 /// </summary>
 public enum ErrorDomain
@@ -379,6 +390,69 @@ public sealed record CommandAckBody(
     IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
+/// Carries normalized HID command arguments for edge transport execution.
+/// </summary>
+public sealed record TransportHidCommandArgsBody(
+    string? Text = null,
+    string? Shortcut = null,
+    int? Usage = null,
+    int? Modifiers = null,
+    int? Dx = null,
+    int? Dy = null,
+    int? Wheel = null,
+    int? Delta = null,
+    string? Button = null,
+    bool? Down = null,
+    int? HoldMs = null,
+    int? InterfaceSelector = null);
+
+/// <summary>
+/// Carries one typed transport command message.
+/// </summary>
+public sealed record TransportCommandMessageBody(
+    TransportMessageKind Kind,
+    string CommandId,
+    string SessionId,
+    string Action,
+    TransportHidCommandArgsBody Args,
+    int TimeoutMs,
+    DateTimeOffset CreatedAtUtc);
+
+/// <summary>
+/// Carries one typed transport acknowledgment message.
+/// </summary>
+public sealed record TransportAckMessageBody(
+    TransportMessageKind Kind,
+    string CommandId,
+    CommandStatus Status,
+    DateTimeOffset AcknowledgedAtUtc,
+    ErrorInfo? Error = null,
+    IReadOnlyDictionary<string, double>? Metrics = null);
+
+/// <summary>
+/// Carries one typed transport heartbeat message.
+/// </summary>
+public sealed record TransportHeartbeatMessageBody(
+    TransportMessageKind Kind,
+    string SessionId,
+    string PeerId,
+    string EndpointId,
+    string PrincipalId,
+    DateTimeOffset Utc);
+
+/// <summary>
+/// Carries one typed transport event message.
+/// </summary>
+public sealed record TransportEventMessageBody(
+    TransportMessageKind Kind,
+    string SessionId,
+    string PeerId,
+    string Name,
+    DateTimeOffset OccurredAtUtc,
+    string? ReasonCode = null,
+    string? Message = null);
+
+/// <summary>
 /// Represents one persisted command journal entry.
 /// </summary>
 public sealed record CommandJournalEntryBody(
@@ -423,6 +497,32 @@ public sealed record WebRtcPeerStateBody(
     bool IsOnline,
     DateTimeOffset LastSeenAtUtc,
     IReadOnlyDictionary<string, string>? Metadata = null);
+
+/// <summary>
+/// Carries one WebRTC signaling publish request.
+/// </summary>
+public sealed record WebRtcSignalPublishBody(
+    WebRtcSignalKind Kind,
+    string SenderPeerId,
+    string? RecipientPeerId,
+    string Payload,
+    string? Mid = null,
+    int? MLineIndex = null);
+
+/// <summary>
+/// Carries one WebRTC peer presence publish request.
+/// </summary>
+public sealed record WebRtcPeerPresenceBody(
+    string? EndpointId = null,
+    IReadOnlyDictionary<string, string>? Metadata = null);
+
+/// <summary>
+/// Carries one WebRTC relay command ACK publish request.
+/// </summary>
+public sealed record WebRtcCommandAckPublishBody(
+    CommandStatus? Status = null,
+    ErrorInfo? Error = null,
+    IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
 /// Carries one command envelope published through the WebRTC relay path.

@@ -240,8 +240,8 @@ public sealed class WebRtcEdgeAgentIntegrationTests
 
         return new EdgeProxyWorker(
             new StaticHttpClientFactory(httpClient),
-            commandExecutor,
-            mediaProbe ?? new StubEdgeMediaReadinessProbe(),
+            new HidAdapterBridge(commandExecutor),
+            new CaptureAdapterBridge(mediaProbe ?? new StubEdgeMediaReadinessProbe()),
             Options.Create(options),
             NullLogger<EdgeProxyWorker>.Instance);
     }
@@ -623,6 +623,60 @@ public sealed class WebRtcEdgeAgentIntegrationTests
             Executed.Add(request);
             return Task.FromResult(_resultFactory(request));
         }
+    }
+
+    /// <summary>
+    /// Adapts executor-oriented test stubs to worker control-adapter boundary.
+    /// </summary>
+    private sealed class HidAdapterBridge : IHidBridgeHidAdapter
+    {
+        private readonly IEdgeCommandExecutor _executor;
+
+        public HidAdapterBridge(IEdgeCommandExecutor executor)
+        {
+            _executor = executor;
+        }
+
+        public Task<EdgeCommandExecutionResult> ExecuteAsync(TransportCommandMessageBody command, CancellationToken cancellationToken)
+        {
+            var args = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(command.Args.Text)) { args["text"] = command.Args.Text; }
+            if (!string.IsNullOrWhiteSpace(command.Args.Shortcut)) { args["shortcut"] = command.Args.Shortcut; }
+            if (command.Args.Usage.HasValue) { args["usage"] = command.Args.Usage.Value; }
+            if (command.Args.Modifiers.HasValue) { args["modifiers"] = command.Args.Modifiers.Value; }
+            if (command.Args.Dx.HasValue) { args["dx"] = command.Args.Dx.Value; }
+            if (command.Args.Dy.HasValue) { args["dy"] = command.Args.Dy.Value; }
+            if (command.Args.Wheel.HasValue) { args["wheel"] = command.Args.Wheel.Value; }
+            if (command.Args.Delta.HasValue) { args["delta"] = command.Args.Delta.Value; }
+            if (!string.IsNullOrWhiteSpace(command.Args.Button)) { args["button"] = command.Args.Button; }
+            if (command.Args.Down.HasValue) { args["down"] = command.Args.Down.Value; }
+            if (command.Args.HoldMs.HasValue) { args["holdMs"] = command.Args.HoldMs.Value; }
+            if (command.Args.InterfaceSelector.HasValue) { args["itfSel"] = command.Args.InterfaceSelector.Value; }
+
+            return _executor.ExecuteAsync(
+                new EdgeCommandRequest(
+                    command.CommandId,
+                    command.Action,
+                    args,
+                    command.TimeoutMs),
+                cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Adapts media-probe stubs to worker capture-adapter boundary.
+    /// </summary>
+    private sealed class CaptureAdapterBridge : ICaptureAdapter
+    {
+        private readonly IEdgeMediaReadinessProbe _probe;
+
+        public CaptureAdapterBridge(IEdgeMediaReadinessProbe probe)
+        {
+            _probe = probe;
+        }
+
+        public Task<EdgeMediaReadinessSnapshot> GetReadinessAsync(CancellationToken cancellationToken)
+            => _probe.GetReadinessAsync(cancellationToken);
     }
 
     /// <summary>

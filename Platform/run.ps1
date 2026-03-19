@@ -8,6 +8,7 @@ param(
     [int]$StaleAfterMinutes = -1,
     [switch]$IncludeWebRtcEdgeAgentSmoke,
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
+    [switch]$SkipWebRtcEdgeAgentAcceptance,
     [string]$WebRtcCommandExecutor,
     [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl,
@@ -150,6 +151,13 @@ if ($IncludeWebRtcEdgeAgentAcceptance) {
     $tasksWithWebRtcAcceptance = @("ci-local", "full")
     if ($tasksWithWebRtcAcceptance -contains $Task) {
         $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentAcceptance") | Out-Null
+    }
+}
+
+if ($SkipWebRtcEdgeAgentAcceptance) {
+    $tasksWithWebRtcAcceptanceSkip = @("ci-local", "full")
+    if ($tasksWithWebRtcAcceptanceSkip -contains $Task) {
+        $effectiveForwardArgs.Add("-SkipWebRtcEdgeAgentAcceptance") | Out-Null
     }
 }
 

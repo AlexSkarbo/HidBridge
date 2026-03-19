@@ -56,9 +56,11 @@ builder.Services.AddSingleton<IEdgeCommandExecutor>(serviceProvider =>
         _ => throw new InvalidOperationException($"Unsupported command executor kind '{executorKind}'."),
     };
 });
+builder.Services.AddSingleton<IHidBridgeHidAdapter, HidBridgeHidAdapter>();
 
 builder.Services.AddHostedService<EdgeProxyWorker>();
 builder.Services.AddSingleton<IEdgeMediaReadinessProbe, EdgeProxyMediaReadinessProbe>();
+builder.Services.AddSingleton<ICaptureAdapter, CaptureAdapter>();
 
 var app = builder.Build();
 app.Run();

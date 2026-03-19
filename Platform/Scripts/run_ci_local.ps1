@@ -6,7 +6,8 @@ param(
     [switch]$SkipDoctor,
     [switch]$SkipChecks,
     [switch]$SkipBearerSmoke,
-    [switch]$IncludeWebRtcEdgeAgentAcceptance,
+    [bool]$IncludeWebRtcEdgeAgentAcceptance = $true,
+    [switch]$SkipWebRtcEdgeAgentAcceptance,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
     [switch]$AllowLegacyControlWs,
@@ -43,7 +44,11 @@ try {
         Invoke-LoggedScript -Results $results -Name "Bearer Smoke" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_api_bearer_smoke.ps1") -Parameters @{ Configuration = $Configuration; ConnectionString = $ConnectionString; Schema = $Schema; AuthAuthority = $AuthAuthority } -StopOnFailure:$StopOnFailure
     }
 
-    if ($IncludeWebRtcEdgeAgentAcceptance) {
+    if (-not $IncludeWebRtcEdgeAgentAcceptance -and -not $SkipWebRtcEdgeAgentAcceptance) {
+        throw "WebRTC edge-agent acceptance lane is required for CI gate. Set -SkipWebRtcEdgeAgentAcceptance only for emergency/local override."
+    }
+
+    if ($IncludeWebRtcEdgeAgentAcceptance -and -not $SkipWebRtcEdgeAgentAcceptance) {
         if ([string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) -and -not $AllowLegacyControlWs) {
             throw "WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
         }

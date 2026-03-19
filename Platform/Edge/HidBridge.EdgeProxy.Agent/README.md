@@ -19,6 +19,15 @@ This worker:
 5. emits periodic heartbeat signal packets.
 6. publishes typed media-readiness metadata as part of peer online snapshots.
 
+Lifecycle states emitted in peer metadata:
+
+- `Starting`
+- `Connecting`
+- `Connected`
+- `Degraded`
+- `Reconnecting`
+- `Offline`
+
 ACK compatibility notes:
 - the worker accepts peer ACK fields `ok`, `success`, or `status` (`ok|success|applied|accepted|done` treated as success);
 - the websocket client closes with normal close handshake after ACK to reduce noisy remote `close handshake` errors.
@@ -32,7 +41,7 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 - `PEERID` (required)
 - `ENDPOINTID` (required)
 - `CONTROLWSURL` (default: `ws://127.0.0.1:28092/ws/control`)
-- `COMMANDEXECUTOR` (`controlws` default, `uart` for direct HID bridge mode)
+- `COMMANDEXECUTOR` (`uart` default, `controlws` only for legacy exp-022 compatibility)
 - `UARTPORT` (required for `COMMANDEXECUTOR=uart`)
 - `UARTBAUD` (default: `3000000`)
 - `UARTHMACKEY` (default: `changeme`)

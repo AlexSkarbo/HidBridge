@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HidBridge.Edge.Abstractions;
+using HidBridge.Contracts;
 using HidBridge.EdgeProxy.Agent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -37,8 +38,8 @@ public sealed class EdgeProxyWorkerLifecycleTests
             BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
         };
         var factory = new StaticHttpClientFactory(client);
-        var executor = new StubEdgeCommandExecutor(_ => EdgeCommandExecutionResult.Applied(42.5));
-        var worker = CreateWorker(factory, executor);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(42.5));
+        var worker = CreateWorker(factory, hidAdapter);
 
         try
         {
@@ -54,6 +55,9 @@ public sealed class EdgeProxyWorkerLifecycleTests
             var onlinePayload = await handler.OnlinePayloadTask.Task.WaitAsync(
                 TimeSpan.FromSeconds(5),
                 TestContext.Current.CancellationToken);
+            Assert.Contains("\"state\":\"Connected\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"stateChangedAtUtc\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"stateReason\":\"none\"", onlinePayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaReady\":\"true\"", onlinePayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaState\":\"Ready\"", onlinePayload, StringComparison.Ordinal);
             var mediaPayload = await handler.MediaPayloadTask.Task.WaitAsync(
@@ -64,7 +68,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
             Assert.True(handler.OnlineSeen);
             Assert.True(handler.HeartbeatSeen);
-            var executed = Assert.Single(executor.Executed);
+            var executed = Assert.Single(hidAdapter.Executed);
             Assert.Equal("cmd-1", executed.CommandId);
         }
         finally
@@ -101,12 +105,12 @@ public sealed class EdgeProxyWorkerLifecycleTests
             BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
         };
         var factory = new StaticHttpClientFactory(client);
-        var executor = new StubEdgeCommandExecutor(_ =>
+        var hidAdapter = new StubHidBridgeHidAdapter(_ =>
             EdgeCommandExecutionResult.Rejected(
                 "E_WEBRTC_PEER_EXECUTION_FAILED",
                 "Peer returned non-success response.",
                 19.0));
-        var worker = CreateWorker(factory, executor);
+        var worker = CreateWorker(factory, hidAdapter);
 
         try
         {
@@ -132,7 +136,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
     /// <summary>
     /// Creates worker with deterministic options for lifecycle tests.
     /// </summary>
-    private static EdgeProxyWorker CreateWorker(IHttpClientFactory httpClientFactory, IEdgeCommandExecutor executor)
+    private static EdgeProxyWorker CreateWorker(IHttpClientFactory httpClientFactory, IHidBridgeHidAdapter hidAdapter)
     {
         var options = new EdgeProxyOptions
         {
@@ -156,8 +160,8 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
         return new EdgeProxyWorker(
             httpClientFactory,
-            executor,
-            new StubEdgeMediaReadinessProbe(),
+            hidAdapter,
+            new StubCaptureAdapter(new StubEdgeMediaReadinessProbe()),
             Options.Create(options),
             NullLogger<EdgeProxyWorker>.Instance);
     }
@@ -282,18 +286,18 @@ public sealed class EdgeProxyWorkerLifecycleTests
     /// <summary>
     /// Captures command requests and returns deterministic execution results.
     /// </summary>
-    private sealed class StubEdgeCommandExecutor : IEdgeCommandExecutor
+    private sealed class StubHidBridgeHidAdapter : IHidBridgeHidAdapter
     {
-        private readonly Func<EdgeCommandRequest, EdgeCommandExecutionResult> _resultFactory;
+        private readonly Func<TransportCommandMessageBody, EdgeCommandExecutionResult> _resultFactory;
 
-        public StubEdgeCommandExecutor(Func<EdgeCommandRequest, EdgeCommandExecutionResult> resultFactory)
+        public StubHidBridgeHidAdapter(Func<TransportCommandMessageBody, EdgeCommandExecutionResult> resultFactory)
         {
             _resultFactory = resultFactory;
         }
 
-        public List<EdgeCommandRequest> Executed { get; } = [];
+        public List<TransportCommandMessageBody> Executed { get; } = [];
 
-        public Task<EdgeCommandExecutionResult> ExecuteAsync(EdgeCommandRequest request, CancellationToken cancellationToken)
+        public Task<EdgeCommandExecutionResult> ExecuteAsync(TransportCommandMessageBody request, CancellationToken cancellationToken)
         {
             Executed.Add(request);
             return Task.FromResult(_resultFactory(request));
@@ -314,5 +318,18 @@ public sealed class EdgeProxyWorkerLifecycleTests
                 StreamId: "stream-main",
                 Source: "test-capture"));
         }
+    }
+
+    private sealed class StubCaptureAdapter : ICaptureAdapter
+    {
+        private readonly IEdgeMediaReadinessProbe _probe;
+
+        public StubCaptureAdapter(IEdgeMediaReadinessProbe probe)
+        {
+            _probe = probe;
+        }
+
+        public Task<EdgeMediaReadinessSnapshot> GetReadinessAsync(CancellationToken cancellationToken)
+            => _probe.GetReadinessAsync(cancellationToken);
     }
 }

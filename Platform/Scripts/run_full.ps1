@@ -6,7 +6,8 @@ param(
     [switch]$StopOnFailure,
     [switch]$SkipRealmSync,
     [switch]$SkipCiLocal,
-    [switch]$IncludeWebRtcEdgeAgentAcceptance,
+    [bool]$IncludeWebRtcEdgeAgentAcceptance = $true,
+    [switch]$SkipWebRtcEdgeAgentAcceptance,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
     [switch]$AllowLegacyControlWs,
@@ -40,6 +41,7 @@ try {
             Schema = $Schema
             AuthAuthority = $AuthAuthority
             IncludeWebRtcEdgeAgentAcceptance = $IncludeWebRtcEdgeAgentAcceptance
+            SkipWebRtcEdgeAgentAcceptance = $SkipWebRtcEdgeAgentAcceptance
             WebRtcCommandExecutor = $WebRtcCommandExecutor
             WebRtcControlHealthUrl = $WebRtcControlHealthUrl
             WebRtcPeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)

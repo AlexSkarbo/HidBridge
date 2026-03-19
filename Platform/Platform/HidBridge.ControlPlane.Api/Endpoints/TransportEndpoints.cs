@@ -636,20 +636,4 @@ public static class TransportEndpoints
         };
     }
 
-    private sealed record WebRtcSignalPublishBody(
-        WebRtcSignalKind Kind,
-        string SenderPeerId,
-        string? RecipientPeerId,
-        string Payload,
-        string? Mid = null,
-        int? MLineIndex = null);
-
-    private sealed record WebRtcPeerPresenceBody(
-        string? EndpointId = null,
-        IReadOnlyDictionary<string, string>? Metadata = null);
-
-    private sealed record WebRtcCommandAckPublishBody(
-        CommandStatus? Status = null,
-        ErrorInfo? Error = null,
-        IReadOnlyDictionary<string, double>? Metrics = null);
 }

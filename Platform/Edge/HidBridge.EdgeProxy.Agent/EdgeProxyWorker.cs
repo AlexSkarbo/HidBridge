@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net;
 using HidBridge.Edge.Abstractions;
+using HidBridge.Contracts;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,11 +19,15 @@ public sealed class EdgeProxyWorker : BackgroundService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
+        Converters =
+        {
+            new JsonStringEnumConverter(),
+        },
     };
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IEdgeCommandExecutor _commandExecutor;
-    private readonly IEdgeMediaReadinessProbe _mediaReadinessProbe;
+    private readonly IHidBridgeHidAdapter _hidAdapter;
+    private readonly ICaptureAdapter _captureAdapter;
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
     private readonly Dictionary<string, string> _callerHeaders;
@@ -31,20 +36,23 @@ public sealed class EdgeProxyWorker : BackgroundService
     private int? _lastSignalSequence;
     private string _accessToken;
     private bool _peerOnline;
+    private EdgeProxyLifecycleState _lifecycleState = EdgeProxyLifecycleState.Starting;
+    private DateTimeOffset _lifecycleStateChangedAtUtc = DateTimeOffset.UtcNow;
+    private string? _lifecycleStateReason;
 
     /// <summary>
     /// Initializes a new <see cref="EdgeProxyWorker"/> instance.
     /// </summary>
     public EdgeProxyWorker(
         IHttpClientFactory httpClientFactory,
-        IEdgeCommandExecutor commandExecutor,
-        IEdgeMediaReadinessProbe mediaReadinessProbe,
+        IHidBridgeHidAdapter hidAdapter,
+        ICaptureAdapter captureAdapter,
         IOptions<EdgeProxyOptions> options,
         ILogger<EdgeProxyWorker> logger)
     {
         _httpClientFactory = httpClientFactory;
-        _commandExecutor = commandExecutor;
-        _mediaReadinessProbe = mediaReadinessProbe;
+        _hidAdapter = hidAdapter;
+        _captureAdapter = captureAdapter;
         _options = options.Value;
         _logger = logger;
         _accessToken = _options.AccessToken;
@@ -84,13 +92,15 @@ public sealed class EdgeProxyWorker : BackgroundService
             {
                 if (!_peerOnline)
                 {
+                    TransitionLifecycleState(EdgeProxyLifecycleState.Connecting, "opening relay peer session");
                     await RefreshPeerOnlineMetadataAsync(
-                        state: "Connected",
+                        state: EdgeProxyLifecycleState.Connected,
                         failureReason: null,
                         consecutiveFailures: consecutiveFailures,
                         reconnectBackoffMs: null,
                         stoppingToken);
                     _peerOnline = true;
+                    TransitionLifecycleState(EdgeProxyLifecycleState.Connected, null);
                     if (consecutiveFailures > 0)
                     {
                         _logger.LogInformation("Edge proxy recovered after {FailureCount} transient failures.", consecutiveFailures);
@@ -119,10 +129,11 @@ public sealed class EdgeProxyWorker : BackgroundService
 
                 if (_peerOnline)
                 {
+                    TransitionLifecycleState(EdgeProxyLifecycleState.Degraded, $"{ex.GetType().Name}: {ex.Message}");
                     try
                     {
                         await RefreshPeerOnlineMetadataAsync(
-                            state: "Degraded",
+                            state: EdgeProxyLifecycleState.Degraded,
                             failureReason: $"{ex.GetType().Name}: {ex.Message}",
                             consecutiveFailures: consecutiveFailures,
                             reconnectBackoffMs: (int)backoff.TotalMilliseconds,
@@ -138,6 +149,7 @@ public sealed class EdgeProxyWorker : BackgroundService
                 {
                     try
                     {
+                        TransitionLifecycleState(EdgeProxyLifecycleState.Offline, "transient failure threshold reached");
                         await MarkPeerOfflineAsync(stoppingToken);
                         _peerOnline = false;
                         _logger.LogWarning("Edge proxy marked peer offline after {FailureCount} transient failures.", consecutiveFailures);
@@ -148,6 +160,7 @@ public sealed class EdgeProxyWorker : BackgroundService
                     }
                 }
 
+                TransitionLifecycleState(EdgeProxyLifecycleState.Reconnecting, $"retry in {(int)backoff.TotalMilliseconds}ms");
                 await Task.Delay(backoff, stoppingToken);
             }
         }
@@ -156,6 +169,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         {
             try
             {
+                TransitionLifecycleState(EdgeProxyLifecycleState.Offline, "runtime stop requested");
                 await MarkPeerOfflineAsync(CancellationToken.None);
                 _peerOnline = false;
             }
@@ -193,29 +207,28 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         // Refresh peer metadata on each heartbeat tick so readiness projections include up-to-date media state.
         await RefreshPeerOnlineMetadataAsync(
-            state: "Connected",
+            state: EdgeProxyLifecycleState.Connected,
             failureReason: null,
             consecutiveFailures: 0,
             reconnectBackoffMs: null,
             cancellationToken);
 
-        var payload = JsonSerializer.Serialize(new
-        {
-            utc = now,
-            adapter = "edge-proxy-agent",
-            peerId = _options.PeerId,
-            endpointId = _options.EndpointId,
-            principalId = _options.PrincipalId,
-        });
+        var heartbeat = new TransportHeartbeatMessageBody(
+            Kind: TransportMessageKind.Heartbeat,
+            SessionId: _options.SessionId,
+            PeerId: _options.PeerId,
+            EndpointId: _options.EndpointId,
+            PrincipalId: _options.PrincipalId,
+            Utc: now);
+        var payload = JsonSerializer.Serialize(heartbeat, JsonOptions);
 
         await SendAsync(HttpMethod.Post,
             $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/signals",
-            new
-            {
-                kind = "Heartbeat",
-                senderPeerId = _options.PeerId,
-                payload,
-            },
+            new WebRtcSignalPublishBody(
+                Kind: WebRtcSignalKind.Heartbeat,
+                SenderPeerId: _options.PeerId,
+                RecipientPeerId: null,
+                Payload: payload),
             cancellationToken);
 
         var query = $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/signals?recipientPeerId={Uri.EscapeDataString(_options.PeerId)}&limit=20";
@@ -224,7 +237,7 @@ public sealed class EdgeProxyWorker : BackgroundService
             query += $"&afterSequence={_lastSignalSequence.Value}";
         }
 
-        var signals = await GetCollectionAsync<WebRtcSignalEnvelope>(query, cancellationToken);
+        var signals = await GetCollectionAsync<WebRtcSignalMessageBody>(query, cancellationToken);
         foreach (var signal in signals)
         {
             _lastSignalSequence = signal.Sequence;
@@ -244,7 +257,7 @@ public sealed class EdgeProxyWorker : BackgroundService
             query += $"&afterSequence={_lastCommandSequence.Value}";
         }
 
-        var envelopes = await GetCollectionAsync<WebRtcCommandEnvelope>(query, cancellationToken);
+        var envelopes = await GetCollectionAsync<WebRtcCommandEnvelopeBody>(query, cancellationToken);
         foreach (var envelope in envelopes.OrderBy(x => x.Sequence))
         {
             if (envelope.Command is null || string.IsNullOrWhiteSpace(envelope.Command.CommandId))
@@ -273,18 +286,21 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// <summary>
     /// Executes one relay command through injected edge command executor and shapes relay ACK payload.
     /// </summary>
-    private async Task<object> ExecuteCommandAsync(CommandRequestBody command, CancellationToken cancellationToken)
+    private async Task<TransportAckMessageBody> ExecuteCommandAsync(CommandRequestBody command, CancellationToken cancellationToken)
     {
-        var effectiveTimeout = Math.Max(1000, command.TimeoutMs ?? _options.CommandTimeoutMs);
+        var effectiveTimeout = Math.Max(1000, command.TimeoutMs);
+        var transportCommand = new TransportCommandMessageBody(
+            Kind: TransportMessageKind.Command,
+            CommandId: command.CommandId,
+            SessionId: command.SessionId,
+            Action: command.Action,
+            Args: BuildTypedHidArgs(command.Args),
+            TimeoutMs: effectiveTimeout,
+            CreatedAtUtc: DateTimeOffset.UtcNow);
 
         try
         {
-            var edgeRequest = new EdgeCommandRequest(
-                CommandId: command.CommandId,
-                Action: command.Action,
-                Args: command.Args,
-                TimeoutMs: effectiveTimeout);
-            var execution = await _commandExecutor.ExecuteAsync(edgeRequest, cancellationToken);
+            var execution = await _hidAdapter.ExecuteAsync(transportCommand, cancellationToken);
 
             var metrics = new Dictionary<string, double>
             {
@@ -294,104 +310,101 @@ public sealed class EdgeProxyWorker : BackgroundService
 
             if (execution.IsSuccess)
             {
-                return new
-                {
-                    status = "Applied",
-                    metrics,
-                };
+                return new TransportAckMessageBody(
+                    Kind: TransportMessageKind.Ack,
+                    CommandId: command.CommandId,
+                    Status: CommandStatus.Applied,
+                    AcknowledgedAtUtc: DateTimeOffset.UtcNow,
+                    Metrics: metrics);
             }
 
             if (execution.IsTimeout)
             {
-                return new
-                {
-                    status = "Timeout",
-                    error = new
-                    {
-                        domain = "Transport",
-                        code = string.IsNullOrWhiteSpace(execution.ErrorCode) ? "E_TRANSPORT_TIMEOUT" : execution.ErrorCode,
-                        message = string.IsNullOrWhiteSpace(execution.ErrorMessage) ? $"WebRTC peer timeout for action '{command.Action}'." : execution.ErrorMessage,
-                        retryable = true,
-                        details = new Dictionary<string, object?>
+                return new TransportAckMessageBody(
+                    Kind: TransportMessageKind.Ack,
+                    CommandId: command.CommandId,
+                    Status: CommandStatus.Timeout,
+                    AcknowledgedAtUtc: DateTimeOffset.UtcNow,
+                    Error: new ErrorInfo(
+                        Domain: ErrorDomain.Transport,
+                        Code: string.IsNullOrWhiteSpace(execution.ErrorCode) ? "E_TRANSPORT_TIMEOUT" : execution.ErrorCode,
+                        Message: string.IsNullOrWhiteSpace(execution.ErrorMessage) ? $"WebRTC peer timeout for action '{command.Action}'." : execution.ErrorMessage,
+                        Retryable: true,
+                        Details: new Dictionary<string, object?>
                         {
                             ["peerId"] = _options.PeerId,
                             ["controlWsUrl"] = _options.ControlWsUrl,
                             ["ackSource"] = "edge-proxy-agent",
-                        },
-                    },
-                    metrics,
-                };
+                        }),
+                    Metrics: metrics);
             }
 
-            return new
-            {
-                status = "Rejected",
-                error = new
-                {
-                    domain = "Command",
-                    code = string.IsNullOrWhiteSpace(execution.ErrorCode) ? "E_WEBRTC_PEER_EXECUTION_FAILED" : execution.ErrorCode,
-                    message = string.IsNullOrWhiteSpace(execution.ErrorMessage) ? "Peer returned non-success response." : execution.ErrorMessage,
-                    retryable = false,
-                    details = new Dictionary<string, object?>
+            return new TransportAckMessageBody(
+                Kind: TransportMessageKind.Ack,
+                CommandId: command.CommandId,
+                Status: CommandStatus.Rejected,
+                AcknowledgedAtUtc: DateTimeOffset.UtcNow,
+                Error: new ErrorInfo(
+                    Domain: ErrorDomain.Command,
+                    Code: string.IsNullOrWhiteSpace(execution.ErrorCode) ? "E_WEBRTC_PEER_EXECUTION_FAILED" : execution.ErrorCode,
+                    Message: string.IsNullOrWhiteSpace(execution.ErrorMessage) ? "Peer returned non-success response." : execution.ErrorMessage,
+                    Retryable: false,
+                    Details: new Dictionary<string, object?>
                     {
                         ["peerId"] = _options.PeerId,
                         ["controlWsUrl"] = _options.ControlWsUrl,
                         ["ackSource"] = "edge-proxy-agent",
-                    },
-                },
-                metrics,
-            };
+                    }),
+                Metrics: metrics);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new
-            {
-                status = "Timeout",
-                error = new
-                {
-                    domain = "Transport",
-                    code = "E_TRANSPORT_TIMEOUT",
-                    message = $"WebRTC peer timeout for action '{command.Action}'.",
-                    retryable = true,
-                    details = new Dictionary<string, object?>
+            return new TransportAckMessageBody(
+                Kind: TransportMessageKind.Ack,
+                CommandId: command.CommandId,
+                Status: CommandStatus.Timeout,
+                AcknowledgedAtUtc: DateTimeOffset.UtcNow,
+                Error: new ErrorInfo(
+                    Domain: ErrorDomain.Transport,
+                    Code: "E_TRANSPORT_TIMEOUT",
+                    Message: $"WebRTC peer timeout for action '{command.Action}'.",
+                    Retryable: true,
+                    Details: new Dictionary<string, object?>
                     {
                         ["peerId"] = _options.PeerId,
                         ["controlWsUrl"] = _options.ControlWsUrl,
                         ["ackSource"] = "edge-proxy-agent",
-                    },
-                },
-                metrics = new Dictionary<string, double>
+                    }),
+                Metrics: new Dictionary<string, double>
                 {
                     ["relayAdapterWsRoundtripMs"] = effectiveTimeout,
                     ["transportRelayMode"] = 1,
-                },
-            };
+                });
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Command failed in edge proxy adapter. CommandId={CommandId}", command.CommandId);
-            return new
-            {
-                status = "Rejected",
-                error = new
-                {
-                    domain = "Command",
-                    code = "E_WEBRTC_PEER_ADAPTER_FAILURE",
-                    message = ex.Message,
-                    retryable = false,
-                    details = new Dictionary<string, object?>
+            return new TransportAckMessageBody(
+                Kind: TransportMessageKind.Ack,
+                CommandId: command.CommandId,
+                Status: CommandStatus.Rejected,
+                AcknowledgedAtUtc: DateTimeOffset.UtcNow,
+                Error: new ErrorInfo(
+                    Domain: ErrorDomain.Command,
+                    Code: "E_WEBRTC_PEER_ADAPTER_FAILURE",
+                    Message: ex.Message,
+                    Retryable: false,
+                    Details: new Dictionary<string, object?>
                     {
                         ["peerId"] = _options.PeerId,
                         ["controlWsUrl"] = _options.ControlWsUrl,
                         ["ackSource"] = "edge-proxy-agent",
-                    },
-                },
-                metrics = new Dictionary<string, double>
+                    }),
+                Metrics: new Dictionary<string, double>
                 {
                     ["relayAdapterWsRoundtripMs"] = effectiveTimeout,
                     ["transportRelayMode"] = 1,
-                },
-            };
+                });
         }
     }
 
@@ -399,14 +412,19 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// Recomputes peer metadata (transport + media readiness) and publishes online snapshot.
     /// </summary>
     private async Task RefreshPeerOnlineMetadataAsync(
-        string state,
+        EdgeProxyLifecycleState state,
         string? failureReason,
         int consecutiveFailures,
         int? reconnectBackoffMs,
         CancellationToken cancellationToken)
     {
         var metadata = new Dictionary<string, string>(
-            BuildPeerMetadata(state, failureReason, consecutiveFailures, reconnectBackoffMs),
+            BuildPeerMetadata(
+                state,
+                failureReason,
+                consecutiveFailures,
+                reconnectBackoffMs,
+                _lifecycleStateChangedAtUtc),
             StringComparer.OrdinalIgnoreCase);
 
         var mediaSnapshot = await ReadMediaSnapshotSafeAsync(cancellationToken);
@@ -420,13 +438,28 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     /// <summary>
+    /// Updates canonical lifecycle state and state-change timestamp.
+    /// </summary>
+    private void TransitionLifecycleState(EdgeProxyLifecycleState nextState, string? reason)
+    {
+        if (_lifecycleState == nextState && string.Equals(_lifecycleStateReason, reason, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lifecycleState = nextState;
+        _lifecycleStateReason = reason;
+        _lifecycleStateChangedAtUtc = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
     /// Reads media readiness from probe and converts probe failures into deterministic degraded snapshots.
     /// </summary>
     private async Task<EdgeMediaReadinessSnapshot> ReadMediaSnapshotSafeAsync(CancellationToken cancellationToken)
     {
         try
         {
-            return await _mediaReadinessProbe.GetReadinessAsync(cancellationToken);
+            return await _captureAdapter.GetReadinessAsync(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -443,6 +476,77 @@ public sealed class EdgeProxyWorker : BackgroundService
                     ["probeErrorType"] = ex.GetType().Name,
                 });
         }
+    }
+
+    /// <summary>
+    /// Projects dynamic command arguments to typed transport HID arguments.
+    /// </summary>
+    private static TransportHidCommandArgsBody BuildTypedHidArgs(IReadOnlyDictionary<string, object?>? args)
+    {
+        args ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+        return new TransportHidCommandArgsBody(
+            Text: ReadString(args, "text"),
+            Shortcut: ReadString(args, "shortcut"),
+            Usage: ReadInt(args, "usage"),
+            Modifiers: ReadInt(args, "modifiers"),
+            Dx: ReadInt(args, "dx"),
+            Dy: ReadInt(args, "dy"),
+            Wheel: ReadInt(args, "wheel"),
+            Delta: ReadInt(args, "delta"),
+            Button: ReadString(args, "button"),
+            Down: ReadBool(args, "down"),
+            HoldMs: ReadInt(args, "holdMs"),
+            InterfaceSelector: ReadInt(args, "itfSel"));
+    }
+
+    private static string? ReadString(IReadOnlyDictionary<string, object?> args, string key)
+        => args.TryGetValue(key, out var value)
+            ? value switch
+            {
+                null => null,
+                string text => text,
+                JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+                _ => value.ToString(),
+            }
+            : null;
+
+    private static int? ReadInt(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int number => number,
+            long number => checked((int)number),
+            byte number => number,
+            JsonElement json when json.ValueKind == JsonValueKind.Number && json.TryGetInt32(out var number) => number,
+            JsonElement { ValueKind: JsonValueKind.String } json when int.TryParse(json.GetString(), out var number) => number,
+            _ when int.TryParse(value.ToString(), out var parsed) => parsed,
+            _ => null,
+        };
+    }
+
+    private static bool? ReadBool(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            bool flag => flag,
+            JsonElement { ValueKind: JsonValueKind.True } => true,
+            JsonElement { ValueKind: JsonValueKind.False } => false,
+            JsonElement { ValueKind: JsonValueKind.String } json when bool.TryParse(json.GetString(), out var parsed) => parsed,
+            JsonElement { ValueKind: JsonValueKind.Number } json when json.TryGetInt32(out var number) => number != 0,
+            _ when bool.TryParse(value.ToString(), out var parsed) => parsed,
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -535,11 +639,9 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         await SendAsync(HttpMethod.Post,
             $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(_options.PeerId)}/online",
-            new
-            {
-                endpointId = _options.EndpointId,
-                metadata = effectiveMetadata,
-            },
+            new WebRtcPeerPresenceBody(
+                EndpointId: _options.EndpointId,
+                Metadata: effectiveMetadata),
             cancellationToken);
     }
 
@@ -700,14 +802,17 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// Builds peer metadata payload used for online/degraded state transitions.
     /// </summary>
     private static IReadOnlyDictionary<string, string> BuildPeerMetadata(
-        string state,
+        EdgeProxyLifecycleState state,
         string? failureReason,
         int consecutiveFailures,
-        int? reconnectBackoffMs)
+        int? reconnectBackoffMs,
+        DateTimeOffset stateChangedAtUtc)
     {
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["state"] = state,
+            ["state"] = state.ToString(),
+            ["stateReason"] = string.IsNullOrWhiteSpace(failureReason) ? "none" : failureReason,
+            ["stateChangedAtUtc"] = stateChangedAtUtc.ToString("O"),
             ["consecutiveFailures"] = consecutiveFailures.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["updatedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
         };
@@ -731,24 +836,5 @@ public sealed class EdgeProxyWorker : BackgroundService
     {
         [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = string.Empty;
-    }
-
-    private sealed class WebRtcSignalEnvelope
-    {
-        public int Sequence { get; set; }
-    }
-
-    private sealed class WebRtcCommandEnvelope
-    {
-        public int Sequence { get; set; }
-        public CommandRequestBody? Command { get; set; }
-    }
-
-    private sealed class CommandRequestBody
-    {
-        public string CommandId { get; set; } = string.Empty;
-        public string Action { get; set; } = string.Empty;
-        public int? TimeoutMs { get; set; }
-        public Dictionary<string, object?> Args { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

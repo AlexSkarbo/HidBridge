@@ -20,9 +20,9 @@ public sealed class EdgeProxyOptions
     public string EndpointId { get; set; } = "";
 
     /// <summary>
-    /// Selects command execution path: <c>controlws</c> (default) or <c>uart</c>.
+    /// Selects command execution path: <c>uart</c> (default) or legacy <c>controlws</c>.
     /// </summary>
-    public string CommandExecutor { get; set; } = "controlws";
+    public string CommandExecutor { get; set; } = "uart";
 
     [Required]
     public string ControlWsUrl { get; set; } = "ws://127.0.0.1:28092/ws/control";
@@ -163,7 +163,7 @@ public sealed class EdgeProxyOptions
             return kind;
         }
 
-        return EdgeProxyCommandExecutorKind.ControlWs;
+        return EdgeProxyCommandExecutorKind.UartHid;
     }
 
     /// <summary>
@@ -241,14 +241,14 @@ public sealed class EdgeProxyOptions
         switch (normalized)
         {
             case "":
-            case "controlws":
-            case "websocket":
-                kind = EdgeProxyCommandExecutorKind.ControlWs;
-                return true;
             case "uart":
             case "uarthid":
             case "serial":
                 kind = EdgeProxyCommandExecutorKind.UartHid;
+                return true;
+            case "controlws":
+            case "websocket":
+                kind = EdgeProxyCommandExecutorKind.ControlWs;
                 return true;
             default:
                 kind = default;

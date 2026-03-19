@@ -719,10 +719,11 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `doctor -StartApiProbe -RequireApi`
   - `run_checks.ps1 -Provider Sql`
   - `run_api_bearer_smoke.ps1`
-  - optional WebRTC edge-agent acceptance lane:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -IncludeWebRtcEdgeAgentAcceptance -WebRtcCommandExecutor uart`
+  - mandatory WebRTC edge-agent acceptance lane (CI gate):
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -WebRtcCommandExecutor uart`
     - acceptance now uses dedicated orchestration (`run_webrtc_edge_agent_acceptance.ps1`): starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
     - optional timeout tuning for acceptance lane: `-PeerReadyTimeoutSec 45` (mapped to `-WebRtcPeerReadyTimeoutSec` for `ci-local`/`full`).
+    - emergency/local override only: `-SkipWebRtcEdgeAgentAcceptance`
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`
 - `Platform/run_export_artifacts.ps1` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
 - additional unified launcher examples:
@@ -741,8 +742,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run_full.ps1
 
 What it does:
 - realm sync with backup
-- local CI (`doctor`, `checks`, `bearer smoke`)
-- optional WebRTC edge-agent acceptance (`-IncludeWebRtcEdgeAgentAcceptance`)
+- local CI (`doctor`, `checks`, `bearer smoke`, mandatory WebRTC edge-agent acceptance lane)
 - artifact export on failure
 
 Recommended operator/dev workflow:
