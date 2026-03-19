@@ -160,37 +160,38 @@
                     {
                         <div class="hid-alert hid-alert--warning">@_transportHealthError</div>
                     }
-                    else if (_transportHealth is null)
+                    else if (_transportReadiness is null && _transportHealth is null)
                     {
                         <div class="hid-empty-state">@T["LoadingTransportHealth"]</div>
                     }
                     else
                     {
                         <div class="hid-meta-grid">
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportProviderLabel"]</div><div class="hid-detail-value">@_transportHealth.Provider</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRouteSource"]</div><div class="hid-detail-value">@_transportHealth.ProviderSource</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportConnectivity"]</div><div class="hid-detail-value">@(_transportHealth.Connected ? T["Yes"] : T["No"])</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportStatus"]</div><div class="hid-detail-value">@_transportHealth.Status</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["ReportedAt"]</div><div class="hid-detail-value">@FormatTime(_transportHealth.ReportedAtUtc)</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportOnlinePeers"]</div><div class="hid-detail-value">@GetTransportOnlinePeerCount(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportProviderLabel"]</div><div class="hid-detail-value">@(_transportReadiness?.Provider ?? _transportHealth?.Provider ?? "—")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRouteSource"]</div><div class="hid-detail-value">@(_transportReadiness?.ProviderSource ?? _transportHealth?.ProviderSource ?? "—")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportReadiness"]</div><div class="hid-detail-value">@GetTransportReadinessLabel()</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportReadinessReasonCode"]</div><div class="hid-detail-value">@GetTransportReadinessReasonCode()</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportReadinessReason"]</div><div class="hid-detail-value">@GetTransportReadinessReason()</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["ReportedAt"]</div><div class="hid-detail-value">@FormatTime(_transportReadiness?.EvaluatedAtUtc ?? _transportHealth?.ReportedAtUtc)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportOnlinePeers"]</div><div class="hid-detail-value">@GetTransportOnlinePeerCount(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPendingAcks"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "pendingAckCount")</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerState"]</div><div class="hid-detail-value">@GetTransportPeerState(_transportHealth)</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerLastSeen"]</div><div class="hid-detail-value">@GetTransportPeerLastSeen(_transportHealth)</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportLastRelayAckAt"]</div><div class="hid-detail-value">@GetTransportLastRelayAckAt(_transportHealth)</div></div>
-                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth.LastCommandAck)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerState"]</div><div class="hid-detail-value">@GetTransportPeerState(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportPeerLastSeen"]</div><div class="hid-detail-value">@GetTransportPeerLastSeen(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportLastRelayAckAt"]</div><div class="hid-detail-value">@GetTransportLastRelayAckAt(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth?.LastCommandAck)</div></div>
                         </div>
 
-                        @if (!string.Equals(GetTransportPeerFailureReason(_transportHealth), "—", StringComparison.Ordinal))
+                        @if (!string.Equals(GetTransportPeerFailureReason(_transportReadiness, _transportHealth), "—", StringComparison.Ordinal))
                         {
-                            <div class="hid-meta-note">@T["TransportPeerFailureReason"]: @GetTransportPeerFailureReason(_transportHealth)</div>
+                            <div class="hid-meta-note">@T["TransportPeerFailureReason"]: @GetTransportPeerFailureReason(_transportReadiness, _transportHealth)</div>
                         }
 
-                        @if (_transportHealth.LastPeerConsecutiveFailures.HasValue || _transportHealth.LastPeerReconnectBackoffMs.HasValue)
+                        @if (_transportHealth?.LastPeerConsecutiveFailures.HasValue == true || _transportHealth?.LastPeerReconnectBackoffMs.HasValue == true)
                         {
                             <div class="hid-meta-note">@T["TransportPeerStability"]: @GetTransportPeerStability(_transportHealth)</div>
                         }
 
-                        @if (_transportHealth.LastCommandAck is null)
+                        @if (_transportHealth?.LastCommandAck is not { } lastAck)
                         {
                             <div class="hid-empty-state">@T["NoTransportAckYet"]</div>
                         }
@@ -198,19 +199,19 @@
                         {
                             <div class="hid-detail-card">
                                 <div class="hid-detail-label">@T["LastTransportAck"]</div>
-                                <div class="hid-detail-value">@_transportHealth.LastCommandAck.Action -> @_transportHealth.LastCommandAck.Status</div>
+                                <div class="hid-detail-value">@lastAck.Action -> @lastAck.Status</div>
                                 <div class="hid-inline-meta">
-                                    <span>@T["CommandId"]: @_transportHealth.LastCommandAck.CommandId</span>
-                                    <span>@T["Channel"]: @_transportHealth.LastCommandAck.Channel</span>
-                                    <span>@T["LastCommand"]: @FormatTime(_transportHealth.LastCommandAck.CompletedAtUtc ?? _transportHealth.LastCommandAck.CreatedAtUtc)</span>
-                                    <span>@T["LastAckRoute"]: @GetAckRoute(_transportHealth.LastCommandAck)</span>
+                                    <span>@T["CommandId"]: @lastAck.CommandId</span>
+                                    <span>@T["Channel"]: @lastAck.Channel</span>
+                                    <span>@T["LastCommand"]: @FormatTime(lastAck.CompletedAtUtc ?? lastAck.CreatedAtUtc)</span>
+                                    <span>@T["LastAckRoute"]: @GetAckRoute(lastAck)</span>
                                 </div>
-                                @if (_transportHealth.LastCommandAck.Error is not null)
+                                @if (lastAck.Error is not null)
                                 {
-                                    <div class="hid-meta-note">@_transportHealth.LastCommandAck.Error.Code · @_transportHealth.LastCommandAck.Error.Message</div>
-                                    @if (_transportHealth.LastCommandAck.Error.Details is not null && _transportHealth.LastCommandAck.Error.Details.Count > 0)
+                                    <div class="hid-meta-note">@lastAck.Error.Code · @lastAck.Error.Message</div>
+                                    @if (lastAck.Error.Details is not null && lastAck.Error.Details.Count > 0)
                                     {
-                                        <div class="hid-meta-note">@T["ErrorDetails"]: @FormatErrorDetails(_transportHealth.LastCommandAck.Error.Details)</div>
+                                        <div class="hid-meta-note">@T["ErrorDetails"]: @FormatErrorDetails(lastAck.Error.Details)</div>
                                     }
                                 }
                             </div>
@@ -623,6 +624,7 @@
     private SessionLobbyViewModel? _lobby;
     private IReadOnlyList<ParticipantActivityViewModel>? _participants;
     private OperatorTimelineViewModel? _timeline;
+    private SessionTransportReadinessViewModel? _transportReadiness;
     private SessionTransportHealthViewModel? _transportHealth;
     private IReadOnlyList<WebRtcSignalMessageViewModel> _webRtcSignals = [];
     private string? _transportHealthError;
@@ -838,6 +840,9 @@
     {
         try
         {
+            _transportReadiness = await ApiClient.GetSessionTransportReadinessAsync(
+                SessionId,
+                "webrtc-datachannel");
             _transportHealth = await ApiClient.GetSessionTransportHealthAsync(SessionId);
             _webRtcSignals = await ApiClient.GetWebRtcSignalsAsync(SessionId, limit: 12)
                 ?? Array.Empty<WebRtcSignalMessageViewModel>();
@@ -845,18 +850,21 @@
         }
         catch (ControlPlaneApiUnavailableException exception)
         {
+            _transportReadiness = null;
             _transportHealth = null;
             _webRtcSignals = [];
             _transportHealthError = exception.Message;
         }
         catch (ControlPlaneApiException exception)
         {
+            _transportReadiness = null;
             _transportHealth = null;
             _webRtcSignals = [];
             _transportHealthError = ResolveApiErrorMessage(exception);
         }
         catch (Exception exception)
         {
+            _transportReadiness = null;
             _transportHealth = null;
             _webRtcSignals = [];
             _transportHealthError = exception.Message;
@@ -1324,10 +1332,47 @@
     }
 
     /// <summary>
-    /// Resolves online relay peer count with typed-field preference and metric fallback.
+    /// Resolves readiness status label from server-side readiness projection.
     /// </summary>
-    private static string GetTransportOnlinePeerCount(SessionTransportHealthViewModel? health)
+    private string GetTransportReadinessLabel()
     {
+        if (_transportReadiness is not null)
+        {
+            return _transportReadiness.Ready ? T["Ready"] : T["NotReady"];
+        }
+
+        if (_transportHealth is not null)
+        {
+            return _transportHealth.Connected ? T["Yes"] : T["No"];
+        }
+
+        return "—";
+    }
+
+    /// <summary>
+    /// Resolves readiness reason code from readiness projection.
+    /// </summary>
+    private string GetTransportReadinessReasonCode()
+        => string.IsNullOrWhiteSpace(_transportReadiness?.ReasonCode) ? "—" : _transportReadiness.ReasonCode;
+
+    /// <summary>
+    /// Resolves readiness reason text from readiness projection.
+    /// </summary>
+    private string GetTransportReadinessReason()
+        => string.IsNullOrWhiteSpace(_transportReadiness?.Reason) ? "—" : _transportReadiness.Reason;
+
+    /// <summary>
+    /// Resolves online relay peer count with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportOnlinePeerCount(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (readiness is not null)
+        {
+            return readiness.OnlinePeerCount.ToString(CultureInfo.InvariantCulture);
+        }
+
         if (health?.OnlinePeerCount is not null)
         {
             return health.OnlinePeerCount.Value.ToString(CultureInfo.InvariantCulture);
@@ -1337,10 +1382,17 @@
     }
 
     /// <summary>
-    /// Resolves relay peer state with typed-field preference and metric fallback.
+    /// Resolves relay peer state with readiness-first preference and health fallback.
     /// </summary>
-    private static string GetTransportPeerState(SessionTransportHealthViewModel? health)
+    private static string GetTransportPeerState(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
     {
+        if (!string.IsNullOrWhiteSpace(readiness?.LastPeerState))
+        {
+            return readiness.LastPeerState!;
+        }
+
         if (!string.IsNullOrWhiteSpace(health?.LastPeerState))
         {
             return health.LastPeerState!;
@@ -1350,10 +1402,17 @@
     }
 
     /// <summary>
-    /// Resolves relay peer failure reason with typed-field preference and metric fallback.
+    /// Resolves relay peer failure reason with readiness-first preference and health fallback.
     /// </summary>
-    private static string GetTransportPeerFailureReason(SessionTransportHealthViewModel? health)
+    private static string GetTransportPeerFailureReason(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
     {
+        if (!string.IsNullOrWhiteSpace(readiness?.LastPeerFailureReason))
+        {
+            return readiness.LastPeerFailureReason!;
+        }
+
         if (!string.IsNullOrWhiteSpace(health?.LastPeerFailureReason))
         {
             return health.LastPeerFailureReason!;
@@ -1363,29 +1422,25 @@
     }
 
     /// <summary>
-    /// Formats relay peer last-seen timestamp.
+    /// Formats relay peer last-seen timestamp with readiness-first preference and health fallback.
     /// </summary>
-    private string GetTransportPeerLastSeen(SessionTransportHealthViewModel? health)
+    private string GetTransportPeerLastSeen(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
     {
-        if (health?.LastPeerSeenAtUtc is not null)
-        {
-            return FormatTime(health.LastPeerSeenAtUtc);
-        }
-
-        return "—";
+        var timestamp = readiness?.LastPeerSeenAtUtc ?? health?.LastPeerSeenAtUtc;
+        return timestamp is null ? "—" : FormatTime(timestamp);
     }
 
     /// <summary>
-    /// Formats relay last-ack timestamp.
+    /// Formats relay last-ack timestamp with readiness-first preference and health fallback.
     /// </summary>
-    private string GetTransportLastRelayAckAt(SessionTransportHealthViewModel? health)
+    private string GetTransportLastRelayAckAt(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
     {
-        if (health?.LastRelayAckAtUtc is not null)
-        {
-            return FormatTime(health.LastRelayAckAtUtc);
-        }
-
-        return "—";
+        var timestamp = readiness?.LastRelayAckAtUtc ?? health?.LastRelayAckAtUtc;
+        return timestamp is null ? "—" : FormatTime(timestamp);
     }
 
     /// <summary>
