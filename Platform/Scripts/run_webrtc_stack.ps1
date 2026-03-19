@@ -15,6 +15,7 @@ param(
     [string]$TokenPassword = "ChangeMe123!",
     [string]$TokenScope = "",
     [int]$PeerReadyTimeoutSec = 30,
+    [string]$OutputJsonPath = "",
     [switch]$SkipIdentityReset = $true,
     [switch]$SkipCiLocal = $true,
     [switch]$SkipRuntimeBootstrap,
@@ -547,6 +548,16 @@ $summary = [pscustomobject]@{
     adapterStderr = $adapterStderr
 }
 $summary | ConvertTo-Json -Depth 6 | Set-Content -Path $stackSummaryPath -Encoding utf8
+if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
+    $resolvedOutputPath = if ([System.IO.Path]::IsPathRooted($OutputJsonPath)) { $OutputJsonPath } else { Join-Path $platformRoot $OutputJsonPath }
+    $resolvedOutputDir = Split-Path -Parent $resolvedOutputPath
+    if (-not [string]::IsNullOrWhiteSpace($resolvedOutputDir) -and -not (Test-Path -Path $resolvedOutputDir)) {
+        New-Item -ItemType Directory -Force -Path $resolvedOutputDir | Out-Null
+    }
+
+    # Writes stack summary to caller-specified location for CI/acceptance orchestration.
+    $summary | ConvertTo-Json -Depth 6 | Set-Content -Path $resolvedOutputPath -Encoding utf8
+}
 
 Write-Host ""
 Write-Host "=== WebRTC Stack Summary ==="

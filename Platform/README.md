@@ -379,6 +379,10 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - for direct UART mode you can skip control-health precheck: add `-SkipControlHealthCheck`
   - smoke now waits for WebRTC transport readiness by typed `/transport/health` fields before dispatching command; disable this check only for compatibility troubleshooting via `-SkipTransportHealthCheck`.
   - readiness polling knobs: `-TransportHealthAttempts`, `-TransportHealthDelayMs`.
+- one-command acceptance for CI/local automation (boots stack + runs smoke):
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
+  - in controlws mode add `-ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
+  - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
 - include the WebRTC smoke as part of `demo-flow`:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor uart`
   - exp-022 compatibility mode:
@@ -709,6 +713,8 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `run_api_bearer_smoke.ps1`
   - optional WebRTC edge-agent acceptance lane:
     - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -IncludeWebRtcEdgeAgentAcceptance -WebRtcCommandExecutor uart`
+    - acceptance now uses dedicated orchestration (`run_webrtc_edge_agent_acceptance.ps1`): starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
+    - optional timeout tuning for acceptance lane: `-PeerReadyTimeoutSec 45` (mapped to `-WebRtcPeerReadyTimeoutSec` for `ci-local`/`full`).
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`
 - `Platform/run_export_artifacts.ps1` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
 - additional unified launcher examples:

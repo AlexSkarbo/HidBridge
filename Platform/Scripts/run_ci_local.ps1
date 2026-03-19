@@ -10,6 +10,9 @@ param(
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
+    [int]$WebRtcPeerReadyTimeoutSec = 45,
+    [switch]$WebRtcStopExistingBeforeAcceptance = $true,
+    [switch]$WebRtcStopStackAfterAcceptance = $true,
     [switch]$StopOnFailure,
     [switch]$ExportArtifactsOnFailure = $true,
     [switch]$IncludeSmokeDataOnFailure = $true,
@@ -40,14 +43,21 @@ try {
     }
 
     if ($IncludeWebRtcEdgeAgentAcceptance) {
-        # Runs primary edge-agent acceptance path without Terminal-B manual fallback.
-        $webrtcDemoFlowParameters = @{
-            SkipIdentityReset = $true
-            IncludeWebRtcEdgeAgentSmoke = $true
-            WebRtcCommandExecutor = $WebRtcCommandExecutor
-            WebRtcControlHealthUrl = $WebRtcControlHealthUrl
+        # Runs end-to-end API + edge-agent relay smoke directly (stack bootstrap + Applied command assertion).
+        $webrtcAcceptanceParameters = @{
+            ApiBaseUrl = "http://127.0.0.1:18093"
+            CommandExecutor = $WebRtcCommandExecutor
+            ControlHealthUrl = $WebRtcControlHealthUrl
+            PeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)
         }
-        Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Acceptance" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_demo_flow.ps1") -Parameters $webrtcDemoFlowParameters -StopOnFailure:$StopOnFailure
+        if ($WebRtcStopExistingBeforeAcceptance) {
+            $webrtcAcceptanceParameters.StopExisting = $true
+        }
+        if ($WebRtcStopStackAfterAcceptance) {
+            $webrtcAcceptanceParameters.StopStackAfter = $true
+        }
+
+        Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Acceptance" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_webrtc_edge_agent_acceptance.ps1") -Parameters $webrtcAcceptanceParameters -StopOnFailure:$StopOnFailure
     }
 }
 catch {

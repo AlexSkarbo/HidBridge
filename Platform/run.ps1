@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "close-failed-rooms", "close-stale-rooms")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "close-failed-rooms", "close-stale-rooms")]
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
@@ -63,6 +63,7 @@ $scriptMap = @{
     "webrtc-stack" = "run_webrtc_stack.ps1"
     "webrtc-stack-terminal-b" = "run_webrtc_stack_terminal_b.ps1"
     "webrtc-edge-agent-smoke" = "run_webrtc_edge_agent_smoke.ps1"
+    "webrtc-edge-agent-acceptance" = "run_webrtc_edge_agent_acceptance.ps1"
     "close-failed-rooms" = "run_close_failed_rooms.ps1"
     "close-stale-rooms" = "run_close_stale_rooms.ps1"
 }
@@ -93,6 +94,7 @@ if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteS
         "uart-diagnostics",
         "webrtc-relay-smoke",
         "webrtc-peer-adapter",
+        "webrtc-edge-agent-acceptance",
         "close-failed-rooms",
         "close-stale-rooms"
     )
@@ -103,7 +105,8 @@ if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteS
             throw "BaseUrl must be an absolute URL for task '$Task'."
         }
 
-        $effectiveForwardArgs.Add("-BaseUrl") | Out-Null
+        $baseUrlParameterName = if ($Task -eq "webrtc-edge-agent-acceptance") { "-ApiBaseUrl" } else { "-BaseUrl" }
+        $effectiveForwardArgs.Add($baseUrlParameterName) | Out-Null
         $effectiveForwardArgs.Add($BaseUrl) | Out-Null
     }
 }
@@ -195,14 +198,14 @@ if ($PSBoundParameters.ContainsKey("ControlHealthAttempts") -and $ControlHealthA
 }
 
 if ($SkipTransportHealthCheck) {
-    $tasksWithTransportHealthCheckSwitch = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
+    $tasksWithTransportHealthCheckSwitch = @("webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
     if ($tasksWithTransportHealthCheckSwitch -contains $Task) {
         $effectiveForwardArgs.Add("-SkipTransportHealthCheck") | Out-Null
     }
 }
 
 if ($PSBoundParameters.ContainsKey("TransportHealthAttempts") -and $TransportHealthAttempts -gt 0) {
-    $tasksWithTransportHealthAttempts = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
+    $tasksWithTransportHealthAttempts = @("webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
     if ($tasksWithTransportHealthAttempts -contains $Task) {
         $effectiveForwardArgs.Add("-TransportHealthAttempts") | Out-Null
         $effectiveForwardArgs.Add([string]$TransportHealthAttempts) | Out-Null
@@ -210,7 +213,7 @@ if ($PSBoundParameters.ContainsKey("TransportHealthAttempts") -and $TransportHea
 }
 
 if ($PSBoundParameters.ContainsKey("TransportHealthDelayMs") -and $TransportHealthDelayMs -gt 0) {
-    $tasksWithTransportHealthDelay = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
+    $tasksWithTransportHealthDelay = @("webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
     if ($tasksWithTransportHealthDelay -contains $Task) {
         $effectiveForwardArgs.Add("-TransportHealthDelayMs") | Out-Null
         $effectiveForwardArgs.Add([string]$TransportHealthDelayMs) | Out-Null
@@ -218,7 +221,7 @@ if ($PSBoundParameters.ContainsKey("TransportHealthDelayMs") -and $TransportHeal
 }
 
 if ($PSBoundParameters.ContainsKey("ControlWsUrl") -and -not [string]::IsNullOrWhiteSpace($ControlWsUrl)) {
-    $tasksWithControlWsUrl = @("webrtc-stack", "webrtc-peer-adapter")
+    $tasksWithControlWsUrl = @("webrtc-stack", "webrtc-peer-adapter", "webrtc-edge-agent-acceptance")
     if ($tasksWithControlWsUrl -contains $Task) {
         $effectiveForwardArgs.Add("-ControlWsUrl") | Out-Null
         $effectiveForwardArgs.Add($ControlWsUrl) | Out-Null
@@ -226,28 +229,28 @@ if ($PSBoundParameters.ContainsKey("ControlWsUrl") -and -not [string]::IsNullOrW
 }
 
 if ($PSBoundParameters.ContainsKey("CommandExecutor") -and -not [string]::IsNullOrWhiteSpace($CommandExecutor)) {
-    if ($Task -eq "webrtc-stack") {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-CommandExecutor") | Out-Null
         $effectiveForwardArgs.Add($CommandExecutor) | Out-Null
     }
 }
 
 if ($PSBoundParameters.ContainsKey("UartPort") -and -not [string]::IsNullOrWhiteSpace($UartPort)) {
-    if ($Task -eq "webrtc-stack") {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-UartPort") | Out-Null
         $effectiveForwardArgs.Add($UartPort) | Out-Null
     }
 }
 
 if ($PSBoundParameters.ContainsKey("UartBaud") -and $UartBaud -gt 0) {
-    if ($Task -eq "webrtc-stack") {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-UartBaud") | Out-Null
         $effectiveForwardArgs.Add([string]$UartBaud) | Out-Null
     }
 }
 
 if ($PSBoundParameters.ContainsKey("UartHmacKey") -and -not [string]::IsNullOrWhiteSpace($UartHmacKey)) {
-    if ($Task -eq "webrtc-stack") {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-UartHmacKey") | Out-Null
         $effectiveForwardArgs.Add($UartHmacKey) | Out-Null
     }
@@ -268,8 +271,12 @@ if ($PSBoundParameters.ContainsKey("AdapterDurationSec") -and $AdapterDurationSe
 }
 
 if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec") -and $PeerReadyTimeoutSec -gt 0) {
-    if ($Task -eq "webrtc-stack") {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-PeerReadyTimeoutSec") | Out-Null
+        $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
+    }
+    elseif ($Task -eq "ci-local" -or $Task -eq "full") {
+        $effectiveForwardArgs.Add("-WebRtcPeerReadyTimeoutSec") | Out-Null
         $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
     }
 }
@@ -282,7 +289,7 @@ if ($PSBoundParameters.ContainsKey("EndpointId") -and -not [string]::IsNullOrWhi
 }
 
 if ($PSBoundParameters.ContainsKey("PrincipalId") -and -not [string]::IsNullOrWhiteSpace($PrincipalId)) {
-    $tasksWithPrincipalId = @("webrtc-stack", "webrtc-peer-adapter", "demo-gate")
+    $tasksWithPrincipalId = @("webrtc-stack", "webrtc-edge-agent-acceptance", "webrtc-peer-adapter", "demo-gate")
     if ($tasksWithPrincipalId -contains $Task) {
         $effectiveForwardArgs.Add("-PrincipalId") | Out-Null
         $effectiveForwardArgs.Add($PrincipalId) | Out-Null

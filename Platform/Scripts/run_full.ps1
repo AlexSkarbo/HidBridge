@@ -10,6 +10,7 @@ param(
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
+    [int]$WebRtcPeerReadyTimeoutSec = 45,
     [switch]$ExportArtifactsOnFailure = $true,
     [switch]$IncludeSmokeDataOnFailure = $true,
     [switch]$IncludeBackupsOnFailure = $true
@@ -40,6 +41,7 @@ try {
             IncludeWebRtcEdgeAgentAcceptance = $IncludeWebRtcEdgeAgentAcceptance
             WebRtcCommandExecutor = $WebRtcCommandExecutor
             WebRtcControlHealthUrl = $WebRtcControlHealthUrl
+            WebRtcPeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)
             ExportArtifactsOnFailure = $ExportArtifactsOnFailure
             IncludeSmokeDataOnFailure = $IncludeSmokeDataOnFailure
             IncludeBackupsOnFailure = $IncludeBackupsOnFailure
