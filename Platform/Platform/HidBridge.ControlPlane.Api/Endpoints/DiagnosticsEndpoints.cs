@@ -82,6 +82,38 @@ public static class DiagnosticsEndpoints
         .WithSummary("Read the archive diagnostics summary.")
         .WithDescription("Returns one archive-oriented summary over audit, telemetry, and command journal data. Optional filters: sessionId and sinceUtc.");
 
+        group.MapGet("/transport/slo", async (
+            string? sessionId,
+            int? windowMinutes,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            TransportSloDiagnosticsService service,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                if (!string.IsNullOrWhiteSpace(sessionId) && caller.IsPresent)
+                {
+                    await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                }
+
+                return Results.Ok(await service.GetSummaryAsync(caller, sessionId, windowMinutes, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Produces<TransportSloSummaryReadModel>(StatusCodes.Status200OK)
+        .WithSummary("Read transport SLO diagnostics summary.")
+        .WithDescription("Returns rolling transport SLO metrics and alerts for relay-ready latency, ACK timeout rate, and reconnect frequency. Optional filters: sessionId and windowMinutes.");
+
         group.MapGet("/archive/audit", async (
             string? sessionId,
             string? category,

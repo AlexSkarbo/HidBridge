@@ -70,6 +70,31 @@ var policyRevisionLifecycleOptions = new PolicyRevisionLifecycleOptions
     Retention = TimeSpan.FromDays(int.TryParse(builder.Configuration["HIDBRIDGE_POLICY_REVISION_RETENTION_DAYS"], out var parsedPolicyRevisionRetentionDays) ? parsedPolicyRevisionRetentionDays : 90),
     MaxRevisionsPerEntity = int.TryParse(builder.Configuration["HIDBRIDGE_POLICY_REVISION_MAX_PER_ENTITY"], out var parsedPolicyRevisionMaxPerEntity) ? parsedPolicyRevisionMaxPerEntity : 20,
 };
+var transportSloOptions = new TransportSloDiagnosticsOptions
+{
+    DefaultWindowMinutes = int.TryParse(builder.Configuration["HIDBRIDGE_SLO_WINDOW_MINUTES"], out var parsedSloWindowMinutes)
+        ? parsedSloWindowMinutes
+        : 60,
+    RelayReadyLatencyWarnMs = double.TryParse(builder.Configuration["HIDBRIDGE_SLO_RELAY_READY_WARN_MS"], out var parsedRelayReadyWarnMs)
+        ? parsedRelayReadyWarnMs
+        : 15_000d,
+    RelayReadyLatencyCriticalMs = double.TryParse(builder.Configuration["HIDBRIDGE_SLO_RELAY_READY_CRITICAL_MS"], out var parsedRelayReadyCriticalMs)
+        ? parsedRelayReadyCriticalMs
+        : 45_000d,
+    AckTimeoutRateWarn = double.TryParse(builder.Configuration["HIDBRIDGE_SLO_ACK_TIMEOUT_RATE_WARN"], out var parsedAckTimeoutRateWarn)
+        ? parsedAckTimeoutRateWarn
+        : 0.05d,
+    AckTimeoutRateCritical = double.TryParse(builder.Configuration["HIDBRIDGE_SLO_ACK_TIMEOUT_RATE_CRITICAL"], out var parsedAckTimeoutRateCritical)
+        ? parsedAckTimeoutRateCritical
+        : 0.20d,
+    ReconnectFrequencyWarnPerHour = double.TryParse(builder.Configuration["HIDBRIDGE_SLO_RECONNECT_FREQ_WARN"], out var parsedReconnectWarnPerHour)
+        ? parsedReconnectWarnPerHour
+        : 2d,
+    ReconnectFrequencyCriticalPerHour = double.TryParse(builder.Configuration["HIDBRIDGE_SLO_RECONNECT_FREQ_CRITICAL"], out var parsedReconnectCriticalPerHour)
+        ? parsedReconnectCriticalPerHour
+        : 5d,
+};
+transportSloOptions.Normalize();
 var transportProviderToken = builder.Configuration["HIDBRIDGE_TRANSPORT_PROVIDER"] ?? "uart";
 var defaultTransportProvider = ParseTransportProvider(transportProviderToken);
 var endpointTransportProviders = ParseTransportProviderOverrides(
@@ -129,6 +154,8 @@ builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
 });
 builder.Services.AddSingleton<WebRtcCommandRelayService>();
 builder.Services.AddSingleton<SessionMediaRegistryService>();
+builder.Services.AddSingleton(transportSloOptions);
+builder.Services.AddSingleton<TransportSloDiagnosticsService>();
 builder.Services.AddSingleton(new WebRtcRelayReadinessOptions
 {
     DefaultProvider = RealtimeTransportProvider.WebRtcDataChannel,
@@ -234,6 +261,7 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     PolicyBootstrap = policyBootstrapOptions,
     Authentication = apiAuthenticationOptions,
     PolicyRevisionLifecycle = policyRevisionLifecycleOptions,
+    TransportSlo = transportSloOptions,
 });
 builder.Services.AddSingleton(policyBootstrapOptions);
 

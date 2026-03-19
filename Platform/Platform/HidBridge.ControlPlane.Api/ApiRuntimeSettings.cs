@@ -131,4 +131,9 @@ public sealed class ApiRuntimeSettings
     /// Gets the active policy revision lifecycle configuration.
     /// </summary>
     public required PolicyRevisionLifecycleOptions PolicyRevisionLifecycle { get; init; }
+
+    /// <summary>
+    /// Gets the active transport SLO diagnostics thresholds.
+    /// </summary>
+    public required TransportSloDiagnosticsOptions TransportSlo { get; init; }
 }

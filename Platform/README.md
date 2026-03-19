@@ -157,6 +157,7 @@ Default ControlPlane API:
   - `GET /api/v1/projections/audit?category={category}&sessionId={sessionId}&principalId={principalId}&sinceUtc={utc}&skip={n}&take={n}`
   - `GET /api/v1/projections/telemetry?scope={scope}&sessionId={sessionId}&metricName={metricName}&sinceUtc={utc}&skip={n}&take={n}`
 - replay/archive diagnostics:
+  - `GET /api/v1/diagnostics/transport/slo?sessionId={sessionId}&windowMinutes={n}`
   - `GET /api/v1/diagnostics/replay/sessions/{sessionId}?take={n}`
   - `GET /api/v1/diagnostics/archive/summary?sessionId={sessionId}&sinceUtc={utc}`
   - `GET /api/v1/diagnostics/archive/audit?sessionId={sessionId}&category={category}&principalId={principalId}&sinceUtc={utc}&skip={n}&take={n}`
@@ -199,6 +200,13 @@ Useful environment variables:
 - `HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE`
 - `HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY` (default: `false`; when `true` readiness endpoint requires media path to be healthy)
 - `HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR` (default: `true`; retries once via default provider when WebRTC route returns transport error and no explicit `transportProvider` override was requested)
+- `HIDBRIDGE_SLO_WINDOW_MINUTES` (default: `60`)
+- `HIDBRIDGE_SLO_RELAY_READY_WARN_MS` (default: `15000`)
+- `HIDBRIDGE_SLO_RELAY_READY_CRITICAL_MS` (default: `45000`)
+- `HIDBRIDGE_SLO_ACK_TIMEOUT_RATE_WARN` (default: `0.05`)
+- `HIDBRIDGE_SLO_ACK_TIMEOUT_RATE_CRITICAL` (default: `0.20`)
+- `HIDBRIDGE_SLO_RECONNECT_FREQ_WARN` (default: `2`)
+- `HIDBRIDGE_SLO_RECONNECT_FREQ_CRITICAL` (default: `5`)
 
 WebRTC relay command path:
 - peers publish online/offline presence via `/transport/webrtc/peers/*`;
@@ -267,6 +275,7 @@ Test entrypoint:
   - audit projections
   - telemetry projections
 - replay/archive diagnostics:
+  - transport SLO summary (relay-ready latency, ACK timeout rate, reconnect frequency)
   - session replay bundle
   - archive summary
   - archive audit slices

@@ -37,6 +37,7 @@ public static class SystemEndpoints
                 "/api/v1/sessions/{sessionId}/transport/webrtc/commands",
                 "/api/v1/events/audit",
                 "/api/v1/events/telemetry",
+                "/api/v1/diagnostics/transport/slo",
                 "/api/v1/runtime/uart",
             },
         }))
@@ -112,6 +113,16 @@ public static class SystemEndpoints
                 maintenanceIntervalSeconds = runtimeSettings.PolicyRevisionLifecycle.MaintenanceInterval.TotalSeconds,
                 retentionDays = runtimeSettings.PolicyRevisionLifecycle.Retention.TotalDays,
                 runtimeSettings.PolicyRevisionLifecycle.MaxRevisionsPerEntity,
+            },
+            transportSlo = new
+            {
+                runtimeSettings.TransportSlo.DefaultWindowMinutes,
+                runtimeSettings.TransportSlo.RelayReadyLatencyWarnMs,
+                runtimeSettings.TransportSlo.RelayReadyLatencyCriticalMs,
+                runtimeSettings.TransportSlo.AckTimeoutRateWarn,
+                runtimeSettings.TransportSlo.AckTimeoutRateCritical,
+                runtimeSettings.TransportSlo.ReconnectFrequencyWarnPerHour,
+                runtimeSettings.TransportSlo.ReconnectFrequencyCriticalPerHour,
             },
             maintenance = new
             {

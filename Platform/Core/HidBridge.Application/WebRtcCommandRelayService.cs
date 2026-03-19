@@ -158,6 +158,11 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerFailureReason"] = null,
                 ["lastPeerConsecutiveFailures"] = null,
                 ["lastPeerReconnectBackoffMs"] = null,
+                ["firstPeerSeenAtUtc"] = null,
+                ["firstPeerReadyAtUtc"] = null,
+                ["relayReadyLatencyMs"] = null,
+                ["reconnectTransitionCount"] = 0,
+                ["connectedTransitionCount"] = 0,
                 ["lastPeerMediaReady"] = null,
                 ["lastPeerMediaState"] = null,
                 ["lastPeerMediaFailureReason"] = null,
@@ -176,7 +181,12 @@ public sealed class WebRtcCommandRelayService
         private readonly ConcurrentDictionary<string, WebRtcPeerStateBody> _peers = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentQueue<WebRtcCommandEnvelopeBody> _commands = new();
         private readonly ConcurrentDictionary<string, TaskCompletionSource<CommandAckBody>> _pendingAcks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _sync = new();
         private DateTimeOffset? _lastRelayAckAtUtc;
+        private DateTimeOffset? _firstPeerSeenAtUtc;
+        private DateTimeOffset? _firstPeerReadyAtUtc;
+        private int _reconnectTransitionCount;
+        private int _connectedTransitionCount;
 
         public WebRtcPeerStateBody UpsertPeer(
             string sessionId,
@@ -186,6 +196,7 @@ public sealed class WebRtcCommandRelayService
             IReadOnlyDictionary<string, string>? metadata)
         {
             var nowUtc = DateTimeOffset.UtcNow;
+            _peers.TryGetValue(peerId, out var previousSnapshot);
             var snapshot = _peers.AddOrUpdate(
                 peerId,
                 _ => new WebRtcPeerStateBody(
@@ -202,7 +213,48 @@ public sealed class WebRtcCommandRelayService
                     LastSeenAtUtc = nowUtc,
                     Metadata = metadata ?? existing.Metadata,
                 });
+            UpdateLifecycleCounters(previousSnapshot?.Metadata, snapshot.Metadata, isOnline, nowUtc);
             return snapshot;
+        }
+
+        /// <summary>
+        /// Tracks relay lifecycle transitions to support reconnect and ready-latency diagnostics.
+        /// </summary>
+        private void UpdateLifecycleCounters(
+            IReadOnlyDictionary<string, string>? previousMetadata,
+            IReadOnlyDictionary<string, string>? currentMetadata,
+            bool isOnline,
+            DateTimeOffset nowUtc)
+        {
+            lock (_sync)
+            {
+                if (isOnline && !_firstPeerSeenAtUtc.HasValue)
+                {
+                    _firstPeerSeenAtUtc = ResolveStateChangedAtUtc(currentMetadata) ?? nowUtc;
+                }
+
+                var previousState = TryReadMetadataValue(previousMetadata, "state");
+                var currentState = TryReadMetadataValue(currentMetadata, "state");
+                if (string.IsNullOrWhiteSpace(currentState)
+                    || string.Equals(previousState, currentState, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (string.Equals(currentState, "Reconnecting", StringComparison.OrdinalIgnoreCase))
+                {
+                    _reconnectTransitionCount++;
+                }
+
+                if (string.Equals(currentState, "Connected", StringComparison.OrdinalIgnoreCase))
+                {
+                    _connectedTransitionCount++;
+                    if (!_firstPeerReadyAtUtc.HasValue && IsPeerReady(currentMetadata))
+                    {
+                        _firstPeerReadyAtUtc = ResolveStateChangedAtUtc(currentMetadata) ?? nowUtc;
+                    }
+                }
+            }
         }
 
         public IReadOnlyList<WebRtcPeerStateBody> ListPeers()
@@ -288,7 +340,10 @@ public sealed class WebRtcCommandRelayService
 
         public bool PublishAck(CommandAckBody ack)
         {
-            _lastRelayAckAtUtc = DateTimeOffset.UtcNow;
+            lock (_sync)
+            {
+                _lastRelayAckAtUtc = DateTimeOffset.UtcNow;
+            }
             if (!_pendingAcks.TryRemove(ack.CommandId, out var pendingAck))
             {
                 return false;
@@ -310,17 +365,39 @@ public sealed class WebRtcCommandRelayService
             var onlinePeerCount = matchingPeers.Count(peer => peer.IsOnline);
             var latestPeer = matchingPeers.FirstOrDefault();
             var latestMetadata = latestPeer?.Metadata;
+            DateTimeOffset? lastRelayAckAtUtc;
+            DateTimeOffset? firstPeerSeenAtUtc;
+            DateTimeOffset? firstPeerReadyAtUtc;
+            int reconnectTransitionCount;
+            int connectedTransitionCount;
+            lock (_sync)
+            {
+                lastRelayAckAtUtc = _lastRelayAckAtUtc;
+                firstPeerSeenAtUtc = _firstPeerSeenAtUtc;
+                firstPeerReadyAtUtc = _firstPeerReadyAtUtc;
+                reconnectTransitionCount = _reconnectTransitionCount;
+                connectedTransitionCount = _connectedTransitionCount;
+            }
+
+            var relayReadyLatencyMs = firstPeerSeenAtUtc.HasValue && firstPeerReadyAtUtc.HasValue
+                ? Math.Max(0d, (firstPeerReadyAtUtc.Value - firstPeerSeenAtUtc.Value).TotalMilliseconds)
+                : (double?)null;
             return new Dictionary<string, object?>
             {
                 ["onlinePeerCount"] = onlinePeerCount,
                 ["pendingAckCount"] = _pendingAcks.Count,
                 ["queuedCommandCount"] = _commands.Count,
-                ["lastRelayAckAtUtc"] = _lastRelayAckAtUtc,
+                ["lastRelayAckAtUtc"] = lastRelayAckAtUtc,
                 ["lastPeerSeenAtUtc"] = latestPeer?.LastSeenAtUtc,
                 ["lastPeerState"] = TryReadMetadataValue(latestMetadata, "state"),
                 ["lastPeerFailureReason"] = TryReadMetadataValue(latestMetadata, "failureReason"),
                 ["lastPeerConsecutiveFailures"] = TryReadMetadataValue(latestMetadata, "consecutiveFailures"),
                 ["lastPeerReconnectBackoffMs"] = TryReadMetadataValue(latestMetadata, "reconnectBackoffMs"),
+                ["firstPeerSeenAtUtc"] = firstPeerSeenAtUtc,
+                ["firstPeerReadyAtUtc"] = firstPeerReadyAtUtc,
+                ["relayReadyLatencyMs"] = relayReadyLatencyMs,
+                ["reconnectTransitionCount"] = reconnectTransitionCount,
+                ["connectedTransitionCount"] = connectedTransitionCount,
                 ["lastPeerMediaReady"] = TryReadMetadataValue(latestMetadata, "mediaReady"),
                 ["lastPeerMediaState"] = TryReadMetadataValue(latestMetadata, "mediaState"),
                 ["lastPeerMediaFailureReason"] = TryReadMetadataValue(latestMetadata, "mediaFailureReason"),
@@ -340,6 +417,32 @@ public sealed class WebRtcCommandRelayService
             return metadata.TryGetValue(key, out var value)
                 ? value
                 : null;
+        }
+
+        private static DateTimeOffset? ResolveStateChangedAtUtc(IReadOnlyDictionary<string, string>? metadata)
+        {
+            var raw = TryReadMetadataValue(metadata, "stateChangedAtUtc");
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            return DateTimeOffset.TryParse(raw, out var parsed)
+                ? parsed
+                : null;
+        }
+
+        private static bool IsPeerReady(IReadOnlyDictionary<string, string>? metadata)
+        {
+            var mediaReadyRaw = TryReadMetadataValue(metadata, "mediaReady");
+            if (string.IsNullOrWhiteSpace(mediaReadyRaw))
+            {
+                return true;
+            }
+
+            return bool.TryParse(mediaReadyRaw, out var parsed)
+                ? parsed
+                : string.Equals(mediaReadyRaw, "1", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
