@@ -36,6 +36,24 @@ public sealed record TransportSloThresholdsReadModel(
     double ReconnectFrequencyCriticalPerHour);
 
 /// <summary>
+/// Represents alert counters by severity.
+/// </summary>
+public sealed record TransportSloAlertCountersReadModel(
+    int WarningCount,
+    int CriticalCount);
+
+/// <summary>
+/// Represents explicit threshold-breach flags for primary transport SLO metrics.
+/// </summary>
+public sealed record TransportSloBreachReadModel(
+    bool AckTimeoutRateWarn,
+    bool AckTimeoutRateCritical,
+    bool RelayReadyLatencyP95Warn,
+    bool RelayReadyLatencyP95Critical,
+    bool ReconnectFrequencyWarnPerHour,
+    bool ReconnectFrequencyCriticalPerHour);
+
+/// <summary>
 /// Represents aggregated transport SLO summary for one diagnostics window.
 /// </summary>
 public sealed record TransportSloSummaryReadModel(
@@ -50,6 +68,8 @@ public sealed record TransportSloSummaryReadModel(
     double? RelayReadyLatencyP95Ms,
     double ReconnectFrequencyPerHour,
     string Status,
+    TransportSloAlertCountersReadModel AlertCounters,
+    TransportSloBreachReadModel Breaches,
     IReadOnlyList<TransportSloAlertReadModel> Alerts,
     IReadOnlyList<TransportSloSessionReadModel> Sessions,
     TransportSloThresholdsReadModel Thresholds);

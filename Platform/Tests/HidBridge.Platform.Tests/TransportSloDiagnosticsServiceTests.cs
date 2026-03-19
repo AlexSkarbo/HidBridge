@@ -89,6 +89,9 @@ public sealed class TransportSloDiagnosticsServiceTests
         Assert.Equal("critical", summary.Status);
         Assert.Contains(summary.Alerts, alert => alert.Metric == "ack_timeout_rate");
         Assert.Contains(summary.Alerts, alert => alert.Metric == "reconnect_frequency_per_hour");
+        Assert.True(summary.Breaches.AckTimeoutRateCritical);
+        Assert.True(summary.Breaches.ReconnectFrequencyCriticalPerHour);
+        Assert.True(summary.AlertCounters.CriticalCount >= 1);
     }
 
     /// <summary>
@@ -132,6 +135,13 @@ public sealed class TransportSloDiagnosticsServiceTests
         Assert.Equal(1, summary.SessionCount);
         Assert.Equal("session-local", Assert.Single(summary.Sessions).SessionId);
         Assert.Equal(1, summary.RelayCommandCount);
+        Assert.Equal("ok", summary.Status);
+        Assert.Equal(0, summary.AlertCounters.WarningCount);
+        Assert.Equal(0, summary.AlertCounters.CriticalCount);
+        Assert.False(summary.Breaches.AckTimeoutRateWarn);
+        Assert.False(summary.Breaches.AckTimeoutRateCritical);
+        Assert.False(summary.Breaches.ReconnectFrequencyWarnPerHour);
+        Assert.False(summary.Breaches.ReconnectFrequencyCriticalPerHour);
     }
 
     /// <summary>

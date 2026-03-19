@@ -158,6 +158,11 @@ Default ControlPlane API:
   - `GET /api/v1/projections/telemetry?scope={scope}&sessionId={sessionId}&metricName={metricName}&sinceUtc={utc}&skip={n}&take={n}`
 - replay/archive diagnostics:
   - `GET /api/v1/diagnostics/transport/slo?sessionId={sessionId}&windowMinutes={n}`
+    - returns threshold-driven SLO status with explicit `alertCounters` and `breaches` flags:
+      - `breaches.ackTimeoutRateWarn|Critical`
+      - `breaches.relayReadyLatencyP95Warn|Critical`
+      - `breaches.reconnectFrequencyWarnPerHour|CriticalPerHour`
+    - `status` is derived from breach severity (`ok|warning|critical`), while `alerts` contains human-readable explanations.
   - `GET /api/v1/diagnostics/replay/sessions/{sessionId}?take={n}`
   - `GET /api/v1/diagnostics/archive/summary?sessionId={sessionId}&sinceUtc={utc}`
   - `GET /api/v1/diagnostics/archive/audit?sessionId={sessionId}&category={category}&principalId={principalId}&sinceUtc={utc}&skip={n}&take={n}`

@@ -99,10 +99,19 @@ public sealed class TransportSloDiagnosticsService
             .OrderBy(static value => value)
             .ToArray();
 
+        var p95Latency = Quantile(relayReadyLatencies, 0.95d);
+        var p50Latency = Quantile(relayReadyLatencies, 0.50d);
         var alerts = EvaluateAlerts(
             ackTimeoutRate,
-            Quantile(relayReadyLatencies, 0.95d),
+            p95Latency,
             reconnectFrequencyPerHour);
+        var breaches = BuildBreaches(
+            ackTimeoutRate,
+            p95Latency,
+            reconnectFrequencyPerHour);
+        var alertCounters = new TransportSloAlertCountersReadModel(
+            WarningCount: alerts.Count(static alert => string.Equals(alert.Severity, "warning", StringComparison.OrdinalIgnoreCase)),
+            CriticalCount: alerts.Count(static alert => string.Equals(alert.Severity, "critical", StringComparison.OrdinalIgnoreCase)));
 
         return new TransportSloSummaryReadModel(
             GeneratedAtUtc: nowUtc,
@@ -112,10 +121,12 @@ public sealed class TransportSloDiagnosticsService
             RelayCommandCount: relayCommandCount,
             RelayTimeoutCount: relayTimeoutCount,
             AckTimeoutRate: ackTimeoutRate,
-            RelayReadyLatencyP50Ms: Quantile(relayReadyLatencies, 0.50d),
-            RelayReadyLatencyP95Ms: Quantile(relayReadyLatencies, 0.95d),
+            RelayReadyLatencyP50Ms: p50Latency,
+            RelayReadyLatencyP95Ms: p95Latency,
             ReconnectFrequencyPerHour: reconnectFrequencyPerHour,
             Status: ResolveStatus(alerts),
+            AlertCounters: alertCounters,
+            Breaches: breaches,
             Alerts: alerts,
             Sessions: sessionRows
                 .OrderByDescending(static row => row.ReconnectFrequencyPerHour)
@@ -128,6 +139,26 @@ public sealed class TransportSloDiagnosticsService
                 AckTimeoutRateCritical: _options.AckTimeoutRateCritical,
                 ReconnectFrequencyWarnPerHour: _options.ReconnectFrequencyWarnPerHour,
                 ReconnectFrequencyCriticalPerHour: _options.ReconnectFrequencyCriticalPerHour));
+    }
+
+    /// <summary>
+    /// Builds explicit breach flags for primary transport SLO metrics.
+    /// </summary>
+    private TransportSloBreachReadModel BuildBreaches(
+        double ackTimeoutRate,
+        double? relayReadyLatencyP95Ms,
+        double reconnectFrequencyPerHour)
+    {
+        var relayP95Warn = relayReadyLatencyP95Ms.HasValue && relayReadyLatencyP95Ms.Value >= _options.RelayReadyLatencyWarnMs;
+        var relayP95Critical = relayReadyLatencyP95Ms.HasValue && relayReadyLatencyP95Ms.Value >= _options.RelayReadyLatencyCriticalMs;
+
+        return new TransportSloBreachReadModel(
+            AckTimeoutRateWarn: ackTimeoutRate >= _options.AckTimeoutRateWarn,
+            AckTimeoutRateCritical: ackTimeoutRate >= _options.AckTimeoutRateCritical,
+            RelayReadyLatencyP95Warn: relayP95Warn,
+            RelayReadyLatencyP95Critical: relayP95Critical,
+            ReconnectFrequencyWarnPerHour: reconnectFrequencyPerHour >= _options.ReconnectFrequencyWarnPerHour,
+            ReconnectFrequencyCriticalPerHour: reconnectFrequencyPerHour >= _options.ReconnectFrequencyCriticalPerHour);
     }
 
     /// <summary>
