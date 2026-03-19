@@ -5,6 +5,7 @@ param(
     [switch]$Build,
     [switch]$Pull,
     [switch]$RemoveVolumes,
+    [switch]$RemoveOrphans,
     [switch]$Follow,
     [switch]$SkipReadyWait,
     [int]$ReadyTimeoutSec = 180
@@ -111,6 +112,9 @@ switch ($Action) {
         if ($Build) {
             $upArgs += "--build"
         }
+        if ($RemoveOrphans) {
+            $upArgs += "--remove-orphans"
+        }
 
         Invoke-Compose -ComposePath $composePath -ComposeArgs $upArgs
 
@@ -128,6 +132,9 @@ switch ($Action) {
         if ($RemoveVolumes) {
             $downArgs += "--volumes"
         }
+        if ($RemoveOrphans) {
+            $downArgs += "--remove-orphans"
+        }
 
         Invoke-Compose -ComposePath $composePath -ComposeArgs $downArgs
     }
@@ -136,12 +143,18 @@ switch ($Action) {
         if ($RemoveVolumes) {
             $restartDownArgs += "--volumes"
         }
+        if ($RemoveOrphans) {
+            $restartDownArgs += "--remove-orphans"
+        }
 
         Invoke-Compose -ComposePath $composePath -ComposeArgs $restartDownArgs
 
         $restartUpArgs = @("up", "-d")
         if ($Build) {
             $restartUpArgs += "--build"
+        }
+        if ($RemoveOrphans) {
+            $restartUpArgs += "--remove-orphans"
         }
 
         Invoke-Compose -ComposePath $composePath -ComposeArgs $restartUpArgs

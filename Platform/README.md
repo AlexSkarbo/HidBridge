@@ -325,6 +325,8 @@ Docker runtime profile (step `21`):
 - stop and cleanup:
   - `docker compose -f docker-compose.platform-runtime.yml down`
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action down`
+- cleanup with orphan removal (useful when old compose services like `hid_postgis` are still attached):
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action down -RemoveOrphans`
 - quick management commands:
   - status: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action status`
   - logs: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action logs -Follow`

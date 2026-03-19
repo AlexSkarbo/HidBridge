@@ -40,6 +40,7 @@ param(
     [switch]$Build,
     [switch]$Pull,
     [switch]$RemoveVolumes,
+    [switch]$RemoveOrphans,
     [switch]$Follow,
     [switch]$SkipReadyWait,
     [int]$ReadyTimeoutSec = -1,
@@ -373,6 +374,10 @@ if ($Task -eq "platform-runtime") {
 
     if ($RemoveVolumes) {
         $effectiveForwardArgs.Add("-RemoveVolumes") | Out-Null
+    }
+
+    if ($RemoveOrphans) {
+        $effectiveForwardArgs.Add("-RemoveOrphans") | Out-Null
     }
 
     if ($Follow) {
