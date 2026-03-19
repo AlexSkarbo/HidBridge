@@ -303,6 +303,35 @@ Local PostgreSQL for Platform:
 - Example smoke-run:
   - `powershell -ExecutionPolicy Bypass -File Platform/run_sql_smoke.ps1 -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 
+Docker runtime profile (step `21`):
+- unified container profile:
+  - `docker compose -f docker-compose.platform-runtime.yml up -d --build`
+- included containers:
+  - `hidbridge_api` (`http://127.0.0.1:18093`)
+  - `hidbridge_web` (`http://127.0.0.1:18110`)
+  - `hidbridge_identity` (`http://127.0.0.1:18096`)
+  - `platform_postgres` (`127.0.0.1:5434`)
+  - `hidbridge_identity_db` (`127.0.0.1:5435`)
+- stop and cleanup:
+  - `docker compose -f docker-compose.platform-runtime.yml down`
+- runtime policy in this profile:
+  - API/Web/Keycloak/Postgres are containerized.
+  - edge-agent remains a separate process/host (not container-coupled).
+  - default API transport in this profile is `webrtc-datachannel`.
+  - web identity is disabled by default (`Identity__Enabled=false`) to keep local bootstrap deterministic; Keycloak is still started for bearer/OIDC integration tests.
+
+Edge-agent as external process (outside docker):
+- run on the target host (or nearby edge host):
+  - `dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj -- --BaseUrl http://127.0.0.1:18093 --SessionId <session-id> --PeerId <peer-id> --EndpointId <endpoint-id> --CommandExecutor uart --UartPort COM6 --UartHmacKey your-master-secret`
+- same flow via environment variables:
+  - `HIDBRIDGE_EDGE_PROXY_BASEURL=http://127.0.0.1:18093`
+  - `HIDBRIDGE_EDGE_PROXY_SESSIONID=<session-id>`
+  - `HIDBRIDGE_EDGE_PROXY_PEERID=<peer-id>`
+  - `HIDBRIDGE_EDGE_PROXY_ENDPOINTID=<endpoint-id>`
+  - `HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR=uart`
+  - `HIDBRIDGE_EDGE_PROXY_UARTPORT=COM6`
+  - `HIDBRIDGE_EDGE_PROXY_UARTHMACKEY=your-master-secret`
+
 One-command demo flow:
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow`
 - Step-by-step runbooks:

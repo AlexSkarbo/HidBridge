@@ -1,0 +1,13 @@
+.git
+.github
+.vs
+**/.idea
+**/.vscode
+**/bin
+**/obj
+Platform/.logs
+Platform/Platform/.logs
+Platform/Artifacts
+WebRtcTests
+Tools
+Firmware

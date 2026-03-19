@@ -1,0 +1,130 @@
+services:
+  platform_postgres:
+    image: postgres:16
+    container_name: hidbridge_platform_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hidbridge
+      POSTGRES_USER: hidbridge
+      POSTGRES_PASSWORD: hidbridge
+    ports:
+      - "5434:5432"
+    volumes:
+      - hidbridge_platform_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hidbridge -d hidbridge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  hidbridge_identity_db:
+    image: postgres:16
+    container_name: hidbridge_identity_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    ports:
+      - "5435:5432"
+    volumes:
+      - hidbridge_identity_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  hidbridge_identity:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: hidbridge_identity
+    restart: unless-stopped
+    depends_on:
+      hidbridge_identity_db:
+        condition: service_healthy
+    command:
+      - start-dev
+      - --import-realm
+      - --http-port=8080
+      - --hostname-strict=false
+      - --proxy-headers=xforwarded
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL_HOST: hidbridge_identity_db
+      KC_DB_URL_PORT: 5432
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+    ports:
+      - "18096:8080"
+    volumes:
+      - ./Platform/Identity/Keycloak/realm-import:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /realms/master HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  hidbridge_api:
+    build:
+      context: .
+      dockerfile: Platform/Platform/HidBridge.ControlPlane.Api/Dockerfile
+    container_name: hidbridge_api
+    restart: unless-stopped
+    depends_on:
+      platform_postgres:
+        condition: service_healthy
+      hidbridge_identity:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      HIDBRIDGE_PERSISTENCE_PROVIDER: Sql
+      HIDBRIDGE_SQL_CONNECTION: Host=platform_postgres;Port=5432;Database=hidbridge;Username=hidbridge;Password=hidbridge
+      HIDBRIDGE_SQL_SCHEMA: hidbridge
+      HIDBRIDGE_SQL_APPLY_MIGRATIONS: "true"
+      HIDBRIDGE_TRANSPORT_PROVIDER: webrtc-datachannel
+      HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY: "true"
+      HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE: "true"
+      HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY: "true"
+      HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES: transport.webrtc.datachannel.v1@1.0
+      HIDBRIDGE_UART_PASSIVE_HEALTH_MODE: "true"
+      HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE: "true"
+      HIDBRIDGE_AUTH_ENABLED: "false"
+      HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK: "true"
+      HIDBRIDGE_AUTH_REQUIRE_HTTPS_METADATA: "false"
+    ports:
+      - "18093:18093"
+    volumes:
+      - hidbridge_api_data:/app/App_Data
+
+  hidbridge_web:
+    build:
+      context: .
+      dockerfile: Platform/Clients/HidBridge.ControlPlane.Web/Dockerfile
+    container_name: hidbridge_web
+    restart: unless-stopped
+    depends_on:
+      hidbridge_api:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ControlPlaneApi__BaseUrl: http://hidbridge_api:18093
+      ControlPlaneApi__OperatorPrincipalId: smoke-runner
+      ControlPlaneApi__PropagateIdentityHeaders: "true"
+      ControlPlaneApi__PropagateAccessToken: "true"
+      Identity__Enabled: "false"
+      Identity__ProviderDisplayName: Keycloak
+      Identity__Authority: http://hidbridge_identity:8080/realms/hidbridge-dev
+      Identity__ClientId: controlplane-web
+      Identity__ClientSecret: hidbridge-web-dev-secret
+      Identity__RequireHttpsMetadata: "false"
+      Identity__DisablePushedAuthorization: "true"
+    ports:
+      - "18110:18110"
+
+volumes:
+  hidbridge_platform_postgres_data:
+  hidbridge_identity_postgres_data:
+  hidbridge_api_data:
