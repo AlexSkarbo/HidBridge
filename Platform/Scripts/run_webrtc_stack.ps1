@@ -254,6 +254,52 @@ function Get-OidcAccessToken {
     return $token
 }
 
+# Ensures effective session route and control lease via server-side control/ensure contract.
+function Ensure-ControlSessionRoute {
+    param(
+        [string]$ApiBaseUrl,
+        [string]$SessionId,
+        [string]$EndpointId,
+        [string]$PrincipalId,
+        [hashtable]$AuthHeaders,
+        [int]$RequestTimeoutSec = 30
+    )
+
+    $ensureBody = @{
+        participantId = "owner:$PrincipalId"
+        requestedBy = $PrincipalId
+        endpointId = $EndpointId
+        profile = "UltraLowLatency"
+        leaseSeconds = 120
+        reason = "webrtc stack bootstrap"
+        autoCreateSessionIfMissing = $true
+        preferLiveRelaySession = $true
+        tenantId = "local-tenant"
+        organizationId = "local-org"
+    }
+
+    try {
+        $result = Invoke-RestMethod `
+            -Method Post `
+            -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/control/ensure" `
+            -Headers $AuthHeaders `
+            -TimeoutSec $RequestTimeoutSec `
+            -ContentType "application/json" `
+            -Body ($ensureBody | ConvertTo-Json -Depth 20)
+    }
+    catch {
+        $message = $_.Exception.Message
+        throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': $message"
+    }
+
+    $effectiveSessionId = if ($null -ne $result -and $result.PSObject.Properties["effectiveSessionId"]) { [string]$result.effectiveSessionId } else { "" }
+    if ([string]::IsNullOrWhiteSpace($effectiveSessionId)) {
+        return $SessionId
+    }
+
+    return $effectiveSessionId
+}
+
 # Asserts COM port can be opened before runtime startup.
 function Assert-UartPortAvailable {
     param([string]$Port, [int]$Baud)
@@ -374,29 +420,13 @@ $authHeaders = @{
     "Authorization" = "Bearer $accessToken"
 }
 
-$inventory = Invoke-RestMethod -Method Get -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/dashboards/inventory" -Headers $authHeaders -TimeoutSec 30
-$inventoryEndpoints = if ($inventory.PSObject.Properties["endpoints"]) { @($inventory.endpoints) } else { @() }
-$selectedEndpoint = $inventoryEndpoints | Where-Object { [string]$_.endpointId -eq $EndpointId } | Select-Object -First 1
-if ($null -eq $selectedEndpoint) {
-    throw "Endpoint '$EndpointId' was not found in inventory."
-}
-
-$targetAgentId = [string]$selectedEndpoint.agentId
-if ([string]::IsNullOrWhiteSpace($targetAgentId)) {
-    throw "Endpoint '$EndpointId' does not expose agentId in inventory."
-}
-
-$null = Invoke-RestMethod -Method Post -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions" -Headers $authHeaders -TimeoutSec 30 -ContentType "application/json" -Body (@{
-    sessionId = $session
-    profile = "UltraLowLatency"
-    requestedBy = $PrincipalId
-    targetAgentId = $targetAgentId
-    targetEndpointId = $EndpointId
-    shareMode = "Owner"
-    tenantId = "local-tenant"
-    organizationId = "local-org"
-    transportProvider = "webrtc-datachannel"
-} | ConvertTo-Json -Depth 10)
+$session = Ensure-ControlSessionRoute `
+    -ApiBaseUrl $ApiBaseUrl `
+    -SessionId $session `
+    -EndpointId $EndpointId `
+    -PrincipalId $PrincipalId `
+    -AuthHeaders $authHeaders `
+    -RequestTimeoutSec 30
 
 $wsUri = $null
 $wsBind = ""
