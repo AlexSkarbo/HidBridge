@@ -240,10 +240,14 @@ if ($PSBoundParameters.ContainsKey("CommandExecutor") -and -not [string]::IsNull
 }
 
 if ($AllowLegacyControlWs) {
-    $tasksWithLegacyControlWs = @("webrtc-stack", "webrtc-edge-agent-acceptance", "demo-flow", "ci-local", "full")
+    $tasksWithLegacyControlWs = @("webrtc-stack", "webrtc-edge-agent-acceptance", "demo-flow", "ci-local", "full", "webrtc-peer-adapter")
     if ($tasksWithLegacyControlWs -contains $Task) {
         $effectiveForwardArgs.Add("-AllowLegacyControlWs") | Out-Null
     }
+}
+
+if ($Task -eq "webrtc-peer-adapter" -and -not $AllowLegacyControlWs) {
+    throw "Task 'webrtc-peer-adapter' is legacy exp-022 compatibility tooling. Pass -AllowLegacyControlWs explicitly to run it."
 }
 
 if ($PSBoundParameters.ContainsKey("UartPort") -and -not [string]::IsNullOrWhiteSpace($UartPort)) {

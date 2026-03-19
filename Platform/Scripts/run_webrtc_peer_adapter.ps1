@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$SessionId,
+    [switch]$AllowLegacyControlWs,
     [string]$BaseUrl = "http://127.0.0.1:18093",
     [string]$PeerId = "",
     [string]$EndpointId = "",
@@ -39,6 +40,12 @@ $ErrorActionPreference = "Stop"
 
 $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptsRoot "Common/KeycloakCommon.ps1")
+
+# This script is retained only for exp-022 compatibility and must be enabled explicitly.
+if (-not $AllowLegacyControlWs) {
+    throw "run_webrtc_peer_adapter.ps1 is legacy exp-022 compatibility tooling. Use EdgeProxy.Agent (uart path), or pass -AllowLegacyControlWs explicitly."
+}
+Write-Warning "Legacy exp-022 peer adapter mode enabled. This path is deprecated for runtime use."
 
 try {
     Add-Type -AssemblyName System.Net.Http -ErrorAction Stop

@@ -406,9 +406,9 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
     - `HIDBRIDGE_EDGE_PROXY_CONTROLWSURL`
 - legacy script adapter is kept only as compatibility harness during migration.
 - task entry:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`
 - direct wrapper:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_webrtc_peer_adapter.ps1 -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run_webrtc_peer_adapter.ps1 -AllowLegacyControlWs -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
 - behavior:
   - auto-creates session when `-SessionId` is missing (reuses ready endpoint; provider=`webrtc-datachannel`)
   - marks peer online via `/transport/webrtc/peers/{peerId}/online`
@@ -423,6 +423,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - `-SingleRun` (single poll/ack pass)
   - `-EnsureSession $false` (fail fast instead of auto-creating session)
   - `-OutputJsonPath Platform/.logs/webrtc-peer-adapter.result.json`
+  - this mode is deprecated for runtime use and should be treated as lab-only tooling.
 
 Manual UART diagnostics (selector sweep):
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093`
