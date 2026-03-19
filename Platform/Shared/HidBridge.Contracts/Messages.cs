@@ -491,6 +491,36 @@ public sealed record SessionTransportReadinessBody(
     DateTimeOffset? EvaluatedAtUtc = null);
 
 /// <summary>
+/// Carries one media stream registration payload published by an edge agent.
+/// </summary>
+public sealed record SessionMediaStreamRegistrationBody(
+    string PeerId,
+    string EndpointId,
+    string StreamId,
+    bool Ready,
+    string State,
+    DateTimeOffset ReportedAtUtc,
+    string? FailureReason = null,
+    string? Source = null,
+    IReadOnlyDictionary<string, object?>? Metrics = null);
+
+/// <summary>
+/// Represents one persisted media stream snapshot tracked by the platform media layer.
+/// </summary>
+public sealed record SessionMediaStreamSnapshotBody(
+    string SessionId,
+    string PeerId,
+    string EndpointId,
+    string StreamId,
+    bool Ready,
+    string State,
+    DateTimeOffset ReportedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    string? FailureReason = null,
+    string? Source = null,
+    IReadOnlyDictionary<string, object?>? Metrics = null);
+
+/// <summary>
 /// Represents one normalized timeline item built from audit, telemetry, and command journal records.
 /// </summary>
 public sealed record TimelineEntryBody(

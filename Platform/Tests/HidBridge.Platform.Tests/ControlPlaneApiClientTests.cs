@@ -678,6 +678,55 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the transport media-stream list route.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionMediaStreamsAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new[]
+        {
+            new SessionMediaStreamSnapshotViewModel(
+                SessionId: "session-1",
+                PeerId: "peer-1",
+                EndpointId: "endpoint-1",
+                StreamId: "stream-main",
+                Ready: true,
+                State: "Ready",
+                ReportedAtUtc: DateTimeOffset.UtcNow,
+                UpdatedAtUtc: DateTimeOffset.UtcNow,
+                Source: "hdmi-usb-capture"),
+        });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        var response = await apiClient.GetSessionMediaStreamsAsync("session-1", cancellationToken: cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/media/streams", handler.LastRequestUri);
+        Assert.NotNull(response);
+        Assert.Single(response!);
+        Assert.Equal("stream-main", response[0].StreamId);
+    }
+
+    /// <summary>
+    /// Verifies the transport media-stream list query filters.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionMediaStreamsAsync_AppendsPeerAndEndpointFilters()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(Array.Empty<SessionMediaStreamSnapshotViewModel>());
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetSessionMediaStreamsAsync("session-1", peerId: "peer-1", endpointId: "endpoint-1", cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/media/streams?peerId=peer-1&endpointId=endpoint-1", handler.LastRequestUri);
+    }
+
+    /// <summary>
     /// Verifies the WebRTC signaling list route and query parameters.
     /// </summary>
     [Fact]

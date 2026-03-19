@@ -325,6 +325,22 @@ public sealed record SessionTransportReadinessViewModel(
     DateTimeOffset? EvaluatedAtUtc = null);
 
 /// <summary>
+/// Represents one media stream snapshot published by edge agent into platform media layer.
+/// </summary>
+public sealed record SessionMediaStreamSnapshotViewModel(
+    string SessionId,
+    string PeerId,
+    string EndpointId,
+    string StreamId,
+    bool Ready,
+    string State,
+    DateTimeOffset ReportedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    string? FailureReason = null,
+    string? Source = null,
+    IReadOnlyDictionary<string, object?>? Metrics = null);
+
+/// <summary>
 /// Represents one WebRTC signaling message.
 /// </summary>
 public sealed record WebRtcSignalMessageViewModel(

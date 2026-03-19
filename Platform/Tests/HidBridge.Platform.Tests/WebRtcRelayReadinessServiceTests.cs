@@ -221,6 +221,61 @@ public sealed class WebRtcRelayReadinessServiceTests
     }
 
     /// <summary>
+    /// Prefers platform media registry snapshot over transport metrics when both are present.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_PrefersMediaRegistrySnapshot_WhenRegistryHasNewerSignal()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-registry"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = false,
+                    ["lastPeerMediaState"] = "Unavailable",
+                    ["lastPeerMediaFailureReason"] = "stale-transport-metric",
+                }));
+        var mediaRegistry = new SessionMediaRegistryService();
+        _ = await mediaRegistry.UpsertAsync(
+            "session-media-registry",
+            new SessionMediaStreamRegistrationBody(
+                PeerId: "peer-1",
+                EndpointId: "endpoint-1",
+                StreamId: "stream-registry",
+                Ready: true,
+                State: "Streaming",
+                ReportedAtUtc: DateTimeOffset.UtcNow,
+                Source: "hdmi-usb-capture"),
+            TestContext.Current.CancellationToken);
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            mediaRegistry,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-registry",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(readiness.Ready);
+        Assert.True(readiness.MediaReady);
+        Assert.Equal("stream-registry", readiness.MediaStreamId);
+        Assert.Equal("hdmi-usb-capture", readiness.MediaSource);
+    }
+
+    /// <summary>
     /// Creates a session snapshot used by readiness tests.
     /// </summary>
     private static SessionSnapshot CreateSession(string sessionId)

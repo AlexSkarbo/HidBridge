@@ -128,6 +128,7 @@ builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
     EnableDefaultProviderFallbackOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
 });
 builder.Services.AddSingleton<WebRtcCommandRelayService>();
+builder.Services.AddSingleton<SessionMediaRegistryService>();
 builder.Services.AddSingleton(new WebRtcRelayReadinessOptions
 {
     DefaultProvider = RealtimeTransportProvider.WebRtcDataChannel,

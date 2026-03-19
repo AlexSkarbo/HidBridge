@@ -56,6 +56,11 @@ public sealed class EdgeProxyWorkerLifecycleTests
                 TestContext.Current.CancellationToken);
             Assert.Contains("\"mediaReady\":\"true\"", onlinePayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaState\":\"Ready\"", onlinePayload, StringComparison.Ordinal);
+            var mediaPayload = await handler.MediaPayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"streamId\":\"stream-main\"", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"source\":\"test-capture\"", mediaPayload, StringComparison.Ordinal);
 
             Assert.True(handler.OnlineSeen);
             Assert.True(handler.HeartbeatSeen);
@@ -179,6 +184,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
         public TaskCompletionSource<string> AckPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource<string> OnlinePayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<string> MediaPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource<bool> OfflineTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -219,6 +225,12 @@ public sealed class EdgeProxyWorkerLifecycleTests
                 }
 
                 return JsonOk(new { items = Array.Empty<object>() });
+            }
+
+            if (request.Method == HttpMethod.Post && path.EndsWith("/transport/media/streams", StringComparison.Ordinal))
+            {
+                MediaPayloadTask.TrySetResult(body);
+                return JsonOk(new { accepted = true });
             }
 
             if (request.Method == HttpMethod.Post && path.Contains("/transport/webrtc/commands/", StringComparison.Ordinal) && path.EndsWith("/ack", StringComparison.Ordinal))

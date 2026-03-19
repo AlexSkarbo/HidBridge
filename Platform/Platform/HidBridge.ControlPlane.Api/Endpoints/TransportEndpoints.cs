@@ -195,6 +195,81 @@ public static class TransportEndpoints
         .WithSummary("Lists WebRTC peers for a session.")
         .WithDescription("Returns transient peer presence records tracked by the WebRTC relay path.");
 
+        group.MapPost("/{sessionId}/transport/media/streams", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            SessionMediaRegistryService mediaRegistry,
+            SessionMediaStreamRegistrationBody request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                if (string.IsNullOrWhiteSpace(request.PeerId))
+                {
+                    return Results.BadRequest(new { sessionId, error = "peerId is required." });
+                }
+
+                if (string.IsNullOrWhiteSpace(request.EndpointId))
+                {
+                    return Results.BadRequest(new { sessionId, error = "endpointId is required." });
+                }
+
+                if (string.IsNullOrWhiteSpace(request.StreamId))
+                {
+                    return Results.BadRequest(new { sessionId, error = "streamId is required." });
+                }
+
+                var snapshot = await mediaRegistry.UpsertAsync(sessionId, request, ct);
+                return Results.Ok(snapshot);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Accepts<SessionMediaStreamRegistrationBody>("application/json")
+        .Produces<SessionMediaStreamSnapshotBody>(StatusCodes.Status200OK)
+        .WithSummary("Registers one edge media stream snapshot.")
+        .WithDescription("Upserts one media capture stream snapshot for the supplied session and peer.");
+
+        group.MapGet("/{sessionId}/transport/media/streams", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            SessionMediaRegistryService mediaRegistry,
+            string? peerId,
+            string? endpointId,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                var items = await mediaRegistry.ListAsync(sessionId, peerId, endpointId, ct);
+                return Results.Ok(items);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Produces<IReadOnlyList<SessionMediaStreamSnapshotBody>>(StatusCodes.Status200OK)
+        .WithSummary("Lists registered edge media streams for a session.")
+        .WithDescription("Returns media stream snapshots published by edge agents for the supplied session route.");
+
         group.MapGet("/{sessionId}/transport/webrtc/commands", async (
             string sessionId,
             HttpContext httpContext,
@@ -363,6 +438,7 @@ public static class TransportEndpoints
             ISessionStore sessionStore,
             ICommandJournalStore journalStore,
             IRealtimeTransportFactory transportFactory,
+            SessionMediaRegistryService mediaRegistry,
             string? provider,
             CancellationToken ct) =>
         {
@@ -424,6 +500,16 @@ public static class TransportEndpoints
                 var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
                 var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
                 var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
+                var latestMediaSnapshot = await mediaRegistry.GetLatestAsync(snapshot.SessionId, snapshot.EndpointId, ct);
+                if (latestMediaSnapshot is not null)
+                {
+                    mediaReady = latestMediaSnapshot.Ready;
+                    mediaState = latestMediaSnapshot.State;
+                    mediaFailureReason = latestMediaSnapshot.FailureReason;
+                    mediaReportedAtUtc = latestMediaSnapshot.ReportedAtUtc;
+                    mediaStreamId = latestMediaSnapshot.StreamId;
+                    mediaSource = latestMediaSnapshot.Source;
+                }
                 return Results.Ok(new SessionTransportHealthBody(
                     SessionId: snapshot.SessionId,
                     AgentId: snapshot.AgentId,

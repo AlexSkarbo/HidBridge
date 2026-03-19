@@ -76,6 +76,13 @@ public sealed class WebRtcEdgeAgentIntegrationTests
             var executed = Assert.Single(commandExecutor.Executed);
             Assert.Equal("cmd-edge-happy", executed.CommandId);
             Assert.Equal("keyboard.text", executed.Action);
+            Assert.Contains(handler.MediaRegistrations, static registration =>
+                string.Equals(registration.StreamId, "stream-main", StringComparison.OrdinalIgnoreCase));
+            var mediaRegistration = handler.MediaRegistrations.Last(static registration =>
+                string.Equals(registration.StreamId, "stream-main", StringComparison.OrdinalIgnoreCase));
+            Assert.True(mediaRegistration.Ready);
+            Assert.Equal("Ready", mediaRegistration.State);
+            Assert.Equal("edge-capture", mediaRegistration.Source);
         }
         finally
         {
@@ -313,6 +320,7 @@ public sealed class WebRtcEdgeAgentIntegrationTests
         public int OfflineCallCount { get; private set; }
 
         public List<IReadOnlyDictionary<string, string>> OnlineMetadataHistory { get; } = [];
+        public List<MediaRegistrationSnapshot> MediaRegistrations { get; } = [];
 
         /// <summary>
         /// Handles one API request emitted by the edge worker.
@@ -366,6 +374,13 @@ public sealed class WebRtcEdgeAgentIntegrationTests
                 var limit = ParseNullableInt(GetQueryString(request.RequestUri, "limit")) ?? 50;
                 var commands = await _relay.ListCommandsAsync(SessionId, peerId, afterSequence, limit, cancellationToken);
                 return JsonOk(new { items = commands });
+            }
+
+            if (request.Method == HttpMethod.Post
+                && path.EndsWith($"/api/v1/sessions/{SessionId}/transport/media/streams", StringComparison.Ordinal))
+            {
+                MediaRegistrations.Add(await ReadMediaRegistrationAsync(request, cancellationToken));
+                return JsonOk(new { accepted = true });
             }
 
             if (request.Method == HttpMethod.Post
@@ -490,6 +505,39 @@ public sealed class WebRtcEdgeAgentIntegrationTests
         }
 
         /// <summary>
+        /// Reads one media-stream registration payload emitted by edge worker.
+        /// </summary>
+        private static async Task<MediaRegistrationSnapshot> ReadMediaRegistrationAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            var peerId = root.TryGetProperty("peerId", out var peerIdElement)
+                ? peerIdElement.GetString() ?? string.Empty
+                : string.Empty;
+            var endpointId = root.TryGetProperty("endpointId", out var endpointIdElement)
+                ? endpointIdElement.GetString() ?? string.Empty
+                : string.Empty;
+            var streamId = root.TryGetProperty("streamId", out var streamIdElement)
+                ? streamIdElement.GetString() ?? string.Empty
+                : string.Empty;
+            var ready = root.TryGetProperty("ready", out var readyElement)
+                && readyElement.ValueKind is JsonValueKind.True;
+            var state = root.TryGetProperty("state", out var stateElement)
+                ? stateElement.GetString() ?? string.Empty
+                : string.Empty;
+            var source = root.TryGetProperty("source", out var sourceElement)
+                ? sourceElement.GetString()
+                : null;
+            return new MediaRegistrationSnapshot(peerId, endpointId, streamId, ready, state, source);
+        }
+
+        /// <summary>
         /// Extracts command id from relay ACK route.
         /// </summary>
         private static string ExtractCommandIdFromAckPath(string path)
@@ -546,6 +594,14 @@ public sealed class WebRtcEdgeAgentIntegrationTests
                 Content = JsonContent.Create(payload),
             };
         }
+
+        public sealed record MediaRegistrationSnapshot(
+            string PeerId,
+            string EndpointId,
+            string StreamId,
+            bool Ready,
+            string State,
+            string? Source);
     }
 
     /// <summary>

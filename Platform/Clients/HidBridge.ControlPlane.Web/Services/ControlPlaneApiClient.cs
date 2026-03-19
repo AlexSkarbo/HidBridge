@@ -215,6 +215,18 @@ public sealed class ControlPlaneApiClient
             cancellationToken);
 
     /// <summary>
+    /// Reads edge media stream snapshots for one session route.
+    /// </summary>
+    public async Task<IReadOnlyList<SessionMediaStreamSnapshotViewModel>?> GetSessionMediaStreamsAsync(
+        string sessionId,
+        string? peerId = null,
+        string? endpointId = null,
+        CancellationToken cancellationToken = default)
+        => await GetJsonAsync<IReadOnlyList<SessionMediaStreamSnapshotViewModel>>(
+            BuildTransportMediaStreamsQuery(sessionId, peerId, endpointId),
+            cancellationToken);
+
+    /// <summary>
     /// Reads session-scoped WebRTC signaling messages.
     /// </summary>
     public async Task<IReadOnlyList<WebRtcSignalMessageViewModel>?> GetWebRtcSignalsAsync(
@@ -653,6 +665,28 @@ public sealed class ControlPlaneApiClient
         }
 
         return $"{route}?provider={Uri.EscapeDataString(provider)}";
+    }
+
+    /// <summary>
+    /// Builds session transport-media streams route with optional peer/endpoint filters.
+    /// </summary>
+    private static string BuildTransportMediaStreamsQuery(string sessionId, string? peerId, string? endpointId)
+    {
+        var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/media/streams";
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(peerId))
+        {
+            query.Add($"peerId={Uri.EscapeDataString(peerId)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(endpointId))
+        {
+            query.Add($"endpointId={Uri.EscapeDataString(endpointId)}");
+        }
+
+        return query.Count == 0
+            ? route
+            : $"{route}?{string.Join("&", query)}";
     }
 
     private static string BuildWebRtcSignalsQuery(

@@ -12,6 +12,7 @@ public sealed class WebRtcRelayReadinessService
 {
     private readonly ISessionStore _sessionStore;
     private readonly IRealtimeTransportFactory _transportFactory;
+    private readonly SessionMediaRegistryService? _mediaRegistry;
     private readonly WebRtcRelayReadinessOptions _options;
 
     /// <summary>
@@ -21,9 +22,22 @@ public sealed class WebRtcRelayReadinessService
         ISessionStore sessionStore,
         IRealtimeTransportFactory transportFactory,
         WebRtcRelayReadinessOptions? options = null)
+        : this(sessionStore, transportFactory, mediaRegistry: null, options)
+    {
+    }
+
+    /// <summary>
+    /// Creates the readiness service with optional media stream registry integration.
+    /// </summary>
+    public WebRtcRelayReadinessService(
+        ISessionStore sessionStore,
+        IRealtimeTransportFactory transportFactory,
+        SessionMediaRegistryService? mediaRegistry,
+        WebRtcRelayReadinessOptions? options = null)
     {
         _sessionStore = sessionStore;
         _transportFactory = transportFactory;
+        _mediaRegistry = mediaRegistry;
         _options = options ?? new WebRtcRelayReadinessOptions();
     }
 
@@ -67,6 +81,19 @@ public sealed class WebRtcRelayReadinessService
         var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
         var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
         var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
+        if (_mediaRegistry is not null)
+        {
+            var latestMediaSnapshot = await _mediaRegistry.GetLatestAsync(snapshot.SessionId, snapshot.EndpointId, cancellationToken);
+            if (latestMediaSnapshot is not null)
+            {
+                mediaReady = latestMediaSnapshot.Ready;
+                mediaState = latestMediaSnapshot.State;
+                mediaFailureReason = latestMediaSnapshot.FailureReason;
+                mediaReportedAtUtc = latestMediaSnapshot.ReportedAtUtc;
+                mediaStreamId = latestMediaSnapshot.StreamId;
+                mediaSource = latestMediaSnapshot.Source;
+            }
+        }
 
         var (ready, reasonCode, reason) = ResolveReadiness(
             snapshot.State,

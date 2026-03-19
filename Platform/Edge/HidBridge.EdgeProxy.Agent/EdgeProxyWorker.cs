@@ -410,6 +410,7 @@ public sealed class EdgeProxyWorker : BackgroundService
             StringComparer.OrdinalIgnoreCase);
 
         var mediaSnapshot = await ReadMediaSnapshotSafeAsync(cancellationToken);
+        await PublishMediaStreamSnapshotAsync(mediaSnapshot, cancellationToken);
         foreach (var pair in BuildMediaMetadata(mediaSnapshot))
         {
             metadata[pair.Key] = pair.Value;
@@ -472,6 +473,36 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
 
         return metadata;
+    }
+
+    /// <summary>
+    /// Publishes media stream snapshot into the platform media layer for stream-level diagnostics.
+    /// </summary>
+    private async Task PublishMediaStreamSnapshotAsync(EdgeMediaReadinessSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var effectiveStreamId = string.IsNullOrWhiteSpace(snapshot.StreamId)
+            ? _options.MediaStreamId
+            : snapshot.StreamId;
+        var effectiveSource = string.IsNullOrWhiteSpace(snapshot.Source)
+            ? _options.MediaSource
+            : snapshot.Source;
+
+        await SendAsync(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/media/streams",
+            new
+            {
+                peerId = _options.PeerId,
+                endpointId = _options.EndpointId,
+                streamId = effectiveStreamId,
+                ready = snapshot.IsReady,
+                state = snapshot.State,
+                reportedAtUtc = snapshot.ReportedAtUtc,
+                failureReason = snapshot.FailureReason,
+                source = effectiveSource,
+                metrics = snapshot.Metrics,
+            },
+            cancellationToken);
     }
 
     /// <summary>

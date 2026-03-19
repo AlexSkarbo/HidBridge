@@ -136,6 +136,8 @@ Default ControlPlane API:
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/online`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/offline`
   - `GET /api/v1/sessions/{sessionId}/transport/webrtc/peers`
+  - `POST /api/v1/sessions/{sessionId}/transport/media/streams`
+  - `GET /api/v1/sessions/{sessionId}/transport/media/streams?peerId={peerId}&endpointId={endpointId}`
   - `GET /api/v1/sessions/{sessionId}/transport/webrtc/commands?peerId={peerId}&afterSequence={n}&limit={n}`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/commands/{commandId}/ack`
 - command journal:
@@ -200,6 +202,7 @@ Useful environment variables:
 
 WebRTC relay command path:
 - peers publish online/offline presence via `/transport/webrtc/peers/*`;
+- edge agents publish capture-source media snapshots via `/transport/media/streams`;
 - commands are queued by transport and consumed from `/transport/webrtc/commands`;
 - peer-side ACK is posted to `/transport/webrtc/commands/{commandId}/ack`;
 - if relay ACK times out and fallback is enabled, dispatch retries once via default provider.
