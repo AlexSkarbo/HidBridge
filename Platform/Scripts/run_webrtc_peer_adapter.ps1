@@ -919,6 +919,7 @@ try {
             }
 
             $action = Get-ObjectPropertyString -InputObject $command -Name "action"
+            $normalizedAction = if ([string]::IsNullOrWhiteSpace($action)) { string.Empty } else { $action.ToLowerInvariant() }
             $timeoutMs = Get-ObjectPropertyValue -InputObject $command -Name "timeoutMs"
             $effectiveTimeoutMs = if ($null -eq $timeoutMs) { [Math]::Max(1000, $CommandTimeoutMs) } else { [Math]::Max(1000, [int]$timeoutMs) }
             $processedCount++
@@ -930,8 +931,52 @@ try {
 
             try {
                 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                $payload = Convert-RelayCommandToExp022Payload -Command $command
-                $exec = Invoke-Exp022ControlCommand -WsUrl $ControlWsUrl -Payload $payload -TimeoutMs $effectiveTimeoutMs
+                if ($normalizedAction -eq "mouse.click") {
+                    $clickArgs = Get-CommandArgsMap -Command $command
+                    $clickButton = if ($clickArgs.ContainsKey("button")) { [string]$clickArgs["button"] } else { "left" }
+                    $clickHoldMs = if ($clickArgs.ContainsKey("holdMs")) { [Math]::Max(0, [int]$clickArgs["holdMs"]) } else { 25 }
+                    $metrics["relayAdapterClickHoldMs"] = [double]$clickHoldMs
+
+                    $clickDownPayload = [ordered]@{
+                        id = $commandId
+                        type = "mouse.button"
+                        button = $clickButton
+                        down = $true
+                    }
+                    $downExec = Invoke-Exp022ControlCommand -WsUrl $ControlWsUrl -Payload $clickDownPayload -TimeoutMs $effectiveTimeoutMs
+                    $downOk = $false
+                    $downOkValue = Get-ObjectPropertyValue -InputObject $downExec -Name "ok"
+                    if ($null -ne $downOkValue) {
+                        try {
+                            $downOk = [System.Convert]::ToBoolean($downOkValue)
+                        }
+                        catch {
+                            $downOk = $false
+                        }
+                    }
+
+                    if (-not $downOk) {
+                        $exec = $downExec
+                    }
+                    else {
+                        if ($clickHoldMs -gt 0) {
+                            Start-Sleep -Milliseconds $clickHoldMs
+                        }
+
+                        $clickUpPayload = [ordered]@{
+                            id = $commandId
+                            type = "mouse.button"
+                            button = $clickButton
+                            down = $false
+                        }
+                        $exec = Invoke-Exp022ControlCommand -WsUrl $ControlWsUrl -Payload $clickUpPayload -TimeoutMs $effectiveTimeoutMs
+                    }
+                }
+                else {
+                    $payload = Convert-RelayCommandToExp022Payload -Command $command
+                    $exec = Invoke-Exp022ControlCommand -WsUrl $ControlWsUrl -Payload $payload -TimeoutMs $effectiveTimeoutMs
+                }
+
                 $sw.Stop()
                 $metrics["relayAdapterWsRoundtripMs"] = [double]$sw.Elapsed.TotalMilliseconds
 
