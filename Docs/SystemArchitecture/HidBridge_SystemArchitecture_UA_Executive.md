@@ -1,9 +1,21 @@
 # HidBridge — Executive Summary системної архітектури
 
 Версія: `0.2-draft`  
-Дата: `2026-02-27`  
+Дата: `2026-03-19`  
 Мова: `Українська`  
 Базовий детальний документ: `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA.md`
+Актуальний runtime baseline: `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
+
+---
+
+## Оновлення `2026-03-19`
+
+Для поточної ітерації зафіксовано:
+
+1. канонічний runtime шлях через `Platform/` core stack + external edge agents;
+2. server-side policy ownership для readiness/lease/SLO/security;
+3. PowerShell сценарії як thin orchestration/testing;
+4. `exp-022` як integration-lab (не production dependency).
 
 ---
 

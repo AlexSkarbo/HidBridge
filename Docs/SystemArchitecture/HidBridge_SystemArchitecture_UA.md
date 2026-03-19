@@ -1,8 +1,22 @@
 # HidBridge — системна архітектура (глибокий аналіз AS-IS + цільова модульна TO-BE)
 
 Версія: `0.2-draft`  
-Дата: `2026-03-03`  
+Дата: `2026-03-19`  
 Мова: `Українська`  
+
+---
+
+## Оновлення `2026-03-19` (runtime canonical flow)
+
+Актуальний production/runtime baseline винесено в окремий документ:
+
+- `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
+
+Ключова зміна:
+
+1. runtime path канонізовано на `Platform/` стеку (core containers + external edge agents);
+2. PowerShell сценарії мають статус thin orchestration/testing;
+3. `WebRtcTests/exp-022-datachanneldotnet` зафіксовано як lab-only.
 
 ---
 

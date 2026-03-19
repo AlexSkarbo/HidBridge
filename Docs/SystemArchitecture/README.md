@@ -1,15 +1,19 @@
 # Docs/SystemArchitecture — Index (UA)
 
-Оновлено: `2026-03-15`
+Оновлено: `2026-03-19`
 
 ## Базові документи
 
 1. Детальний системний опис:
 - `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA.md`
   - Додано оновлення `2026-03-15`: `Global Room-Centric Multi-Agent Fabric` (розділ 20)
+  - Додано оновлення `2026-03-19`: runtime canonical flow синхронізовано з `Platform/` baseline (core container profile + external edge agents)
 
 2. Executive summary:
 - `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA_Executive.md`
+
+3. Актуальний runtime baseline (канонічний flow для поточної ітерації):
+- `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
 
 ## Нормативні доповнення (Agent-first архітектура)
 
