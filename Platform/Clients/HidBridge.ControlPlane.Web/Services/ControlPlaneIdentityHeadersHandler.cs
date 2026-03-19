@@ -103,7 +103,26 @@ public sealed class ControlPlaneIdentityHeadersHandler : DelegatingHandler
             return null;
         }
 
-        var cookieAuthResult = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        // DevelopmentOperator mode does not register Cookies/OIDC handlers.
+        // Skip bearer-token propagation in that mode and rely on identity headers.
+        if (!_identityOptions.Enabled)
+        {
+            return null;
+        }
+
+        AuthenticateResult cookieAuthResult;
+        try
+        {
+            cookieAuthResult = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger.LogDebug(
+                exception,
+                "Cookie authentication scheme is unavailable; skipping access-token propagation.");
+            return null;
+        }
+
         var accessToken = cookieAuthResult.Properties?.GetTokenValue("access_token")
             ?? await context.GetTokenAsync(CookieAuthenticationDefaults.AuthenticationScheme, "access_token")
             ?? await context.GetTokenAsync(OpenIdConnectDefaults.AuthenticationScheme, "access_token")
@@ -115,11 +134,6 @@ public sealed class ControlPlaneIdentityHeadersHandler : DelegatingHandler
         }
 
         if (!ShouldRefreshAccessToken(cookieAuthResult.Properties, accessToken))
-        {
-            return accessToken;
-        }
-
-        if (!_identityOptions.Enabled)
         {
             return accessToken;
         }

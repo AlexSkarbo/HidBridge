@@ -145,6 +145,45 @@ public sealed class ControlPlaneIdentityHeadersHandlerTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
+    [Fact]
+    public async Task SendAsync_IdentityDisabled_DoesNotRequireCookieScheme()
+    {
+        var identity = new OperatorIdentityContext(
+            true,
+            "user-1",
+            "operator@example.com",
+            "Operator",
+            "tenant-a",
+            "org-a",
+            ["operator.viewer"],
+            "DevelopmentOperator",
+            null);
+
+        var httpContext = new DefaultHttpContext();
+        // No IAuthenticationService registration: this reproduces development mode without Cookies scheme.
+        httpContext.RequestServices = new ServiceCollection().BuildServiceProvider();
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var options = Options.Create(new ControlPlaneApiOptions { PropagateAccessToken = true, PropagateIdentityHeaders = true });
+        var identityOptions = Options.Create(new IdentityOptions { Enabled = false });
+        var oidcOptions = new StaticOptionsMonitor<OpenIdConnectOptions>(new OpenIdConnectOptions());
+        var inner = new RecordingDelegatingHandler();
+        var handler = new ControlPlaneIdentityHeadersHandler(
+            identity,
+            accessor,
+            options,
+            identityOptions,
+            oidcOptions,
+            NullLogger<ControlPlaneIdentityHeadersHandler>.Instance)
+        { InnerHandler = inner };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        using var response = await invoker.SendAsync(new HttpRequestMessage(HttpMethod.Get, "http://localhost/test"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Null(inner.LastAuthorizationScheme);
+        Assert.Equal("operator.viewer", inner.Headers["X-HidBridge-Role"]);
+    }
+
     private sealed class FakeAuthenticationService : IAuthenticationService
     {
         private readonly string _accessToken;
