@@ -315,7 +315,7 @@ Local PostgreSQL for Platform:
 Docker runtime profile (step `21`):
 - unified container profile:
   - `docker compose -f docker-compose.platform-runtime.yml up -d --build`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -ForwardArgs @('-Action','up','-Build')`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action up -Build`
 - included containers:
   - `hidbridge_api` (`http://127.0.0.1:18093`)
   - `hidbridge_web` (`http://127.0.0.1:18110`)
@@ -324,10 +324,10 @@ Docker runtime profile (step `21`):
   - `hidbridge_identity_db` (`127.0.0.1:5435`)
 - stop and cleanup:
   - `docker compose -f docker-compose.platform-runtime.yml down`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -ForwardArgs @('-Action','down')`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action down`
 - quick management commands:
-  - status: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -ForwardArgs @('-Action','status')`
-  - logs: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -ForwardArgs @('-Action','logs','-Follow')`
+  - status: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action status`
+  - logs: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action logs -Follow`
 - runtime policy in this profile:
   - API/Web/Keycloak/Postgres are containerized.
   - edge-agent remains a separate process/host (not container-coupled).

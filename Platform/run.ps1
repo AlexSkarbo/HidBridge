@@ -34,6 +34,15 @@ param(
     [switch]$SkipRuntimeBootstrap,
     [string]$EndpointId,
     [string]$PrincipalId,
+    [ValidateSet("up", "down", "restart", "status", "logs")]
+    [string]$Action,
+    [string]$ComposeFile,
+    [switch]$Build,
+    [switch]$Pull,
+    [switch]$RemoveVolumes,
+    [switch]$Follow,
+    [switch]$SkipReadyWait,
+    [int]$ReadyTimeoutSec = -1,
     [string]$OutputJsonPath,
     [string]$InterfaceSelectorsCsv,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -341,6 +350,43 @@ if ($PSBoundParameters.ContainsKey("PrincipalId") -and -not [string]::IsNullOrWh
 if ($PSBoundParameters.ContainsKey("OutputJsonPath") -and -not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
     $effectiveForwardArgs.Add("-OutputJsonPath") | Out-Null
     $effectiveForwardArgs.Add($OutputJsonPath) | Out-Null
+}
+
+if ($Task -eq "platform-runtime") {
+    if ($PSBoundParameters.ContainsKey("Action") -and -not [string]::IsNullOrWhiteSpace($Action)) {
+        $effectiveForwardArgs.Add("-Action") | Out-Null
+        $effectiveForwardArgs.Add($Action) | Out-Null
+    }
+
+    if ($PSBoundParameters.ContainsKey("ComposeFile") -and -not [string]::IsNullOrWhiteSpace($ComposeFile)) {
+        $effectiveForwardArgs.Add("-ComposeFile") | Out-Null
+        $effectiveForwardArgs.Add($ComposeFile) | Out-Null
+    }
+
+    if ($Build) {
+        $effectiveForwardArgs.Add("-Build") | Out-Null
+    }
+
+    if ($Pull) {
+        $effectiveForwardArgs.Add("-Pull") | Out-Null
+    }
+
+    if ($RemoveVolumes) {
+        $effectiveForwardArgs.Add("-RemoveVolumes") | Out-Null
+    }
+
+    if ($Follow) {
+        $effectiveForwardArgs.Add("-Follow") | Out-Null
+    }
+
+    if ($SkipReadyWait) {
+        $effectiveForwardArgs.Add("-SkipReadyWait") | Out-Null
+    }
+
+    if ($PSBoundParameters.ContainsKey("ReadyTimeoutSec") -and $ReadyTimeoutSec -gt 0) {
+        $effectiveForwardArgs.Add("-ReadyTimeoutSec") | Out-Null
+        $effectiveForwardArgs.Add([string]$ReadyTimeoutSec) | Out-Null
+    }
 }
 
 if ($PSBoundParameters.ContainsKey("InterfaceSelectorsCsv") -and -not [string]::IsNullOrWhiteSpace($InterfaceSelectorsCsv)) {
