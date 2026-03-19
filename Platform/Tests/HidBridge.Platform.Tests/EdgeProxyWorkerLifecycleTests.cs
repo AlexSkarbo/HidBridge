@@ -16,6 +16,79 @@ namespace HidBridge.Platform.Tests;
 public sealed class EdgeProxyWorkerLifecycleTests
 {
     /// <summary>
+    /// Ensures worker sends least-privilege role header by default.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_DefaultRolesHeader_UsesOperatorViewer()
+    {
+        var handler = new RelayApiHandler(commandEnvelope: null);
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(1.0));
+        var worker = CreateWorker(factory, hidAdapter);
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+            _ = await handler.OnlinePayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal("operator.viewer", handler.LastRoleHeader);
+    }
+
+    /// <summary>
+    /// Ensures worker rotates bearer token after one unauthorized relay call.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_UnauthorizedRelayCall_RotatesBearerTokenAndRetries()
+    {
+        var handler = new RelayApiHandler(commandEnvelope: null)
+        {
+            UnauthorizedFirstOnlineCall = true,
+        };
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(1.0));
+        var worker = CreateWorker(factory, hidAdapter, options =>
+        {
+            options.AccessToken = "expired-token";
+            options.KeycloakBaseUrl = "http://localhost:18093";
+            options.TokenUsername = "operator.smoke.admin";
+            options.TokenPassword = "ChangeMe123!";
+            options.TokenClientId = "controlplane-smoke";
+        });
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+            _ = await handler.OnlinePayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(handler.TokenEndpointCalled);
+        Assert.True(handler.OnlineAuthorizationHeaders.Count >= 2);
+        Assert.Equal("Bearer expired-token", handler.OnlineAuthorizationHeaders[0]);
+        Assert.Equal("Bearer refreshed-access-token", handler.OnlineAuthorizationHeaders[1]);
+    }
+
+    /// <summary>
     /// Ensures the worker publishes online/heartbeat, executes one command, posts Applied ACK, then marks peer offline.
     /// </summary>
     [Fact]
@@ -136,7 +209,10 @@ public sealed class EdgeProxyWorkerLifecycleTests
     /// <summary>
     /// Creates worker with deterministic options for lifecycle tests.
     /// </summary>
-    private static EdgeProxyWorker CreateWorker(IHttpClientFactory httpClientFactory, IHidBridgeHidAdapter hidAdapter)
+    private static EdgeProxyWorker CreateWorker(
+        IHttpClientFactory httpClientFactory,
+        IHidBridgeHidAdapter hidAdapter,
+        Action<EdgeProxyOptions>? configure = null)
     {
         var options = new EdgeProxyOptions
         {
@@ -156,6 +232,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
             TenantId = "local-tenant",
             OrganizationId = "local-org",
         };
+        configure?.Invoke(options);
         options.Normalize();
 
         return new EdgeProxyWorker(
@@ -173,6 +250,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
     {
         private readonly object? _commandEnvelope;
         private int _commandPollCount;
+        private int _onlineCallCount;
 
         public RelayApiHandler(object? commandEnvelope)
         {
@@ -184,6 +262,14 @@ public sealed class EdgeProxyWorkerLifecycleTests
         public bool HeartbeatSeen { get; private set; }
 
         public bool OfflineSeen { get; private set; }
+
+        public bool TokenEndpointCalled { get; private set; }
+
+        public bool UnauthorizedFirstOnlineCall { get; set; }
+
+        public string LastRoleHeader { get; private set; } = string.Empty;
+
+        public List<string> OnlineAuthorizationHeaders { get; } = [];
 
         public TaskCompletionSource<string> AckPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -202,8 +288,32 @@ public sealed class EdgeProxyWorkerLifecycleTests
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
 
+            if (request.Headers.TryGetValues("X-HidBridge-Role", out var roleValues))
+            {
+                LastRoleHeader = roleValues.FirstOrDefault() ?? LastRoleHeader;
+            }
+
+            if (request.Method == HttpMethod.Post
+                && path.EndsWith("/realms/hidbridge-dev/protocol/openid-connect/token", StringComparison.Ordinal))
+            {
+                TokenEndpointCalled = true;
+                return JsonOk(new
+                {
+                    access_token = "refreshed-access-token",
+                    refresh_token = "refresh-token-1",
+                    expires_in = 300,
+                });
+            }
+
             if (request.Method == HttpMethod.Post && path.EndsWith("/transport/webrtc/peers/peer-1/online", StringComparison.Ordinal))
             {
+                _onlineCallCount++;
+                OnlineAuthorizationHeaders.Add(request.Headers.Authorization?.ToString() ?? string.Empty);
+                if (UnauthorizedFirstOnlineCall && _onlineCallCount == 1)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized);
+                }
+
                 OnlineSeen = true;
                 OnlinePayloadTask.TrySetResult(body);
                 return JsonOk(new { ok = true });

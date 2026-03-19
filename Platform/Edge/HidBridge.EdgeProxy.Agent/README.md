@@ -60,9 +60,12 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 - `ASSUMEMEDIAREADYWITHOUTPROBE` (default: `false`)
 - `PRINCIPALID` (default: `smoke-runner`)
 - `TENANTID` / `ORGANIZATIONID`
+- `OPERATORROLESCSV` (default: `operator.viewer`, least-privilege caller roles for API headers)
 - `ACCESSTOKEN` (optional)
 - `KEYCLOAKBASEURL` / `KEYCLOAKREALM`
 - `TOKENCLIENTID` / `TOKENUSERNAME` / `TOKENPASSWORD`
+- `TOKENSCOPE` (optional OIDC scope for password/refresh grants)
+- `TOKENREFRESHSKEWSEC` (default: `60`, proactive refresh window before token expiry)
 - `POLLINTERVALMS`
 - `BATCHLIMIT`
 - `HEARTBEATINTERVALSEC`
@@ -77,3 +80,10 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 ```bash
 dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj
 ```
+
+## Token lifecycle
+
+- if `ACCESSTOKEN` is absent, the agent acquires a password-grant token;
+- if a refresh token exists, the agent refreshes proactively (`TOKENREFRESHSKEWSEC`) and on HTTP `401`;
+- if refresh grant fails, the agent falls back to password grant;
+- default caller role header is `operator.viewer` (override via `OPERATORROLESCSV` only when stricter API scope requires it).

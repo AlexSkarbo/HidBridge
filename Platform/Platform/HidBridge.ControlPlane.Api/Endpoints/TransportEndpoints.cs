@@ -3,6 +3,7 @@ using HidBridge.Application;
 using HidBridge.Contracts;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace HidBridge.ControlPlane.Api.Endpoints;
 
@@ -317,10 +318,13 @@ public static class TransportEndpoints
             HttpContext httpContext,
             ISessionStore sessionStore,
             WebRtcCommandRelayService relay,
+            IEventWriter eventWriter,
+            ILoggerFactory loggerFactory,
             WebRtcCommandAckPublishBody? request,
             CancellationToken ct) =>
         {
             var caller = ApiCallerContext.FromHttpContext(httpContext);
+            var logger = loggerFactory.CreateLogger("TransportEndpoints");
             try
             {
                 caller.EnsureViewerAccess();
@@ -359,9 +363,41 @@ public static class TransportEndpoints
                 var ack = new CommandAckBody(
                     commandId,
                     status,
-                    request?.Error,
-                    request?.Metrics);
+                    request.Error,
+                    request.Metrics);
                 var accepted = await relay.PublishAckAsync(sessionId, ack, ct);
+                try
+                {
+                    await eventWriter.WriteAuditAsync(
+                        new AuditEventBody(
+                            Category: "transport.ack",
+                            Message: accepted
+                                ? $"Transport ACK '{status}' accepted for command {commandId}."
+                                : $"Transport ACK '{status}' rejected because pending command {commandId} was not found.",
+                            SessionId: sessionId,
+                            Data: new Dictionary<string, object?>
+                            {
+                                ["sessionId"] = sessionId,
+                                ["commandId"] = commandId,
+                                ["status"] = status.ToString(),
+                                ["accepted"] = accepted,
+                                ["provider"] = RealtimeTransportProvider.WebRtcDataChannel.ToString(),
+                                ["principalId"] = caller.EffectivePrincipalId ?? "unknown",
+                                ["errorDomain"] = request.Error?.Domain.ToString(),
+                                ["errorCode"] = request.Error?.Code,
+                            },
+                            CreatedAtUtc: DateTimeOffset.UtcNow),
+                        ct);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Failed to write transport ACK audit event. Session={SessionId}, Command={CommandId}",
+                        sessionId,
+                        commandId);
+                }
+
                 return accepted
                     ? Results.Ok(new { sessionId, commandId, accepted = true })
                     : Results.NotFound(new { sessionId, commandId, error = "Pending command was not found for acknowledgment." });

@@ -111,12 +111,27 @@ public sealed class EdgeProxyOptions
     public string TenantId { get; set; } = "local-tenant";
     public string OrganizationId { get; set; } = "local-org";
 
+    /// <summary>
+    /// Caller roles projected into <c>X-HidBridge-Role</c> header (comma/semicolon separated).
+    /// </summary>
+    public string OperatorRolesCsv { get; set; } = "operator.viewer";
+
     public string AccessToken { get; set; } = "";
     public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
     public string KeycloakRealm { get; set; } = "hidbridge-dev";
     public string TokenClientId { get; set; } = "controlplane-smoke";
     public string TokenUsername { get; set; } = "operator.smoke.admin";
     public string TokenPassword { get; set; } = "ChangeMe123!";
+
+    /// <summary>
+    /// Optional OIDC scope used by password and refresh grants.
+    /// </summary>
+    public string TokenScope { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Proactive refresh window before access-token expiry.
+    /// </summary>
+    public int TokenRefreshSkewSec { get; set; } = 60;
 
     public int PollIntervalMs { get; set; } = 250;
     public int BatchLimit { get; set; } = 50;
@@ -151,6 +166,19 @@ public sealed class EdgeProxyOptions
         ReconnectBackoffMaxMs = Math.Max(ReconnectBackoffMinMs, ReconnectBackoffMaxMs);
         ReconnectBackoffJitterMs = Math.Max(0, ReconnectBackoffJitterMs);
         TransientFailureThresholdForOffline = Math.Max(1, TransientFailureThresholdForOffline);
+        TokenRefreshSkewSec = Math.Max(5, TokenRefreshSkewSec);
+        TokenScope = TokenScope?.Trim() ?? string.Empty;
+        OperatorRolesCsv = string.Join(
+            ",",
+            (OperatorRolesCsv ?? string.Empty)
+                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(static role => role.Trim())
+                .Where(static role => !string.IsNullOrWhiteSpace(role))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(OperatorRolesCsv))
+        {
+            OperatorRolesCsv = "operator.viewer";
+        }
     }
 
     /// <summary>

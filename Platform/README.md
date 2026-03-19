@@ -441,7 +441,10 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
     - `HIDBRIDGE_EDGE_PROXY_SESSIONID`
     - `HIDBRIDGE_EDGE_PROXY_PEERID`
     - `HIDBRIDGE_EDGE_PROXY_ENDPOINTID`
-    - `HIDBRIDGE_EDGE_PROXY_CONTROLWSURL`
+    - `HIDBRIDGE_EDGE_PROXY_CONTROLWSURL` (legacy mode only; ignored by direct UART executor)
+  - security defaults:
+    - `HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV=operator.viewer` (least-privilege caller header)
+    - bearer token is auto-rotated (refresh-token grant first, password grant fallback) when Keycloak credentials are provided.
 - legacy script adapter is kept only as compatibility harness during migration.
 - task entry:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`

@@ -31,10 +31,13 @@ public sealed class EdgeProxyWorker : BackgroundService
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
     private readonly Dictionary<string, string> _callerHeaders;
+    private readonly SemaphoreSlim _tokenRefreshGate = new(1, 1);
     private DateTimeOffset _lastHeartbeatAtUtc = DateTimeOffset.MinValue;
     private int? _lastCommandSequence;
     private int? _lastSignalSequence;
     private string _accessToken;
+    private string _refreshToken = string.Empty;
+    private DateTimeOffset _accessTokenExpiresAtUtc = DateTimeOffset.MaxValue;
     private bool _peerOnline;
     private EdgeProxyLifecycleState _lifecycleState = EdgeProxyLifecycleState.Starting;
     private DateTimeOffset _lifecycleStateChangedAtUtc = DateTimeOffset.UtcNow;
@@ -62,7 +65,7 @@ public sealed class EdgeProxyWorker : BackgroundService
             ["X-HidBridge-PrincipalId"] = _options.PrincipalId,
             ["X-HidBridge-TenantId"] = _options.TenantId,
             ["X-HidBridge-OrganizationId"] = _options.OrganizationId,
-            ["X-HidBridge-Role"] = "operator.admin,operator.moderator,operator.viewer",
+            ["X-HidBridge-Role"] = NormalizeCallerRolesHeader(_options.OperatorRolesCsv),
         };
     }
 
@@ -74,7 +77,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     {
         if (string.IsNullOrWhiteSpace(_accessToken))
         {
-            _accessToken = await RequestTokenAsync(stoppingToken);
+            await RotateAccessTokenAsync(preferRefreshToken: false, stoppingToken, force: true);
         }
 
         _logger.LogInformation(
@@ -657,24 +660,63 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     /// <summary>
-    /// Requests OIDC access token for API calls that require bearer authorization.
+    /// Requests a new OIDC token by username/password credentials.
     /// </summary>
-    private async Task<string> RequestTokenAsync(CancellationToken cancellationToken)
+    private async Task<TokenResponse> RequestPasswordTokenAsync(CancellationToken cancellationToken)
     {
-        using var client = new HttpClient
+        if (string.IsNullOrWhiteSpace(_options.TokenUsername)
+            || string.IsNullOrWhiteSpace(_options.TokenPassword)
+            || string.IsNullOrWhiteSpace(_options.TokenClientId))
         {
-            BaseAddress = new Uri(_options.KeycloakBaseUrl, UriKind.Absolute),
-            Timeout = TimeSpan.FromSeconds(30),
-        };
+            throw new InvalidOperationException("Token username/password/client_id must be configured for password grant.");
+        }
 
-        var endpoint = $"/realms/{_options.KeycloakRealm}/protocol/openid-connect/token";
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        return await RequestTokenGrantAsync(
+            new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["client_id"] = _options.TokenClientId,
+                ["username"] = _options.TokenUsername,
+                ["password"] = _options.TokenPassword,
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Requests a refreshed OIDC token using refresh token grant.
+    /// </summary>
+    private async Task<TokenResponse> RequestRefreshTokenAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_refreshToken) || string.IsNullOrWhiteSpace(_options.TokenClientId))
         {
-            ["grant_type"] = "password",
-            ["client_id"] = _options.TokenClientId,
-            ["username"] = _options.TokenUsername,
-            ["password"] = _options.TokenPassword,
-        });
+            throw new InvalidOperationException("Refresh token and client_id must be configured for refresh grant.");
+        }
+
+        return await RequestTokenGrantAsync(
+            new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["client_id"] = _options.TokenClientId,
+                ["refresh_token"] = _refreshToken,
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Executes one OIDC token grant request and parses token payload.
+    /// </summary>
+    private async Task<TokenResponse> RequestTokenGrantAsync(
+        Dictionary<string, string> form,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.TokenScope))
+        {
+            form["scope"] = _options.TokenScope;
+        }
+
+        var client = _httpClientFactory.CreateClient("edge-proxy-auth");
+        var endpoint = $"/realms/{_options.KeycloakRealm}/protocol/openid-connect/token";
+        using var content = new FormUrlEncodedContent(form);
 
         using var response = await client.PostAsync(endpoint, content, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -686,7 +728,96 @@ public sealed class EdgeProxyWorker : BackgroundService
             throw new InvalidOperationException("OIDC token response did not contain access_token.");
         }
 
-        return token.AccessToken;
+        return token;
+    }
+
+    /// <summary>
+    /// Applies a newly acquired access token/refresh token pair to in-memory runtime state.
+    /// </summary>
+    private void ApplyTokenGrant(TokenResponse token)
+    {
+        _accessToken = token.AccessToken;
+        if (!string.IsNullOrWhiteSpace(token.RefreshToken))
+        {
+            _refreshToken = token.RefreshToken;
+        }
+
+        var expiresInSec = token.ExpiresIn.GetValueOrDefault() > 0 ? token.ExpiresIn!.Value : 300;
+        _accessTokenExpiresAtUtc = DateTimeOffset.UtcNow.AddSeconds(expiresInSec);
+    }
+
+    /// <summary>
+    /// Refreshes bearer token via refresh-token grant and falls back to password grant when needed.
+    /// </summary>
+    private async Task RotateAccessTokenAsync(bool preferRefreshToken, CancellationToken cancellationToken, bool force = false)
+    {
+        await _tokenRefreshGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!force && !ShouldRefreshToken())
+            {
+                return;
+            }
+
+            TokenResponse? token = null;
+            Exception? refreshError = null;
+
+            if (preferRefreshToken && !string.IsNullOrWhiteSpace(_refreshToken))
+            {
+                try
+                {
+                    token = await RequestRefreshTokenAsync(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    refreshError = ex;
+                    _logger.LogWarning(ex, "Refresh-token grant failed. Falling back to password grant.");
+                }
+            }
+
+            if (token is null)
+            {
+                if (string.IsNullOrWhiteSpace(_options.TokenUsername)
+                    || string.IsNullOrWhiteSpace(_options.TokenPassword)
+                    || string.IsNullOrWhiteSpace(_options.TokenClientId))
+                {
+                    if (refreshError is not null)
+                    {
+                        throw new InvalidOperationException("Failed to refresh bearer token and password grant is not configured.", refreshError);
+                    }
+
+                    throw new InvalidOperationException("Cannot acquire bearer token: token credentials are not configured.");
+                }
+
+                token = await RequestPasswordTokenAsync(cancellationToken);
+            }
+
+            ApplyTokenGrant(token);
+        }
+        finally
+        {
+            _tokenRefreshGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Determines whether access token should be refreshed before the next request.
+    /// </summary>
+    private bool ShouldRefreshToken()
+    {
+        if (string.IsNullOrWhiteSpace(_accessToken))
+        {
+            return true;
+        }
+
+        if (_accessTokenExpiresAtUtc == DateTimeOffset.MaxValue)
+        {
+            // Externally provided static access token. Refresh only on 401 challenge.
+            return false;
+        }
+
+        var refreshAtUtc = _accessTokenExpiresAtUtc.AddSeconds(-Math.Max(5, _options.TokenRefreshSkewSec));
+        return DateTimeOffset.UtcNow >= refreshAtUtc;
     }
 
     /// <summary>
@@ -763,39 +894,53 @@ public sealed class EdgeProxyWorker : BackgroundService
         bool allowNotFound = false)
     {
         var client = _httpClientFactory.CreateClient("edge-proxy");
-        using var request = new HttpRequestMessage(method, relativeUrl);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        var canAcquireToken = !string.IsNullOrWhiteSpace(_options.TokenUsername)
+            && !string.IsNullOrWhiteSpace(_options.TokenPassword)
+            && !string.IsNullOrWhiteSpace(_options.TokenClientId);
 
-        foreach (var header in _callerHeaders)
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
+            if (attempt == 0 && ShouldRefreshToken() && canAcquireToken)
+            {
+                await RotateAccessTokenAsync(preferRefreshToken: true, cancellationToken);
+            }
 
-        if (!string.IsNullOrWhiteSpace(_accessToken))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-        }
+            using var request = new HttpRequestMessage(method, relativeUrl);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        if (body is not null)
-        {
-            request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
-        }
+            foreach (var header in _callerHeaders)
+            {
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
 
-        var response = await client.SendAsync(request, cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !string.IsNullOrWhiteSpace(_options.TokenUsername))
-        {
-            _accessToken = await RequestTokenAsync(cancellationToken);
-            response.Dispose();
-            return await SendAsync(method, relativeUrl, body, cancellationToken, allowNotFound);
-        }
+            if (!string.IsNullOrWhiteSpace(_accessToken))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+            }
 
-        if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
-        {
+            if (body is not null)
+            {
+                request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
+            }
+
+            var response = await client.SendAsync(request, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0 && canAcquireToken)
+            {
+                response.Dispose();
+                await RotateAccessTokenAsync(preferRefreshToken: true, cancellationToken, force: true);
+                continue;
+            }
+
+            if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return response;
+            }
+
+            response.EnsureSuccessStatusCode();
             return response;
         }
 
-        response.EnsureSuccessStatusCode();
-        return response;
+        throw new InvalidOperationException("Request retry exhausted while refreshing access token.");
     }
 
     /// <summary>
@@ -827,6 +972,23 @@ public sealed class EdgeProxyWorker : BackgroundService
         return metadata;
     }
 
+    /// <summary>
+    /// Normalizes caller roles header to a deterministic comma-separated list.
+    /// </summary>
+    private static string NormalizeCallerRolesHeader(string? rolesCsv)
+    {
+        var normalized = (rolesCsv ?? string.Empty)
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static role => role.Trim())
+            .Where(static role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized.Length == 0
+            ? "operator.viewer"
+            : string.Join(",", normalized);
+    }
+
     private sealed class CollectionEnvelope<T>
     {
         public List<T>? Items { get; set; }
@@ -836,5 +998,11 @@ public sealed class EdgeProxyWorker : BackgroundService
     {
         [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = string.Empty;
+
+        [JsonPropertyName("refresh_token")]
+        public string? RefreshToken { get; set; }
+
+        [JsonPropertyName("expires_in")]
+        public int? ExpiresIn { get; set; }
     }
 }

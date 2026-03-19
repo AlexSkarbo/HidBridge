@@ -24,6 +24,13 @@ builder.Services.AddHttpClient("edge-proxy")
         client.BaseAddress = new Uri(options.BaseUrl, UriKind.Absolute);
         client.Timeout = TimeSpan.FromSeconds(Math.Max(5, options.HttpTimeoutSec));
     });
+builder.Services.AddHttpClient("edge-proxy-auth")
+    .ConfigureHttpClient((serviceProvider, client) =>
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<EdgeProxyOptions>>().Value;
+        client.BaseAddress = new Uri(options.KeycloakBaseUrl, UriKind.Absolute);
+        client.Timeout = TimeSpan.FromSeconds(Math.Max(5, options.HttpTimeoutSec));
+    });
 builder.Services.AddHttpClient("edge-proxy-media")
     .ConfigureHttpClient((serviceProvider, client) =>
     {
