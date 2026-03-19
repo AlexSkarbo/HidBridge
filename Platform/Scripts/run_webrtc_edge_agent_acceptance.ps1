@@ -81,7 +81,7 @@ function Stop-OptionalProcess {
         Write-Host "Stopped PID $pid"
     }
     catch {
-        Write-Warning "Failed to stop PID $pid: $($_.Exception.Message)"
+        Write-Warning "Failed to stop PID ${pid}: $($_.Exception.Message)"
     }
 }
 
