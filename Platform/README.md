@@ -379,6 +379,8 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - for direct UART mode you can skip control-health precheck: add `-SkipControlHealthCheck`
   - smoke now waits for WebRTC transport readiness by typed `/transport/health` fields before dispatching command; disable this check only for compatibility troubleshooting via `-SkipTransportHealthCheck`.
   - readiness polling knobs: `-TransportHealthAttempts`, `-TransportHealthDelayMs`.
+- `webrtc-stack-terminal-b` is now a thin compatibility wrapper over `webrtc-edge-agent-smoke` (no session auto-create/fallback policy in script layer).
+  - deprecated/no-op parameters in this wrapper: `-AutoCreateSessionIfMissing`, `-AllowMissingControlRequestEndpoint`, `-EndpointId`, `-Profile`.
 - one-command acceptance for CI/local automation (boots stack + runs smoke):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
   - in controlws mode add `-ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
