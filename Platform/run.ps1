@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "close-failed-rooms", "close-stale-rooms")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "close-failed-rooms", "close-stale-rooms", "platform-runtime")]
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
@@ -71,6 +71,7 @@ $scriptMap = @{
     "webrtc-edge-agent-acceptance" = "run_webrtc_edge_agent_acceptance.ps1"
     "close-failed-rooms" = "run_close_failed_rooms.ps1"
     "close-stale-rooms" = "run_close_stale_rooms.ps1"
+    "platform-runtime" = "run_platform_runtime_profile.ps1"
 }
 
 $scriptPath = Join-Path $PSScriptRoot (Join-Path "Scripts" $scriptMap[$Task])
