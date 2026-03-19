@@ -473,6 +473,7 @@ public static class RealtimeTransportProviderParser
                 return true;
             case "webrtc":
             case "webrtc-datachannel":
+            case "webrtcdatachannel":
             case "datachannel":
                 provider = RealtimeTransportProvider.WebRtcDataChannel;
                 return true;
