@@ -36,7 +36,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     private int? _lastCommandSequence;
     private int? _lastSignalSequence;
     private string _accessToken;
-    private string _refreshToken = string.Empty;
+    private string _refreshToken;
     private DateTimeOffset _accessTokenExpiresAtUtc = DateTimeOffset.MaxValue;
     private bool _peerOnline;
     private EdgeProxyLifecycleState _lifecycleState = EdgeProxyLifecycleState.Starting;
@@ -59,6 +59,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         _options = options.Value;
         _logger = logger;
         _accessToken = _options.AccessToken;
+        _refreshToken = _options.TokenRefreshToken;
         _callerHeaders = new(StringComparer.OrdinalIgnoreCase)
         {
             ["X-HidBridge-UserId"] = _options.PrincipalId,
@@ -713,6 +714,10 @@ public sealed class EdgeProxyWorker : BackgroundService
         {
             form["scope"] = _options.TokenScope;
         }
+        if (!string.IsNullOrWhiteSpace(_options.TokenClientSecret))
+        {
+            form["client_secret"] = _options.TokenClientSecret;
+        }
 
         var client = _httpClientFactory.CreateClient("edge-proxy-auth");
         var endpoint = $"/realms/{_options.KeycloakRealm}/protocol/openid-connect/token";
@@ -777,6 +782,16 @@ public sealed class EdgeProxyWorker : BackgroundService
 
             if (token is null)
             {
+                if (!_options.AllowPasswordGrantFallback)
+                {
+                    if (refreshError is not null)
+                    {
+                        throw new InvalidOperationException("Refresh-token grant failed and password fallback is disabled.", refreshError);
+                    }
+
+                    throw new InvalidOperationException("Password grant fallback is disabled and no valid refresh-token grant result is available.");
+                }
+
                 if (string.IsNullOrWhiteSpace(_options.TokenUsername)
                     || string.IsNullOrWhiteSpace(_options.TokenPassword)
                     || string.IsNullOrWhiteSpace(_options.TokenClientId))
@@ -985,7 +1000,7 @@ public sealed class EdgeProxyWorker : BackgroundService
             .ToArray();
 
         return normalized.Length == 0
-            ? "operator.viewer"
+            ? "operator.edge"
             : string.Join(",", normalized);
     }
 

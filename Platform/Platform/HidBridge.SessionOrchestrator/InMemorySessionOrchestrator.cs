@@ -200,6 +200,15 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                 request.Args.TryGetValue("shareId", out var shareId) ? shareId?.ToString() : null),
             cancellationToken);
 
+        await _eventWriter.WriteAuditAsync(
+            new AuditEventBody(
+                Category: "session.command",
+                Message: $"Command {request.CommandId} completed with status {ack.Status}.",
+                SessionId: request.SessionId,
+                Data: BuildCommandAuditData(request, ack, agentId, principalId, participantId, sessionTransportProvider, nowUtc),
+                CreatedAtUtc: nowUtc),
+            cancellationToken);
+
         if (session is not null)
         {
             var shouldRefreshLease = ShouldRefreshSessionLeaseFromDispatch(ack);
@@ -759,6 +768,37 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
 
     private async Task PersistSessionAsync(SessionAggregate aggregate, DateTimeOffset nowUtc, CancellationToken cancellationToken)
         => await _sessionStore.UpsertAsync(ToSnapshot(aggregate, nowUtc), cancellationToken);
+
+    /// <summary>
+    /// Builds deterministic audit payload for one command-dispatch completion.
+    /// </summary>
+    private static Dictionary<string, object?> BuildCommandAuditData(
+        CommandRequestBody request,
+        CommandAckBody ack,
+        string? agentId,
+        string? principalId,
+        string? participantId,
+        RealtimeTransportProvider? sessionTransportProvider,
+        DateTimeOffset completedAtUtc)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["commandId"] = request.CommandId,
+            ["channel"] = request.Channel,
+            ["action"] = request.Action,
+            ["sessionId"] = request.SessionId,
+            ["agentId"] = agentId,
+            ["status"] = ack.Status.ToString(),
+            ["errorDomain"] = ack.Error?.Domain.ToString(),
+            ["errorCode"] = ack.Error?.Code,
+            ["principalId"] = principalId,
+            ["participantId"] = participantId,
+            ["timeoutMs"] = request.TimeoutMs,
+            ["idempotencyKey"] = request.IdempotencyKey,
+            ["transportProvider"] = sessionTransportProvider?.ToString(),
+            ["completedAtUtc"] = completedAtUtc,
+        };
+    }
 
     private static bool ShouldRefreshSessionLeaseFromDispatch(CommandAckBody ack)
     {

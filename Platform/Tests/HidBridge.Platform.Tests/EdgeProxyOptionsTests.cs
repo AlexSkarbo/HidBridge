@@ -79,6 +79,17 @@ public sealed class EdgeProxyOptionsTests
         Assert.Contains("MediaHealthUrl", error);
     }
 
+    [Fact]
+    public void Normalize_DefaultOperatorRole_UsesEdgeRole()
+    {
+        var options = CreateBaselineOptions();
+        options.OperatorRolesCsv = string.Empty;
+
+        options.Normalize();
+
+        Assert.Equal("operator.edge", options.OperatorRolesCsv);
+    }
+
     /// <summary>
     /// Creates valid baseline options for mode-specific overrides.
     /// </summary>

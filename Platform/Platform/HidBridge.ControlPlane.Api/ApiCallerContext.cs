@@ -62,6 +62,11 @@ public sealed record ApiCallerContext(
     public bool IsAdmin => OperatorPolicyRoles.HasAdminAccess(OperatorRoles);
 
     /// <summary>
+    /// Gets whether the caller has edge relay transport access.
+    /// </summary>
+    public bool CanAccessEdgeRelay => OperatorPolicyRoles.HasEdgeRelayAccess(OperatorRoles);
+
+    /// <summary>
     /// Creates a context from the current HTTP request.
     /// </summary>
     public static ApiCallerContext FromHttpContext(HttpContext httpContext)
@@ -166,6 +171,25 @@ public sealed record ApiCallerContext(
                 "moderation_access_required",
                 "Caller does not have an operator role that grants moderation access.",
                 ["operator.moderator", "operator.admin"]);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that the caller has edge relay transport access.
+    /// </summary>
+    public void EnsureEdgeRelayAccess()
+    {
+        if (!IsPresent)
+        {
+            return;
+        }
+
+        if (!CanAccessEdgeRelay)
+        {
+            throw new ApiAuthorizationException(
+                "edge_relay_access_required",
+                "Caller does not have an operator role that grants edge relay access.",
+                [OperatorPolicyRoles.EdgeRelay, "operator.moderator", "operator.admin"]);
         }
     }
 

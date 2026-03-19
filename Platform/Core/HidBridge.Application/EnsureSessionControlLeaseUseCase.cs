@@ -12,6 +12,7 @@ public sealed class EnsureSessionControlLeaseUseCase
     private readonly ISessionOrchestrator _orchestrator;
     private readonly IConnectorRegistry _connectorRegistry;
     private readonly WebRtcCommandRelayService _relayService;
+    private readonly IEventWriter _eventWriter;
 
     /// <summary>
     /// Creates the ensure-control use case.
@@ -20,12 +21,14 @@ public sealed class EnsureSessionControlLeaseUseCase
         ISessionStore sessionStore,
         ISessionOrchestrator orchestrator,
         IConnectorRegistry connectorRegistry,
-        WebRtcCommandRelayService relayService)
+        WebRtcCommandRelayService relayService,
+        IEventWriter eventWriter)
     {
         _sessionStore = sessionStore;
         _orchestrator = orchestrator;
         _connectorRegistry = connectorRegistry;
         _relayService = relayService;
+        _eventWriter = eventWriter;
     }
 
     /// <summary>
@@ -88,13 +91,34 @@ public sealed class EnsureSessionControlLeaseUseCase
             request,
             cancellationToken);
         sessionCreated = sessionCreated || leaseResult.SessionCreated;
+        var resolvedAtUtc = DateTimeOffset.UtcNow;
+
+        await _eventWriter.WriteAuditAsync(
+            new AuditEventBody(
+                Category: "session.control.ensure",
+                Message: $"Control lease ensured for session {effectiveSessionId}.",
+                SessionId: effectiveSessionId,
+                Data: new Dictionary<string, object?>
+                {
+                    ["requestedSessionId"] = requestedSessionId,
+                    ["effectiveSessionId"] = effectiveSessionId,
+                    ["sessionCreated"] = sessionCreated,
+                    ["sessionReused"] = sessionReused,
+                    ["participantId"] = request.ParticipantId,
+                    ["requestedBy"] = request.RequestedBy,
+                    ["leaseSeconds"] = request.LeaseSeconds,
+                    ["endpointId"] = request.EndpointId,
+                },
+                CreatedAtUtc: resolvedAtUtc),
+            cancellationToken);
+
         return new SessionControlEnsureResultBody(
             RequestedSessionId: requestedSessionId,
             EffectiveSessionId: effectiveSessionId,
             Lease: leaseResult.Lease,
             SessionCreated: sessionCreated,
             SessionReused: sessionReused,
-            ResolvedAtUtc: DateTimeOffset.UtcNow);
+            ResolvedAtUtc: resolvedAtUtc);
     }
 
     /// <summary>

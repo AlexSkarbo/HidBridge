@@ -353,6 +353,15 @@ Edge-agent as external process (outside docker):
   - `HIDBRIDGE_EDGE_PROXY_UARTPORT=COM6`
   - `HIDBRIDGE_EDGE_PROXY_UARTHMACKEY=your-master-secret`
 
+Final runtime flow (no script policy dependency):
+- production path:
+  - `Web` -> `API` -> `WebRTC relay queue/signaling` -> `HidBridge.EdgeProxy.Agent` -> `HID/UART protocol` -> target device
+- server-side ownership:
+  - readiness policy (`WebRtcRelayReadinessService`) and endpoint `GET /api/v1/sessions/{id}/transport/readiness`
+  - lease ensure/retry orchestration (`POST /api/v1/sessions/{id}/control/ensure`)
+  - command/lease/ack audit trail (`session.command`, `session.control*`, `transport.ack`)
+- scripts are test harnesses only (bootstrap/smoke/acceptance), not runtime policy owners.
+
 One-command demo flow:
 - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow`
 - Step-by-step runbooks:
@@ -458,8 +467,12 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
     - `HIDBRIDGE_EDGE_PROXY_ENDPOINTID`
     - `HIDBRIDGE_EDGE_PROXY_CONTROLWSURL` (legacy mode only; ignored by direct UART executor)
   - security defaults:
-    - `HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV=operator.viewer` (least-privilege caller header)
-    - bearer token is auto-rotated (refresh-token grant first, password grant fallback) when Keycloak credentials are provided.
+    - `HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV=operator.edge` (least-privilege relay role)
+    - bearer token is auto-rotated (refresh-token grant first; password fallback is configurable).
+    - optional hardening:
+      - `HIDBRIDGE_EDGE_PROXY_TOKENCLIENTSECRET=<secret>`
+      - `HIDBRIDGE_EDGE_PROXY_TOKENREFRESHTOKEN=<refresh-token>`
+      - `HIDBRIDGE_EDGE_PROXY_ALLOWPASSWORDGRANTFALLBACK=false`
 - legacy script adapter is kept only as compatibility harness during migration.
 - task entry:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`

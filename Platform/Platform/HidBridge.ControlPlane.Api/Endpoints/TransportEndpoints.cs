@@ -31,7 +31,7 @@ public static class TransportEndpoints
             var caller = ApiCallerContext.FromHttpContext(httpContext);
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 var senderPeerId = caller.EffectivePrincipalId ?? request.SenderPeerId;
                 if (string.IsNullOrWhiteSpace(senderPeerId))
@@ -116,7 +116,7 @@ public static class TransportEndpoints
             var caller = ApiCallerContext.FromHttpContext(httpContext);
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 var snapshot = await relay.MarkPeerOnlineAsync(
                     sessionId,
@@ -151,7 +151,7 @@ public static class TransportEndpoints
             var caller = ApiCallerContext.FromHttpContext(httpContext);
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 var snapshot = await relay.MarkPeerOfflineAsync(sessionId, peerId, ct);
                 return Results.Ok(snapshot);
@@ -207,7 +207,7 @@ public static class TransportEndpoints
             var caller = ApiCallerContext.FromHttpContext(httpContext);
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 if (string.IsNullOrWhiteSpace(request.PeerId))
                 {
@@ -284,7 +284,7 @@ public static class TransportEndpoints
             var caller = ApiCallerContext.FromHttpContext(httpContext);
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 if (string.IsNullOrWhiteSpace(peerId))
                 {
@@ -327,7 +327,7 @@ public static class TransportEndpoints
             var logger = loggerFactory.CreateLogger("TransportEndpoints");
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 if (request is null)
                 {

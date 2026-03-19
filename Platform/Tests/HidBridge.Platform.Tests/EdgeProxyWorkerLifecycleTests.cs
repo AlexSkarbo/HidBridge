@@ -19,7 +19,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
     /// Ensures worker sends least-privilege role header by default.
     /// </summary>
     [Fact]
-    public async Task ExecuteAsync_DefaultRolesHeader_UsesOperatorViewer()
+    public async Task ExecuteAsync_DefaultRolesHeader_UsesOperatorEdge()
     {
         var handler = new RelayApiHandler(commandEnvelope: null);
         var client = new HttpClient(handler)
@@ -42,7 +42,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
             await worker.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal("operator.viewer", handler.LastRoleHeader);
+        Assert.Equal("operator.edge", handler.LastRoleHeader);
     }
 
     /// <summary>

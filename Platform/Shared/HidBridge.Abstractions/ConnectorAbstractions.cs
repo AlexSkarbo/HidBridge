@@ -599,6 +599,11 @@ public interface IOperatorPolicyService
 public static class OperatorPolicyRoles
 {
     /// <summary>
+    /// Role assigned to machine-to-machine edge relay agents.
+    /// </summary>
+    public const string EdgeRelay = "operator.edge";
+
+    /// <summary>
     /// Gets the normalized HidBridge operator roles from one role set.
     /// </summary>
     public static IReadOnlyList<string> Normalize(IReadOnlyList<string>? roles)
@@ -626,6 +631,22 @@ public static class OperatorPolicyRoles
                 string.Equals(role, "operator.viewer", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "operator.moderator", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "operator.admin", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the role set grants edge relay transport access.
+    /// </summary>
+    public static bool HasEdgeRelayAccess(IReadOnlyList<string>? roles)
+    {
+        if (roles is null)
+        {
+            return true;
+        }
+
+        return Normalize(roles).Any(static role =>
+            string.Equals(role, EdgeRelay, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "operator.moderator", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "operator.admin", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

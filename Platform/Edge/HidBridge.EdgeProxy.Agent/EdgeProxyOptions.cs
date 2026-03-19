@@ -114,14 +114,21 @@ public sealed class EdgeProxyOptions
     /// <summary>
     /// Caller roles projected into <c>X-HidBridge-Role</c> header (comma/semicolon separated).
     /// </summary>
-    public string OperatorRolesCsv { get; set; } = "operator.viewer";
+    public string OperatorRolesCsv { get; set; } = "operator.edge";
 
     public string AccessToken { get; set; } = "";
     public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
     public string KeycloakRealm { get; set; } = "hidbridge-dev";
     public string TokenClientId { get; set; } = "controlplane-smoke";
+    public string TokenClientSecret { get; set; } = string.Empty;
     public string TokenUsername { get; set; } = "operator.smoke.admin";
     public string TokenPassword { get; set; } = "ChangeMe123!";
+    public string TokenRefreshToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Allows fallback to password grant when refresh-token grant is unavailable or fails.
+    /// </summary>
+    public bool AllowPasswordGrantFallback { get; set; } = true;
 
     /// <summary>
     /// Optional OIDC scope used by password and refresh grants.
@@ -168,6 +175,8 @@ public sealed class EdgeProxyOptions
         TransientFailureThresholdForOffline = Math.Max(1, TransientFailureThresholdForOffline);
         TokenRefreshSkewSec = Math.Max(5, TokenRefreshSkewSec);
         TokenScope = TokenScope?.Trim() ?? string.Empty;
+        TokenClientSecret = TokenClientSecret?.Trim() ?? string.Empty;
+        TokenRefreshToken = TokenRefreshToken?.Trim() ?? string.Empty;
         OperatorRolesCsv = string.Join(
             ",",
             (OperatorRolesCsv ?? string.Empty)
@@ -177,7 +186,7 @@ public sealed class EdgeProxyOptions
                 .Distinct(StringComparer.OrdinalIgnoreCase));
         if (string.IsNullOrWhiteSpace(OperatorRolesCsv))
         {
-            OperatorRolesCsv = "operator.viewer";
+            OperatorRolesCsv = "operator.edge";
         }
     }
 

@@ -22,7 +22,8 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
         var orchestrator = new RecordingSessionOrchestrator(sessionStore);
         var connectorRegistry = new StubConnectorRegistry([]);
         var relay = new WebRtcCommandRelayService();
-        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay);
+        var eventWriter = new RecordingEventWriter();
+        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay, eventWriter);
 
         var result = await useCase.ExecuteAsync(
             "session-existing",
@@ -35,6 +36,7 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
         Assert.Single(orchestrator.RequestControlCalls);
         Assert.Equal("session-existing", orchestrator.RequestControlCalls[0]);
         Assert.Empty(orchestrator.OpenCalls);
+        Assert.Contains(eventWriter.AuditEvents, audit => audit.Category == "session.control.ensure");
     }
 
     /// <summary>
@@ -57,7 +59,8 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
                 ["state"] = "Connected",
             },
             TestContext.Current.CancellationToken);
-        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay);
+        var eventWriter = new RecordingEventWriter();
+        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay, eventWriter);
 
         var result = await useCase.ExecuteAsync(
             "session-missing",
@@ -89,7 +92,8 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
                     Capabilities: []),
             ]);
         var relay = new WebRtcCommandRelayService();
-        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay);
+        var eventWriter = new RecordingEventWriter();
+        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay, eventWriter);
 
         var result = await useCase.ExecuteAsync(
             "session-created",
@@ -126,7 +130,8 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
                     Capabilities: []),
             ]);
         var relay = new WebRtcCommandRelayService();
-        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay);
+        var eventWriter = new RecordingEventWriter();
+        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay, eventWriter);
 
         var result = await useCase.ExecuteAsync(
             "session-retry",
@@ -153,7 +158,8 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
         };
         var connectorRegistry = new StubConnectorRegistry([]);
         var relay = new WebRtcCommandRelayService();
-        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay);
+        var eventWriter = new RecordingEventWriter();
+        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay, eventWriter);
 
         var exception = await Assert.ThrowsAsync<ControlArbitrationException>(() => useCase.ExecuteAsync(
             "session-conflict",
@@ -164,6 +170,23 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
         Assert.Equal("session-conflict", exception.SessionId);
         Assert.Equal("owner:other", exception.CurrentControllerParticipantId);
         Assert.Equal("other-user", exception.CurrentControllerPrincipalId);
+    }
+
+    /// <summary>
+    /// Collects audit records emitted by ensure-lease orchestration.
+    /// </summary>
+    private sealed class RecordingEventWriter : IEventWriter
+    {
+        public List<AuditEventBody> AuditEvents { get; } = [];
+
+        public Task WriteAuditAsync(AuditEventBody auditEvent, CancellationToken cancellationToken)
+        {
+            AuditEvents.Add(auditEvent);
+            return Task.CompletedTask;
+        }
+
+        public Task WriteTelemetryAsync(TelemetryEventBody telemetryEvent, CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     /// <summary>
