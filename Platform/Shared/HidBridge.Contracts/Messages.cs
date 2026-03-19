@@ -304,6 +304,34 @@ public sealed record SessionControlRequestBody(
     IReadOnlyList<string>? OperatorRoles = null);
 
 /// <summary>
+/// Requests server-side ensure flow for control lease:
+/// resolve/reuse/create session when needed, then request lease.
+/// </summary>
+public sealed record SessionControlEnsureBody(
+    string ParticipantId,
+    string RequestedBy,
+    string? EndpointId = null,
+    SessionProfile Profile = SessionProfile.UltraLowLatency,
+    int? LeaseSeconds = null,
+    string? Reason = null,
+    bool AutoCreateSessionIfMissing = true,
+    bool PreferLiveRelaySession = true,
+    string? TenantId = null,
+    string? OrganizationId = null,
+    IReadOnlyList<string>? OperatorRoles = null);
+
+/// <summary>
+/// Reports one control-ensure result with effective session and lease snapshot.
+/// </summary>
+public sealed record SessionControlEnsureResultBody(
+    string RequestedSessionId,
+    string EffectiveSessionId,
+    SessionControlLeaseBody Lease,
+    bool SessionCreated,
+    bool SessionReused,
+    DateTimeOffset ResolvedAtUtc);
+
+/// <summary>
 /// Grants or force-transfers control to the specified participant.
 /// </summary>
 public sealed record SessionControlGrantBody(
@@ -428,6 +456,27 @@ public sealed record SessionTransportHealthBody(
     int? LastPeerConsecutiveFailures = null,
     int? LastPeerReconnectBackoffMs = null,
     DateTimeOffset? LastRelayAckAtUtc = null);
+
+/// <summary>
+/// Carries one transport-readiness projection for WebRTC relay command routing.
+/// </summary>
+public sealed record SessionTransportReadinessBody(
+    string SessionId,
+    string AgentId,
+    string EndpointId,
+    string Provider,
+    string ProviderSource,
+    bool Ready,
+    string ReasonCode,
+    string Reason,
+    bool Connected,
+    int OnlinePeerCount,
+    string? LastPeerState = null,
+    string? LastPeerFailureReason = null,
+    DateTimeOffset? LastPeerSeenAtUtc = null,
+    DateTimeOffset? LastRelayAckAtUtc = null,
+    IReadOnlyDictionary<string, object?>? Metrics = null,
+    DateTimeOffset? EvaluatedAtUtc = null);
 
 /// <summary>
 /// Represents one normalized timeline item built from audit, telemetry, and command journal records.

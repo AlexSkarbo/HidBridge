@@ -1,4 +1,5 @@
 using HidBridge.Abstractions;
+using HidBridge.Application;
 using HidBridge.Contracts;
 using HidBridge.SessionOrchestrator;
 
@@ -80,6 +81,49 @@ public static class ControlEndpoints
         .Produces<SessionControlLeaseBody>(StatusCodes.Status200OK)
         .WithSummary("Request active control for one participant.")
         .WithDescription("Grants control immediately when no competing controller lease is active. If another active controller already holds the lease, the endpoint returns a conflict.");
+
+        group.MapPost("/{sessionId}/control/ensure", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            EnsureSessionControlLeaseUseCase useCase,
+            SessionControlEnsureBody request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                var normalized = caller.Apply(request);
+                var ensured = await useCase.ExecuteAsync(sessionId, normalized, ct);
+                if (caller.IsPresent)
+                {
+                    _ = await caller.RequireScopedSessionAsync(sessionStore, ensured.EffectiveSessionId, ct);
+                }
+
+                return Results.Ok(ensured);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+            catch (ControlArbitrationException ex)
+            {
+                return ToControlConflict(ex);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { sessionId, error = ex.Message });
+            }
+        })
+        .Accepts<SessionControlEnsureBody>("application/json")
+        .Produces<SessionControlEnsureResultBody>(StatusCodes.Status200OK)
+        .WithSummary("Ensure control lease for a session route.")
+        .WithDescription("Ensures effective session resolution (reuse/create when configured) and acquires a control lease with bounded server-side retry semantics.");
 
         group.MapPost("/{sessionId}/control/grant", async (
             string sessionId,

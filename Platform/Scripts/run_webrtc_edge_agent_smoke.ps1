@@ -179,7 +179,7 @@ function ConvertTo-NullableInt {
     return $null
 }
 
-# Polls transport health until relay peer is connected and online.
+# Polls server-side readiness endpoint (with transport-health fallback for older API builds).
 function Wait-RelayTransportReady {
     param(
         [string]$ApiBaseUrl,
@@ -190,45 +190,80 @@ function Wait-RelayTransportReady {
         [int]$TimeoutSec
     )
 
+    $readinessUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/transport/readiness?provider=webrtc-datachannel"
     $healthUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/transport/health?provider=webrtc-datachannel"
     $lastSnapshot = $null
+    $fallbackToHealth = $false
 
     for ($i = 0; $i -lt $Attempts; $i++) {
         try {
-            $health = Invoke-SmokeJson -Method "GET" -Uri $healthUri -Headers $Headers -TimeoutSec $TimeoutSec
-            $connected = [bool](Get-PropertyValue -InputObject $health -Name "connected")
-            $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $health -Name "onlinePeerCount")
-            if ($null -eq $onlinePeerCount) {
-                $metrics = Get-PropertyValue -InputObject $health -Name "metrics"
-                $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $metrics -Name "onlinePeerCount")
+            if (-not $fallbackToHealth) {
+                $readiness = Invoke-SmokeJson -Method "GET" -Uri $readinessUri -Headers $Headers -TimeoutSec $TimeoutSec
+                $ready = [bool](Get-PropertyValue -InputObject $readiness -Name "ready")
+                $connected = [bool](Get-PropertyValue -InputObject $readiness -Name "connected")
+                $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $readiness -Name "onlinePeerCount")
+                $peerState = [string](Get-PropertyValue -InputObject $readiness -Name "lastPeerState")
+                $reasonCode = [string](Get-PropertyValue -InputObject $readiness -Name "reasonCode")
+                $reason = [string](Get-PropertyValue -InputObject $readiness -Name "reason")
+                $lastSnapshot = [pscustomobject]@{
+                    connected = $connected
+                    onlinePeerCount = $onlinePeerCount
+                    lastPeerState = if ([string]::IsNullOrWhiteSpace($peerState)) { $null } else { $peerState }
+                    lastPeerFailureReason = [string](Get-PropertyValue -InputObject $readiness -Name "lastPeerFailureReason")
+                    lastPeerSeenAtUtc = [string](Get-PropertyValue -InputObject $readiness -Name "lastPeerSeenAtUtc")
+                    lastRelayAckAtUtc = [string](Get-PropertyValue -InputObject $readiness -Name "lastRelayAckAtUtc")
+                    readinessReasonCode = if ([string]::IsNullOrWhiteSpace($reasonCode)) { $null } else { $reasonCode }
+                    readinessReason = if ([string]::IsNullOrWhiteSpace($reason)) { $null } else { $reason }
+                }
+
+                if ($ready) {
+                    return $lastSnapshot
+                }
             }
+            else {
+                $health = Invoke-SmokeJson -Method "GET" -Uri $healthUri -Headers $Headers -TimeoutSec $TimeoutSec
+                $connected = [bool](Get-PropertyValue -InputObject $health -Name "connected")
+                $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $health -Name "onlinePeerCount")
+                if ($null -eq $onlinePeerCount) {
+                    $metrics = Get-PropertyValue -InputObject $health -Name "metrics"
+                    $onlinePeerCount = ConvertTo-NullableInt (Get-PropertyValue -InputObject $metrics -Name "onlinePeerCount")
+                }
 
-            $peerState = [string](Get-PropertyValue -InputObject $health -Name "lastPeerState")
-            if ([string]::IsNullOrWhiteSpace($peerState)) {
-                $metrics = Get-PropertyValue -InputObject $health -Name "metrics"
-                $peerState = [string](Get-PropertyValue -InputObject $metrics -Name "lastPeerState")
-            }
+                $peerState = [string](Get-PropertyValue -InputObject $health -Name "lastPeerState")
+                if ([string]::IsNullOrWhiteSpace($peerState)) {
+                    $metrics = Get-PropertyValue -InputObject $health -Name "metrics"
+                    $peerState = [string](Get-PropertyValue -InputObject $metrics -Name "lastPeerState")
+                }
 
-            $isHealthyState = [string]::IsNullOrWhiteSpace($peerState) -or
-                [string]::Equals($peerState, "Connected", [StringComparison]::OrdinalIgnoreCase) -or
-                [string]::Equals($peerState, "Degraded", [StringComparison]::OrdinalIgnoreCase)
+                $isHealthyState = [string]::IsNullOrWhiteSpace($peerState) -or
+                    [string]::Equals($peerState, "Connected", [StringComparison]::OrdinalIgnoreCase) -or
+                    [string]::Equals($peerState, "Degraded", [StringComparison]::OrdinalIgnoreCase)
 
-            $lastSnapshot = [pscustomobject]@{
-                connected = $connected
-                onlinePeerCount = $onlinePeerCount
-                lastPeerState = if ([string]::IsNullOrWhiteSpace($peerState)) { $null } else { $peerState }
-                lastPeerFailureReason = [string](Get-PropertyValue -InputObject $health -Name "lastPeerFailureReason")
-                lastPeerSeenAtUtc = [string](Get-PropertyValue -InputObject $health -Name "lastPeerSeenAtUtc")
-                lastRelayAckAtUtc = [string](Get-PropertyValue -InputObject $health -Name "lastRelayAckAtUtc")
-            }
+                $lastSnapshot = [pscustomobject]@{
+                    connected = $connected
+                    onlinePeerCount = $onlinePeerCount
+                    lastPeerState = if ([string]::IsNullOrWhiteSpace($peerState)) { $null } else { $peerState }
+                    lastPeerFailureReason = [string](Get-PropertyValue -InputObject $health -Name "lastPeerFailureReason")
+                    lastPeerSeenAtUtc = [string](Get-PropertyValue -InputObject $health -Name "lastPeerSeenAtUtc")
+                    lastRelayAckAtUtc = [string](Get-PropertyValue -InputObject $health -Name "lastRelayAckAtUtc")
+                    readinessReasonCode = if ($isHealthyState -and $connected -and ($onlinePeerCount -ge 1)) { "ready" } else { "legacy_transport_health_not_ready" }
+                    readinessReason = if ($isHealthyState -and $connected -and ($onlinePeerCount -ge 1)) { "Legacy transport health indicates ready route." } else { "Legacy transport health did not satisfy readiness checks." }
+                }
 
-            if ($connected -and ($onlinePeerCount -ge 1) -and $isHealthyState) {
-                return $lastSnapshot
+                if ($connected -and ($onlinePeerCount -ge 1) -and $isHealthyState) {
+                    return $lastSnapshot
+                }
             }
         }
         catch {
             $statusCode = Get-HttpStatusCode -Exception $_.Exception
-            if ($statusCode -eq 404) {
+            if (-not $fallbackToHealth -and $statusCode -eq 404) {
+                Write-Warning "Transport readiness endpoint is unavailable for session '$SessionId'. Falling back to transport-health checks."
+                $fallbackToHealth = $true
+                continue
+            }
+
+            if ($fallbackToHealth -and $statusCode -eq 404) {
                 Write-Warning "Transport health endpoint is unavailable for session '$SessionId'. Skipping transport-health readiness check."
                 return $null
             }
@@ -244,7 +279,11 @@ function Wait-RelayTransportReady {
     $onlinePeerCountText = if ($null -eq $lastSnapshot.onlinePeerCount) { "null" } else { [string]$lastSnapshot.onlinePeerCount }
     $lastPeerStateText = if ([string]::IsNullOrWhiteSpace([string]$lastSnapshot.lastPeerState)) { "null" } else { [string]$lastSnapshot.lastPeerState }
     $lastPeerFailureReasonText = if ([string]::IsNullOrWhiteSpace([string]$lastSnapshot.lastPeerFailureReason)) { "null" } else { [string]$lastSnapshot.lastPeerFailureReason }
-    throw ("WebRTC transport health is not ready (connected={0}, onlinePeerCount={1}, lastPeerState={2}, lastPeerFailureReason={3})." -f `
+    $reasonCodeText = if ($lastSnapshot.PSObject.Properties["readinessReasonCode"] -and -not [string]::IsNullOrWhiteSpace([string]$lastSnapshot.readinessReasonCode)) { [string]$lastSnapshot.readinessReasonCode } else { "unknown" }
+    $reasonText = if ($lastSnapshot.PSObject.Properties["readinessReason"] -and -not [string]::IsNullOrWhiteSpace([string]$lastSnapshot.readinessReason)) { [string]$lastSnapshot.readinessReason } else { "n/a" }
+    throw ("WebRTC transport readiness is not ready (reasonCode={0}, reason={1}, connected={2}, onlinePeerCount={3}, lastPeerState={4}, lastPeerFailureReason={5})." -f `
+        $reasonCodeText, `
+        $reasonText, `
         $lastSnapshot.connected, `
         $onlinePeerCountText, `
         $lastPeerStateText, `
@@ -343,23 +382,53 @@ catch {
 }
 
 if (-not $SkipControlLeaseRequest) {
-    $leaseBody = @{
+    $leaseEnsureBody = @{
         participantId = "owner:$effectivePrincipalId"
         requestedBy = $effectivePrincipalId
+        endpointId = if ([string]::IsNullOrWhiteSpace($sessionEndpointId)) { $null } else { $sessionEndpointId }
+        profile = "UltraLowLatency"
         leaseSeconds = [Math]::Max(30, $LeaseSeconds)
         reason = "webrtc edge-agent smoke"
+        autoCreateSessionIfMissing = $true
+        preferLiveRelaySession = $true
         tenantId = $effectiveTenantId
         organizationId = $effectiveOrganizationId
     }
 
-    $leaseUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/control/request"
+    $leaseEnsureUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/control/ensure"
     try {
-        $null = Invoke-SmokeJson -Method "POST" -Uri $leaseUri -Headers $authHeaders -Body $leaseBody -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+        $leaseEnsureResult = Invoke-SmokeJson -Method "POST" -Uri $leaseEnsureUri -Headers $authHeaders -Body $leaseEnsureBody -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+        $effectiveSessionId = [string](Get-PropertyValue -InputObject $leaseEnsureResult -Name "effectiveSessionId")
+        if (-not [string]::IsNullOrWhiteSpace($effectiveSessionId) -and -not [string]::Equals($effectiveSessionId, $sessionId, [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Warning "Control ensure switched session '$sessionId' -> '$effectiveSessionId'."
+            $sessionId = $effectiveSessionId
+        }
     }
     catch {
         $statusCode = Get-HttpStatusCode -Exception $_.Exception
         if ($statusCode -eq 404) {
-            Write-Warning "Control request endpoint is unavailable for session '$sessionId'. Continuing without explicit lease."
+            Write-Warning "Control ensure endpoint is unavailable for session '$sessionId'. Falling back to legacy /control/request flow."
+            $legacyLeaseBody = @{
+                participantId = "owner:$effectivePrincipalId"
+                requestedBy = $effectivePrincipalId
+                leaseSeconds = [Math]::Max(30, $LeaseSeconds)
+                reason = "webrtc edge-agent smoke"
+                tenantId = $effectiveTenantId
+                organizationId = $effectiveOrganizationId
+            }
+            $legacyLeaseUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/control/request"
+            try {
+                $null = Invoke-SmokeJson -Method "POST" -Uri $legacyLeaseUri -Headers $authHeaders -Body $legacyLeaseBody -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+            }
+            catch {
+                $legacyStatusCode = Get-HttpStatusCode -Exception $_.Exception
+                if ($legacyStatusCode -eq 404) {
+                    Write-Warning "Legacy control request endpoint is unavailable for session '$sessionId'. Continuing without explicit lease."
+                }
+                else {
+                    throw
+                }
+            }
         }
         else {
             throw

@@ -285,6 +285,18 @@ public sealed record ApiCallerContext(
         };
 
     /// <summary>
+    /// Applies the caller scope to a control-ensure request.
+    /// </summary>
+    public SessionControlEnsureBody Apply(SessionControlEnsureBody request)
+        => request with
+        {
+            RequestedBy = EffectivePrincipalId ?? request.RequestedBy,
+            TenantId = TenantId ?? request.TenantId,
+            OrganizationId = OrganizationId ?? request.OrganizationId,
+            OperatorRoles = MergeOperatorRoles(request.OperatorRoles),
+        };
+
+    /// <summary>
     /// Applies the caller scope to a control grant request.
     /// </summary>
     public SessionControlGrantBody Apply(SessionControlGrantBody request)

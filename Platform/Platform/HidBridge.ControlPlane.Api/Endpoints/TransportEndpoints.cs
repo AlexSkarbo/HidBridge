@@ -305,6 +305,58 @@ public static class TransportEndpoints
         .WithSummary("Publishes command acknowledgment from the WebRTC relay consumer.")
         .WithDescription("Completes the pending relay command by commandId so dispatch can return the final acknowledgment.");
 
+        group.MapGet("/{sessionId}/transport/readiness", async (
+            string sessionId,
+            HttpContext httpContext,
+            ISessionStore sessionStore,
+            WebRtcRelayReadinessService readinessService,
+            string? provider,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                if (caller.IsPresent)
+                {
+                    _ = await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
+                }
+
+                RealtimeTransportProvider? requestedProvider = null;
+                if (!string.IsNullOrWhiteSpace(provider))
+                {
+                    if (!RealtimeTransportProviderParser.TryParse(provider, out var parsedProvider))
+                    {
+                        return Results.BadRequest(new
+                        {
+                            sessionId,
+                            error = $"Unknown transport provider '{provider}'.",
+                        });
+                    }
+
+                    requestedProvider = parsedProvider;
+                }
+
+                var readiness = await readinessService.EvaluateAsync(sessionId, requestedProvider, ct);
+                return Results.Ok(readiness);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { sessionId, error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { sessionId, error = ex.Message });
+            }
+        })
+        .Produces<SessionTransportReadinessBody>(StatusCodes.Status200OK)
+        .WithSummary("Read typed transport readiness projection for a session route.")
+        .WithDescription("Evaluates server-side readiness policy for WebRTC relay routing using current session and transport-health state.");
+
         group.MapGet("/{sessionId}/transport/health", async (
             string sessionId,
             HttpContext httpContext,

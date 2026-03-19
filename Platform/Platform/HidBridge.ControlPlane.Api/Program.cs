@@ -126,6 +126,12 @@ builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
     EnableDefaultProviderFallbackOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
 });
 builder.Services.AddSingleton<WebRtcCommandRelayService>();
+builder.Services.AddSingleton(new WebRtcRelayReadinessOptions
+{
+    DefaultProvider = RealtimeTransportProvider.WebRtcDataChannel,
+});
+builder.Services.AddSingleton<WebRtcRelayReadinessService>();
+builder.Services.AddSingleton<EnsureSessionControlLeaseUseCase>();
 builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new ConnectorBackedRealtimeTransport(
         RealtimeTransportProvider.Uart,
