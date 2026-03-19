@@ -87,4 +87,8 @@ if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
 
 # Terminal-B entrypoint is now a thin compatibility wrapper over the canonical smoke flow.
 & $smokeScript @smokeParameters
-exit $LASTEXITCODE
+if (Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue) {
+    exit $global:LASTEXITCODE
+}
+
+exit 0
