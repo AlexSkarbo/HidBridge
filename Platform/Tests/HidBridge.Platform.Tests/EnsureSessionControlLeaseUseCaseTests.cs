@@ -1,6 +1,7 @@
 using HidBridge.Abstractions;
 using HidBridge.Application;
 using HidBridge.Contracts;
+using HidBridge.SessionOrchestrator;
 using Xunit;
 
 namespace HidBridge.Platform.Tests;
@@ -139,6 +140,33 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
     }
 
     /// <summary>
+    /// Propagates deterministic control conflict when another participant already holds the lease.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_PropagatesControlConflict_WhenLeaseIsHeldByOtherParticipant()
+    {
+        var sessionStore = new TestSessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-conflict", "agent-1", "endpoint-1"), TestContext.Current.CancellationToken);
+        var orchestrator = new RecordingSessionOrchestrator(sessionStore)
+        {
+            ThrowLeaseHeldByOtherConflict = true,
+        };
+        var connectorRegistry = new StubConnectorRegistry([]);
+        var relay = new WebRtcCommandRelayService();
+        var useCase = new EnsureSessionControlLeaseUseCase(sessionStore, orchestrator, connectorRegistry, relay);
+
+        var exception = await Assert.ThrowsAsync<ControlArbitrationException>(() => useCase.ExecuteAsync(
+            "session-conflict",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal("E_CONTROL_LEASE_HELD_BY_OTHER", exception.Code);
+        Assert.Equal("session-conflict", exception.SessionId);
+        Assert.Equal("owner:other", exception.CurrentControllerParticipantId);
+        Assert.Equal("other-user", exception.CurrentControllerPrincipalId);
+    }
+
+    /// <summary>
     /// Creates one default ensure request for tests.
     /// </summary>
     private static SessionControlEnsureBody CreateEnsureRequest(string endpointId)
@@ -221,6 +249,8 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
 
         public bool FailFirstRequestControlWithNotFound { get; set; }
 
+        public bool ThrowLeaseHeldByOtherConflict { get; set; }
+
         public List<SessionOpenBody> OpenCalls { get; } = [];
 
         public List<string> RequestControlCalls { get; } = [];
@@ -238,6 +268,21 @@ public sealed class EnsureSessionControlLeaseUseCaseTests
         {
             RequestControlCalls.Add(sessionId);
             _requestControlAttempts++;
+
+            if (ThrowLeaseHeldByOtherConflict)
+            {
+                var conflictNow = DateTimeOffset.UtcNow;
+                throw ControlArbitrationException.LeaseHeldByOther(
+                    sessionId,
+                    new SessionControlLeaseBody(
+                        ParticipantId: "owner:other",
+                        PrincipalId: "other-user",
+                        GrantedBy: "other-user",
+                        GrantedAtUtc: conflictNow.AddSeconds(-10),
+                        ExpiresAtUtc: conflictNow.AddMinutes(2)),
+                    request.ParticipantId,
+                    request.RequestedBy);
+            }
 
             if (FailFirstRequestControlWithNotFound && _requestControlAttempts == 1)
             {

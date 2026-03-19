@@ -269,6 +269,11 @@ Test entrypoint:
   - archive audit slices
   - archive telemetry slices
   - archive command slices
+- WebRTC edge-agent integration tests now cover:
+  - happy-path relay dispatch (`Applied` ACK)
+  - degraded peer metadata publication on transient relay/API failures
+  - reconnect flow (offline -> online) with command-path recovery
+  - control-lease conflict propagation (`E_CONTROL_LEASE_HELD_BY_OTHER`)
 - The SQL smoke script requires a valid PostgreSQL connection string; the bundled default `postgres/postgres` credentials are only a local placeholder.
 
 Persistence provider selection:
