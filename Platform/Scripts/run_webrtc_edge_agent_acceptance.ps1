@@ -71,17 +71,17 @@ function Read-JsonOrNull {
 function Stop-OptionalProcess {
     param([object]$PidValue)
 
-    $pid = 0
-    if ($null -eq $PidValue -or -not [int]::TryParse([string]$PidValue, [ref]$pid) -or $pid -le 0) {
+    $targetPid = 0
+    if ($null -eq $PidValue -or -not [int]::TryParse([string]$PidValue, [ref]$targetPid) -or $targetPid -le 0) {
         return
     }
 
     try {
-        Stop-Process -Id $pid -Force -ErrorAction Stop
-        Write-Host "Stopped PID $pid"
+        Stop-Process -Id $targetPid -Force -ErrorAction Stop
+        Write-Host "Stopped PID $targetPid"
     }
     catch {
-        Write-Warning "Failed to stop PID ${pid}: $($_.Exception.Message)"
+        Write-Warning "Failed to stop PID ${targetPid}: $($_.Exception.Message)"
     }
 }
 
