@@ -78,6 +78,7 @@ if ($IncludeWebRtcEdgeAgentSmoke -and [string]::Equals($WebRtcCommandExecutor, "
         throw "WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
     }
 
+    Assert-LegacyExp022Enabled -Context "run_demo_flow.ps1 controlws mode"
     Write-Warning "Legacy controlws executor enabled for demo-flow WebRTC validation (exp-022 compatibility mode)."
 }
 

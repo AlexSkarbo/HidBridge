@@ -423,6 +423,9 @@ Manual WebRTC relay smoke (peer queue + ack + transport health):
   - `$env:HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE="true"` (recommended together with passive mode)
 
 Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
+- legacy exp-022 compatibility paths are now **disabled by default** and are treated as lab-only tooling.
+  - to explicitly enable lab mode for one shell:
+    - `$env:HIDBRIDGE_ENABLE_LEGACY_EXP022="true"`
 - preferred stack launcher (starts API/Web + service-based edge proxy agent in direct UART mode):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','uart','-UartPort','COM6','-UartHmacKey','your-master-secret')`
 - compatibility launcher (starts API/Web + exp-022 + edge proxy agent via control websocket):

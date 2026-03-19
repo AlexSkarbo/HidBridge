@@ -115,6 +115,7 @@ if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalI
         throw "CommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
     }
 
+    Assert-LegacyExp022Enabled -Context "run_webrtc_stack.ps1 controlws mode"
     Write-Warning "Legacy controlws executor enabled for webrtc-stack (exp-022 compatibility mode)."
 }
 

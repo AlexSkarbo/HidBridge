@@ -53,6 +53,28 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Test-LegacyExp022Enabled {
+    $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::Process)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::User)
+    }
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::Machine)
+    }
+
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $false
+    }
+
+    switch ($value.Trim().ToLowerInvariant()) {
+        "1" { return $true }
+        "true" { return $true }
+        "yes" { return $true }
+        "on" { return $true }
+        default { return $false }
+    }
+}
+
 $scriptMap = @{
     "checks"       = "run_checks.ps1"
     "tests"        = "run_all_tests.ps1"
@@ -261,6 +283,10 @@ if ($PSBoundParameters.ContainsKey("CommandExecutor") -and -not [string]::IsNull
 if ($AllowLegacyControlWs) {
     $tasksWithLegacyControlWs = @("webrtc-stack", "webrtc-edge-agent-acceptance", "demo-flow", "ci-local", "full", "webrtc-peer-adapter")
     if ($tasksWithLegacyControlWs -contains $Task) {
+        if (-not (Test-LegacyExp022Enabled)) {
+            throw "Legacy exp-022 compatibility mode is disabled. Set HIDBRIDGE_ENABLE_LEGACY_EXP022=true in your shell to run controlws/peer-adapter flows."
+        }
+
         $effectiveForwardArgs.Add("-AllowLegacyControlWs") | Out-Null
     }
 }

@@ -38,6 +38,9 @@ $smokeSummaryPath = Join-Path $logRoot "webrtc-edge-agent-smoke.result.json"
 if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) -and -not $AllowLegacyControlWs) {
     throw "CommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
 }
+if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    Assert-LegacyExp022Enabled -Context "run_webrtc_edge_agent_acceptance.ps1 controlws mode"
+}
 
 # Converts control health endpoint to websocket endpoint for controlws executor.
 function Convert-ControlHealthToWebSocketUrl {

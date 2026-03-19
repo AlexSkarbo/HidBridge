@@ -41,9 +41,34 @@ $ErrorActionPreference = "Stop"
 $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptsRoot "Common/KeycloakCommon.ps1")
 
+function Test-LegacyExp022Enabled {
+    $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::Process)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::User)
+    }
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::Machine)
+    }
+
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $false
+    }
+
+    switch ($value.Trim().ToLowerInvariant()) {
+        "1" { return $true }
+        "true" { return $true }
+        "yes" { return $true }
+        "on" { return $true }
+        default { return $false }
+    }
+}
+
 # This script is retained only for exp-022 compatibility and must be enabled explicitly.
 if (-not $AllowLegacyControlWs) {
     throw "run_webrtc_peer_adapter.ps1 is legacy exp-022 compatibility tooling. Use EdgeProxy.Agent (uart path), or pass -AllowLegacyControlWs explicitly."
+}
+if (-not (Test-LegacyExp022Enabled)) {
+    throw "Legacy exp-022 compatibility mode is disabled. Set HIDBRIDGE_ENABLE_LEGACY_EXP022=true in your shell to run run_webrtc_peer_adapter.ps1."
 }
 Write-Warning "Legacy exp-022 peer adapter mode enabled. This path is deprecated for runtime use."
 
