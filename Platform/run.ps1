@@ -27,6 +27,9 @@ param(
     [int]$Exp022DurationSec = -1,
     [int]$AdapterDurationSec = -1,
     [int]$PeerReadyTimeoutSec = -1,
+    [switch]$StopExisting,
+    [switch]$StopStackAfter,
+    [switch]$SkipRuntimeBootstrap,
     [string]$EndpointId,
     [string]$PrincipalId,
     [string]$OutputJsonPath,
@@ -278,6 +281,24 @@ if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec") -and $PeerReadyTimeout
     elseif ($Task -eq "ci-local" -or $Task -eq "full") {
         $effectiveForwardArgs.Add("-WebRtcPeerReadyTimeoutSec") | Out-Null
         $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
+    }
+}
+
+if ($StopExisting) {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
+        $effectiveForwardArgs.Add("-StopExisting") | Out-Null
+    }
+}
+
+if ($StopStackAfter) {
+    if ($Task -eq "webrtc-edge-agent-acceptance") {
+        $effectiveForwardArgs.Add("-StopStackAfter") | Out-Null
+    }
+}
+
+if ($SkipRuntimeBootstrap) {
+    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
+        $effectiveForwardArgs.Add("-SkipRuntimeBootstrap") | Out-Null
     }
 }
 
