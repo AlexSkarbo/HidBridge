@@ -254,6 +254,40 @@ function Get-OidcAccessToken {
     return $token
 }
 
+# Reads response body from a failed HTTP call when available.
+function Get-HttpErrorBody {
+    param([System.Exception]$Exception)
+
+    if ($null -eq $Exception) {
+        return $null
+    }
+
+    try {
+        $responseProperty = $Exception.PSObject.Properties["Response"]
+        $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
+        if ($null -eq $response) {
+            return $null
+        }
+
+        $stream = $response.GetResponseStream()
+        if ($null -eq $stream) {
+            return $null
+        }
+
+        $reader = New-Object System.IO.StreamReader($stream)
+        try {
+            return $reader.ReadToEnd()
+        }
+        finally {
+            $reader.Dispose()
+            $stream.Dispose()
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
 # Ensures effective session route and control lease via server-side control/ensure contract.
 function Ensure-ControlSessionRoute {
     param(
@@ -278,18 +312,42 @@ function Ensure-ControlSessionRoute {
         organizationId = "local-org"
     }
 
-    try {
-        $result = Invoke-RestMethod `
-            -Method Post `
-            -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/control/ensure" `
-            -Headers $AuthHeaders `
-            -TimeoutSec $RequestTimeoutSec `
-            -ContentType "application/json" `
-            -Body ($ensureBody | ConvertTo-Json -Depth 20)
+    $ensureUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/control/ensure"
+    $result = $null
+    $maxAttempts = 20
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            $result = Invoke-RestMethod `
+                -Method Post `
+                -Uri $ensureUri `
+                -Headers $AuthHeaders `
+                -TimeoutSec $RequestTimeoutSec `
+                -ContentType "application/json" `
+                -Body ($ensureBody | ConvertTo-Json -Depth 20)
+            break
+        }
+        catch {
+            $errorBody = Get-HttpErrorBody -Exception $_.Exception
+            $message = $_.Exception.Message
+            $transientNoAgent = $message.IndexOf("(400)", [StringComparison]::OrdinalIgnoreCase) -ge 0 `
+                -and -not [string]::IsNullOrWhiteSpace($errorBody) `
+                -and $errorBody.IndexOf("No agent was found for endpoint", [StringComparison]::OrdinalIgnoreCase) -ge 0
+
+            if ($transientNoAgent -and $attempt -lt $maxAttempts) {
+                Start-Sleep -Milliseconds 500
+                continue
+            }
+
+            if ([string]::IsNullOrWhiteSpace($errorBody)) {
+                throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': $message"
+            }
+
+            throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': $message`n$errorBody"
+        }
     }
-    catch {
-        $message = $_.Exception.Message
-        throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': $message"
+
+    if ($null -eq $result) {
+        throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': no response was produced."
     }
 
     $effectiveSessionId = if ($null -ne $result -and $result.PSObject.Properties["effectiveSessionId"]) { [string]$result.effectiveSessionId } else { "" }
