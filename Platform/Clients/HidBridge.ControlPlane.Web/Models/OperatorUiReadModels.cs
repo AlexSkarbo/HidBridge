@@ -292,6 +292,27 @@ public sealed record SessionTransportHealthViewModel(
     DateTimeOffset? LastRelayAckAtUtc = null);
 
 /// <summary>
+/// Represents one transport readiness projection for a session route.
+/// </summary>
+public sealed record SessionTransportReadinessViewModel(
+    string SessionId,
+    string AgentId,
+    string EndpointId,
+    string Provider,
+    string ProviderSource,
+    bool Ready,
+    string ReasonCode,
+    string Reason,
+    bool Connected,
+    int OnlinePeerCount,
+    string? LastPeerState = null,
+    string? LastPeerFailureReason = null,
+    DateTimeOffset? LastPeerSeenAtUtc = null,
+    DateTimeOffset? LastRelayAckAtUtc = null,
+    IReadOnlyDictionary<string, object?>? Metrics = null,
+    DateTimeOffset? EvaluatedAtUtc = null);
+
+/// <summary>
 /// Represents one WebRTC signaling message.
 /// </summary>
 public sealed record WebRtcSignalMessageViewModel(
@@ -693,6 +714,78 @@ public sealed record SessionControlLeaseViewModel(
     string GrantedBy,
     DateTimeOffset GrantedAtUtc,
     DateTimeOffset ExpiresAtUtc);
+
+/// <summary>
+/// Represents one control-ensure request for server-side session resolution and lease acquisition.
+/// </summary>
+public sealed class SessionControlEnsureRequestViewModel
+{
+    /// <summary>
+    /// Gets or sets the participant that should hold the lease.
+    /// </summary>
+    public string ParticipantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the principal requesting control.
+    /// </summary>
+    public string RequestedBy { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the optional endpoint identifier used for missing-session resolution.
+    /// </summary>
+    public string? EndpointId { get; set; }
+
+    /// <summary>
+    /// Gets or sets session profile to use when auto-creating a missing session.
+    /// </summary>
+    public string Profile { get; set; } = "UltraLowLatency";
+
+    /// <summary>
+    /// Gets or sets requested lease duration in seconds.
+    /// </summary>
+    public int? LeaseSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Gets or sets optional business reason recorded in audit.
+    /// </summary>
+    public string? Reason { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether API may auto-create a missing session.
+    /// </summary>
+    public bool AutoCreateSessionIfMissing { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether API should prefer reusing a live relay session for the same endpoint.
+    /// </summary>
+    public bool PreferLiveRelaySession { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets optional tenant scope.
+    /// </summary>
+    public string? TenantId { get; set; }
+
+    /// <summary>
+    /// Gets or sets optional organization scope.
+    /// </summary>
+    public string? OrganizationId { get; set; }
+
+    /// <summary>
+    /// Gets or sets operator roles propagated to API.
+    /// </summary>
+    public IReadOnlyList<string>? OperatorRoles { get; set; }
+}
+
+/// <summary>
+/// Represents one control-ensure result with effective session details.
+/// </summary>
+public sealed record SessionControlEnsureResultViewModel(
+    string RequestedSessionId,
+    string EffectiveSessionId,
+    SessionControlLeaseViewModel Lease,
+    bool SessionCreated,
+    bool SessionReused,
+    DateTimeOffset ResolvedAtUtc);
 
 /// <summary>
 /// Represents one candidate for active control.

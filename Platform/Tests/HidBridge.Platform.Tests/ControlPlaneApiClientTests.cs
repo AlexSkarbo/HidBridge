@@ -323,6 +323,52 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the control-ensure route and payload.
+    /// </summary>
+    [Fact]
+    public async Task EnsureControlAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new SessionControlEnsureRequestViewModel
+        {
+            ParticipantId = "participant-1",
+            RequestedBy = "operator-a",
+            EndpointId = "endpoint-1",
+            Profile = "UltraLowLatency",
+            LeaseSeconds = 45,
+            Reason = "need control",
+            AutoCreateSessionIfMissing = true,
+            PreferLiveRelaySession = true,
+            TenantId = "local-tenant",
+            OrganizationId = "local-org",
+            OperatorRoles = ["operator.viewer", "operator.moderator"],
+        };
+        var handler = new RecordingHandler(new SessionControlEnsureResultViewModel(
+            RequestedSessionId: "session-1",
+            EffectiveSessionId: "session-1",
+            Lease: new SessionControlLeaseViewModel("participant-1", "operator-a", "operator-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddSeconds(45)),
+            SessionCreated: false,
+            SessionReused: false,
+            ResolvedAtUtc: DateTimeOffset.UtcNow));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        var response = await apiClient.EnsureControlAsync("session-1", request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/control/ensure", handler.LastRequestUri);
+        Assert.NotNull(response);
+        Assert.Equal("session-1", response!.EffectiveSessionId);
+        Assert.False(response.SessionCreated);
+        Assert.False(response.SessionReused);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("participant-1", payload!["participantId"]?.ToString());
+        Assert.Equal("endpoint-1", payload["endpointId"]?.ToString());
+        Assert.Equal("True", payload["autoCreateSessionIfMissing"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the invitation-approval route and payload.
     /// </summary>
     [Fact]
@@ -566,6 +612,69 @@ public sealed class ControlPlaneApiClientTests
 
         Assert.Equal(HttpMethod.Get, handler.LastMethod);
         Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/health?provider=webrtc-datachannel", handler.LastRequestUri);
+    }
+
+    /// <summary>
+    /// Verifies the transport-readiness route.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionTransportReadinessAsync_TargetsExpectedRoute()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new SessionTransportReadinessViewModel(
+            SessionId: "session-1",
+            AgentId: "agent-1",
+            EndpointId: "endpoint-1",
+            Provider: "WebRtcDataChannel",
+            ProviderSource: "request",
+            Ready: true,
+            ReasonCode: "ready",
+            Reason: "WebRTC relay route is ready.",
+            Connected: true,
+            OnlinePeerCount: 1,
+            LastPeerState: "Connected",
+            LastPeerFailureReason: null,
+            LastPeerSeenAtUtc: DateTimeOffset.UtcNow,
+            LastRelayAckAtUtc: DateTimeOffset.UtcNow,
+            Metrics: new Dictionary<string, object?>(),
+            EvaluatedAtUtc: DateTimeOffset.UtcNow));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        var response = await apiClient.GetSessionTransportReadinessAsync("session-1", cancellationToken: cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/readiness", handler.LastRequestUri);
+        Assert.NotNull(response);
+        Assert.True(response!.Ready);
+        Assert.Equal("ready", response.ReasonCode);
+    }
+
+    /// <summary>
+    /// Verifies the transport-readiness provider query parameter.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionTransportReadinessAsync_AppendsProviderQuery()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var handler = new RecordingHandler(new SessionTransportReadinessViewModel(
+            SessionId: "session-1",
+            AgentId: "agent-1",
+            EndpointId: "endpoint-1",
+            Provider: "WebRtcDataChannel",
+            ProviderSource: "request",
+            Ready: true,
+            ReasonCode: "ready",
+            Reason: "WebRTC relay route is ready.",
+            Connected: true,
+            OnlinePeerCount: 1));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GetSessionTransportReadinessAsync("session-1", "webrtc-datachannel", cancellationToken);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/transport/readiness?provider=webrtc-datachannel", handler.LastRequestUri);
     }
 
     /// <summary>

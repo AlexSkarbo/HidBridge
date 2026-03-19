@@ -866,7 +866,21 @@
     private async Task RequestControlAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(
             $"{T["ControlRequestedMessage"]} {candidate.PrincipalId}.",
-            () => ApiClient.RequestControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, 30, "operator requested control"));
+            async () =>
+            {
+                _ = await ApiClient.EnsureControlAsync(
+                    SessionId,
+                    new SessionControlEnsureRequestViewModel
+                    {
+                        ParticipantId = candidate.ParticipantId,
+                        RequestedBy = CurrentOperatorPrincipalId,
+                        EndpointId = _dashboard?.EndpointId,
+                        LeaseSeconds = 30,
+                        Reason = "operator requested control",
+                        AutoCreateSessionIfMissing = true,
+                        PreferLiveRelaySession = true,
+                    });
+            });
 
     private async Task ReleaseControlAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(

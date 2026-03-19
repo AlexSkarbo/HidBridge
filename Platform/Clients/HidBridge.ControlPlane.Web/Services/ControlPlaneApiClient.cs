@@ -204,6 +204,17 @@ public sealed class ControlPlaneApiClient
             cancellationToken);
 
     /// <summary>
+    /// Reads transport readiness for one session route using server-side policy.
+    /// </summary>
+    public async Task<SessionTransportReadinessViewModel?> GetSessionTransportReadinessAsync(
+        string sessionId,
+        string? provider = null,
+        CancellationToken cancellationToken = default)
+        => await GetJsonAsync<SessionTransportReadinessViewModel>(
+            BuildTransportReadinessQuery(sessionId, provider),
+            cancellationToken);
+
+    /// <summary>
     /// Reads session-scoped WebRTC signaling messages.
     /// </summary>
     public async Task<IReadOnlyList<WebRtcSignalMessageViewModel>?> GetWebRtcSignalsAsync(
@@ -313,6 +324,19 @@ public sealed class ControlPlaneApiClient
                 leaseSeconds,
                 reason,
             },
+            cancellationToken);
+
+    /// <summary>
+    /// Ensures control lease using server-side session resolution and bounded retry policy.
+    /// </summary>
+    public async Task<SessionControlEnsureResultViewModel?> EnsureControlAsync(
+        string sessionId,
+        SessionControlEnsureRequestViewModel body,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<SessionControlEnsureResultViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/ensure",
+            body,
             cancellationToken);
 
     /// <summary>
@@ -609,6 +633,20 @@ public sealed class ControlPlaneApiClient
     private static string BuildTransportHealthQuery(string sessionId, string? provider)
     {
         var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/health";
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            return route;
+        }
+
+        return $"{route}?provider={Uri.EscapeDataString(provider)}";
+    }
+
+    /// <summary>
+    /// Builds session transport-readiness route with optional provider override query.
+    /// </summary>
+    private static string BuildTransportReadinessQuery(string sessionId, string? provider)
+    {
+        var route = $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/readiness";
         if (string.IsNullOrWhiteSpace(provider))
         {
             return route;
