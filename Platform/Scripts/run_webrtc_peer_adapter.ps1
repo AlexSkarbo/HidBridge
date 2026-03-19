@@ -419,6 +419,13 @@ function Convert-RelayCommandToExp022Payload {
             $payload["down"] = if ($args.ContainsKey("down")) { [bool]$args["down"] } else { $false }
             break
         }
+        "mouse.click" {
+            $payload["button"] = if ($args.ContainsKey("button")) { [string]$args["button"] } else { "left" }
+            if ($args.ContainsKey("holdMs")) {
+                $payload["holdMs"] = [int]$args["holdMs"]
+            }
+            break
+        }
         default {
             foreach ($entry in $args.GetEnumerator()) {
                 if (-not $payload.Contains($entry.Key)) {

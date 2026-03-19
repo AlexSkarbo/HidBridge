@@ -45,6 +45,25 @@ public static class HidBridgeUartCommandDispatcher
                     cancellationToken,
                     GetByteOrNull(args, "itfSel"));
                 return;
+            case "mouse.click":
+                var clickButton = GetStringOrDefault(args, "button", "left");
+                var clickHoldMs = Math.Max(0, GetInt(args, "holdMs", 25));
+                await client.SetMouseButtonAsync(
+                    clickButton,
+                    down: true,
+                    cancellationToken,
+                    GetByteOrNull(args, "itfSel"));
+                if (clickHoldMs > 0)
+                {
+                    await Task.Delay(clickHoldMs, cancellationToken);
+                }
+
+                await client.SetMouseButtonAsync(
+                    clickButton,
+                    down: false,
+                    cancellationToken,
+                    GetByteOrNull(args, "itfSel"));
+                return;
             case "mouse.buttons":
                 await client.SetMouseButtonsMaskAsync(
                     GetByte(args, "mask"),
@@ -103,6 +122,24 @@ public static class HidBridgeUartCommandDispatcher
             string text => text,
             JsonElement { ValueKind: JsonValueKind.String } json => json.GetString() ?? string.Empty,
             _ => value.ToString() ?? string.Empty,
+        };
+    }
+
+    /// <summary>
+    /// Reads optional string argument from command payload.
+    /// </summary>
+    private static string GetStringOrDefault(IReadOnlyDictionary<string, object?> args, string name, string defaultValue)
+    {
+        if (!args.TryGetValue(name, out var value) || value is null)
+        {
+            return defaultValue;
+        }
+
+        return value switch
+        {
+            string text => text,
+            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString() ?? defaultValue,
+            _ => value.ToString() ?? defaultValue,
         };
     }
 

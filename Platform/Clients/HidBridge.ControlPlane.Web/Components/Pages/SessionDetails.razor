@@ -376,6 +376,23 @@
                                 </div>
                             </div>
                         </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioMouseClickTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioMouseClickHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioMouseClickId)">@GetScenarioBadgeLabel(CommandScenarioMouseClickId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoMouseClickCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     @if (_lastCommandAck is not null)
@@ -643,6 +660,7 @@
     private const string CommandScenarioTextId = "text";
     private const string CommandScenarioShortcutId = "shortcut";
     private const string CommandScenarioMouseId = "mouse";
+    private const string CommandScenarioMouseClickId = "mouse-click";
     private static readonly string[] SessionRoles = ["Observer", "Controller", "Presenter"];
     private static readonly TimeSpan RecoveryStatePollInterval = TimeSpan.FromSeconds(3);
     private CancellationTokenSource? _recoveryPollingCts;
@@ -984,6 +1002,15 @@
             string.Format(T["CommandDispatchedMessage"], "mouse.move"),
             new KeyValuePair<string, object?>("dx", 24),
             new KeyValuePair<string, object?>("dy", 12));
+
+    private Task SendDemoMouseClickCommandAsync()
+        => DispatchDemoCommandAsync(
+            CommandScenarioMouseClickId,
+            T["CommandScenarioMouseClickTitle"],
+            "mouse.click",
+            string.Format(T["CommandDispatchedMessage"], "mouse.click"),
+            new KeyValuePair<string, object?>("button", "left"),
+            new KeyValuePair<string, object?>("holdMs", 25));
 
     private async Task DispatchDemoCommandAsync(
         string scenarioId,

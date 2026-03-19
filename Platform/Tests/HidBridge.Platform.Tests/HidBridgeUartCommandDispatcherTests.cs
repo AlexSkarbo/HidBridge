@@ -12,6 +12,7 @@ public sealed class HidBridgeUartCommandDispatcherTests
     [InlineData("keyboard_text", "keyboard.text")]
     [InlineData(" mouse.move ", "mouse.move")]
     [InlineData("MOUSE_BUTTON", "mouse.button")]
+    [InlineData("MOUSE_CLICK", "mouse.click")]
     public void NormalizeAction_NormalizesLegacyAliases(string input, string expected)
     {
         var actual = HidBridgeUartCommandDispatcher.NormalizeAction(input);
