@@ -9,6 +9,7 @@ param(
     [switch]$IncludeWebRtcEdgeAgentSmoke,
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [string]$WebRtcCommandExecutor,
+    [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl,
     [int]$WebRtcRequestTimeoutSec = -1,
     [int]$WebRtcControlHealthAttempts = -1,
@@ -235,6 +236,13 @@ if ($PSBoundParameters.ContainsKey("CommandExecutor") -and -not [string]::IsNull
     if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-CommandExecutor") | Out-Null
         $effectiveForwardArgs.Add($CommandExecutor) | Out-Null
+    }
+}
+
+if ($AllowLegacyControlWs) {
+    $tasksWithLegacyControlWs = @("webrtc-stack", "webrtc-edge-agent-acceptance", "demo-flow", "ci-local", "full")
+    if ($tasksWithLegacyControlWs -contains $Task) {
+        $effectiveForwardArgs.Add("-AllowLegacyControlWs") | Out-Null
     }
 }
 

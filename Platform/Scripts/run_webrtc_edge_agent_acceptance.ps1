@@ -2,6 +2,7 @@ param(
     [string]$ApiBaseUrl = "http://127.0.0.1:18093",
     [ValidateSet("uart", "controlws")]
     [string]$CommandExecutor = "uart",
+    [switch]$AllowLegacyControlWs,
     [string]$ControlHealthUrl = "http://127.0.0.1:28092/health",
     [string]$ControlWsUrl = "",
     [int]$RequestTimeoutSec = 15,
@@ -33,6 +34,10 @@ $logRoot = New-OperationalLogRoot -PlatformRoot $platformRoot -Category "webrtc-
 $results = New-OperationalResultList
 $stackSummaryPath = Join-Path $logRoot "webrtc-stack.summary.json"
 $smokeSummaryPath = Join-Path $logRoot "webrtc-edge-agent-smoke.result.json"
+
+if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) -and -not $AllowLegacyControlWs) {
+    throw "CommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
+}
 
 # Converts control health endpoint to websocket endpoint for controlws executor.
 function Convert-ControlHealthToWebSocketUrl {
@@ -99,6 +104,7 @@ try {
     }
     if ($SkipRuntimeBootstrap) { $stackParameters.SkipRuntimeBootstrap = $true }
     if ($StopExisting) { $stackParameters.StopExisting = $true }
+    if ($AllowLegacyControlWs) { $stackParameters.AllowLegacyControlWs = $true }
 
     if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
         $effectiveControlWsUrl = if ([string]::IsNullOrWhiteSpace($ControlWsUrl)) { Convert-ControlHealthToWebSocketUrl -HealthUrl $ControlHealthUrl } else { $ControlWsUrl }

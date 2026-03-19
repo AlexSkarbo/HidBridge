@@ -9,6 +9,7 @@ param(
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
+    [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [int]$WebRtcPeerReadyTimeoutSec = 45,
     [switch]$WebRtcStopExistingBeforeAcceptance = $true,
@@ -43,12 +44,19 @@ try {
     }
 
     if ($IncludeWebRtcEdgeAgentAcceptance) {
+        if ([string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) -and -not $AllowLegacyControlWs) {
+            throw "WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
+        }
+
         # Runs end-to-end API + edge-agent relay smoke directly (stack bootstrap + Applied command assertion).
         $webrtcAcceptanceParameters = @{
             ApiBaseUrl = "http://127.0.0.1:18093"
             CommandExecutor = $WebRtcCommandExecutor
             ControlHealthUrl = $WebRtcControlHealthUrl
             PeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)
+        }
+        if ($AllowLegacyControlWs) {
+            $webrtcAcceptanceParameters.AllowLegacyControlWs = $true
         }
         if ($WebRtcStopExistingBeforeAcceptance) {
             $webrtcAcceptanceParameters.StopExisting = $true

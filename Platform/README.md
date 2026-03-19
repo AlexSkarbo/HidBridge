@@ -332,7 +332,8 @@ One-command demo flow:
       - runs Doctor without API-required gate (API is validated by Start API step in this flow)
       - when Demo Gate is enabled, standalone `WebRTC Edge Agent Smoke` step is skipped (Demo Gate already validates WebRTC command path)
     - useful when `webrtc-stack` is already running with active relay peer session
-  - `-WebRtcCommandExecutor` (`uart` default, `controlws` for exp-022 compatibility mode)
+  - `-WebRtcCommandExecutor` (`uart` default; `controlws` is legacy exp-022 compatibility mode)
+  - `-AllowLegacyControlWs` (required when `WebRtcCommandExecutor=controlws`)
   - `-WebRtcControlHealthUrl` (default `http://127.0.0.1:28092/health`)
   - `-WebRtcRequestTimeoutSec` (default `15`)
   - `-WebRtcControlHealthAttempts` (default `20`)
@@ -375,7 +376,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
 - preferred stack launcher (starts API/Web + service-based edge proxy agent in direct UART mode):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','uart','-UartPort','COM6','-UartHmacKey','your-master-secret')`
 - compatibility launcher (starts API/Web + exp-022 + edge proxy agent via control websocket):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','controlws','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','controlws','-AllowLegacyControlWs','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
   - stack launcher is now a thin runtime bootstrapper (start/stop only): no script-side control/lease/readiness policy.
   - session/lease/readiness checks are executed by server-side API policy and smoke/acceptance tasks.
 - one-command smoke for the running stack (expects `Applied`):
@@ -387,12 +388,12 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - deprecated/no-op parameters in this wrapper: `-AutoCreateSessionIfMissing`, `-AllowMissingControlRequestEndpoint`, `-EndpointId`, `-Profile`.
 - one-command acceptance for CI/local automation (boots stack + runs smoke):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
-  - in controlws mode add `-ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
+  - in controlws mode add `-AllowLegacyControlWs -ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
 - include the WebRTC smoke as part of `demo-flow`:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor uart`
   - exp-022 compatibility mode:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor controlws -WebRtcControlHealthUrl "http://127.0.0.1:28092/health"`
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor controlws -AllowLegacyControlWs -WebRtcControlHealthUrl "http://127.0.0.1:28092/health"`
   - optional relay-readiness tuning for `demo-flow`/`demo-gate`/`webrtc-edge-agent-smoke`/`webrtc-stack-terminal-b`: `-TransportHealthAttempts`, `-TransportHealthDelayMs`, `-SkipTransportHealthCheck`.
 - the stack now launches `Platform/Edge/HidBridge.EdgeProxy.Agent` (dotnet worker) instead of the legacy PowerShell adapter runtime.
 - manual direct run of service-based edge proxy agent:

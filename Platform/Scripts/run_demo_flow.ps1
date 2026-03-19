@@ -20,6 +20,7 @@ param(
     [switch]$IncludeWebRtcEdgeAgentSmoke,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
+    [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [int]$WebRtcRequestTimeoutSec = 15,
     [int]$WebRtcControlHealthAttempts = 20,
@@ -71,6 +72,14 @@ if ($authUri.AbsolutePath -match "^/realms/([^/]+)$") {
 $effectiveReuseRunningServices = $ReuseRunningServices
 $effectiveSkipCiLocal = $SkipCiLocal
 $effectiveSkipDemoGate = $SkipDemoGate
+
+if ($IncludeWebRtcEdgeAgentSmoke -and [string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $AllowLegacyControlWs) {
+        throw "WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
+    }
+
+    Write-Warning "Legacy controlws executor enabled for demo-flow WebRTC validation (exp-022 compatibility mode)."
+}
 
 function Add-DemoResult {
     param(
@@ -474,6 +483,9 @@ try {
                 SkipIdentityReset = $true
                 SkipCiLocal = $true
                 StopExisting = $true
+            }
+            if ($AllowLegacyControlWs) {
+                $webrtcStackParameters["AllowLegacyControlWs"] = $true
             }
             if ([string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
                 $webrtcStackParameters["ControlWsUrl"] = (Convert-ControlHealthToWebSocketUrl -ControlHealthUrl $WebRtcControlHealthUrl)

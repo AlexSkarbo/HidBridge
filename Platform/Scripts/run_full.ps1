@@ -9,6 +9,7 @@ param(
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
+    [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl = "http://127.0.0.1:28092/health",
     [int]$WebRtcPeerReadyTimeoutSec = 45,
     [switch]$ExportArtifactsOnFailure = $true,
@@ -45,6 +46,7 @@ try {
             ExportArtifactsOnFailure = $ExportArtifactsOnFailure
             IncludeSmokeDataOnFailure = $IncludeSmokeDataOnFailure
             IncludeBackupsOnFailure = $IncludeBackupsOnFailure
+            AllowLegacyControlWs = $AllowLegacyControlWs
         } -StopOnFailure:$StopOnFailure
     }
 }

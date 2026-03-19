@@ -3,6 +3,7 @@ param(
     [string]$WebBaseUrl = "http://127.0.0.1:18110",
     [ValidateSet("uart", "controlws")]
     [string]$CommandExecutor = "uart",
+    [switch]$AllowLegacyControlWs,
     [string]$ControlWsUrl = "ws://127.0.0.1:28092/ws/control",
     [string]$UartPort = "COM6",
     [int]$UartBaud = 3000000,
@@ -107,6 +108,14 @@ if ($PSBoundParameters.ContainsKey("TokenScope") -and -not [string]::IsNullOrWhi
 }
 if ($PSBoundParameters.ContainsKey("AdapterDurationSec")) {
     Write-Warning "AdapterDurationSec is currently informational only; edge-agent runtime remains active until explicitly stopped."
+}
+
+if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $AllowLegacyControlWs) {
+        throw "CommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
+    }
+
+    Write-Warning "Legacy controlws executor enabled for webrtc-stack (exp-022 compatibility mode)."
 }
 
 if ($StopExisting) {
