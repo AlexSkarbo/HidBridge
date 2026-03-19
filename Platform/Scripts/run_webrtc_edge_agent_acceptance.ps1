@@ -93,7 +93,6 @@ try {
         UartBaud = [Math]::Max(300, $UartBaud)
         UartHmacKey = $UartHmacKey
         PrincipalId = $PrincipalId
-        PeerReadyTimeoutSec = [Math]::Max(5, $PeerReadyTimeoutSec)
         SkipIdentityReset = $true
         SkipCiLocal = $true
         OutputJsonPath = $stackSummaryPath
@@ -108,13 +107,17 @@ try {
 
     Invoke-LoggedScript -Results $results -Name "WebRTC Stack" -LogRoot $logRoot -ScriptPath $stackScript -Parameters $stackParameters -StopOnFailure:$true
 
+    $targetPeerReadyTimeoutSec = [Math]::Max(5, $PeerReadyTimeoutSec)
+    $effectiveTransportHealthDelayMs = [Math]::Max(100, $TransportHealthDelayMs)
+    $minTransportAttemptsByTimeout = [int][Math]::Ceiling(($targetPeerReadyTimeoutSec * 1000.0) / $effectiveTransportHealthDelayMs)
+
     $smokeParameters = @{
         ApiBaseUrl = $ApiBaseUrl
         ControlHealthUrl = $ControlHealthUrl
         RequestTimeoutSec = [Math]::Max(1, $RequestTimeoutSec)
         ControlHealthAttempts = [Math]::Max(1, $ControlHealthAttempts)
-        TransportHealthAttempts = [Math]::Max(1, $TransportHealthAttempts)
-        TransportHealthDelayMs = [Math]::Max(100, $TransportHealthDelayMs)
+        TransportHealthAttempts = [Math]::Max([Math]::Max(1, $TransportHealthAttempts), $minTransportAttemptsByTimeout)
+        TransportHealthDelayMs = $effectiveTransportHealthDelayMs
         PrincipalId = $PrincipalId
         OutputJsonPath = $smokeSummaryPath
     }

@@ -376,8 +376,8 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','uart','-UartPort','COM6','-UartHmacKey','your-master-secret')`
 - compatibility launcher (starts API/Web + exp-022 + edge proxy agent via control websocket):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','controlws','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
-  - stack bootstrap now waits until relay peer is reported online in API before returning summary (default timeout: `30s`, override with `-PeerReadyTimeoutSec`).
-  - stack session bootstrap now relies on server-side `POST /api/v1/sessions/{id}/control/ensure` (session/lease orchestration is no longer reimplemented in script policy).
+  - stack launcher is now a thin runtime bootstrapper (start/stop only): no script-side control/lease/readiness policy.
+  - session/lease/readiness checks are executed by server-side API policy and smoke/acceptance tasks.
 - one-command smoke for the running stack (expects `Applied`):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-smoke -ForwardArgs @('-ControlHealthUrl','http://127.0.0.1:28092/health','-OutputJsonPath','Platform/.logs/webrtc-edge-agent-smoke.result.json')`
   - for direct UART mode you can skip control-health precheck: add `-SkipControlHealthCheck`

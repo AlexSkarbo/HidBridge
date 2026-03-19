@@ -81,322 +81,32 @@ function Stop-MatchingProcesses {
     }
 }
 
-# Waits until an HTTP health endpoint returns one of the expected "ok" shapes.
-function Wait-HttpHealth {
-    param(
-        [string]$Uri,
-        [int]$Attempts = 40,
-        [int]$DelayMs = 500
-    )
+# Converts one control websocket URL to health endpoint URL.
+function Get-ControlHealthUrl {
+    param([string]$Url)
 
-    for ($i = 0; $i -lt $Attempts; $i++) {
-        try {
-            $response = Invoke-RestMethod -Method Get -Uri $Uri -TimeoutSec 2
-            if ($null -ne $response) {
-                if ($response -is [System.Collections.IDictionary] -and $response.Contains("ok")) {
-                    if ([bool]$response["ok"]) {
-                        return $true
-                    }
-                }
-                elseif ($response -is [System.Collections.IDictionary] -and $response.Contains("status")) {
-                    if ([string]$response["status"] -eq "ok") {
-                        return $true
-                    }
-                }
-                elseif ($response.PSObject.Properties["ok"] -and [bool]$response.ok) {
-                    return $true
-                }
-                elseif ($response.PSObject.Properties["status"] -and [string]$response.status -eq "ok") {
-                    return $true
-                }
-            }
-        }
-        catch {
-        }
-
-        Start-Sleep -Milliseconds $DelayMs
-    }
-
-    return $false
-}
-
-# Normalizes collection-style API responses to a plain array.
-function Get-CollectionItems {
-    param([object]$Response)
-
-    if ($null -eq $Response) { return @() }
-    if ($Response -is [System.Collections.IDictionary] -and $Response.Contains("items")) {
-        return @($Response["items"])
-    }
-    if ($Response.PSObject.Properties["items"]) {
-        return @($Response.items)
-    }
-    return @($Response)
-}
-
-# Returns the latest tail from a log file for failure diagnostics.
-function Get-LogTail {
-    param(
-        [string]$Path,
-        [int]$LineCount = 40
-    )
-
-    if (-not (Test-Path -Path $Path -PathType Leaf)) {
-        return "<log file not found: $Path>"
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return ""
     }
 
     try {
-        return ((Get-Content -Path $Path -Tail $LineCount -ErrorAction Stop) -join [Environment]::NewLine)
+        $uri = [Uri]$Url
+        $scheme = if ([string]::Equals($uri.Scheme, "wss", [StringComparison]::OrdinalIgnoreCase)) { "https" } else { "http" }
+        return "${scheme}://$($uri.Host):$($uri.Port)/health"
     }
     catch {
-        return "<failed to read log tail: $($_.Exception.Message)>"
+        return ""
     }
 }
 
-# Checks whether a spawned process is still running.
-function Test-ProcessAlive {
-    param([System.Diagnostics.Process]$Process)
-
-    if ($null -eq $Process) {
-        return $false
-    }
-
-    try {
-        return (-not $Process.HasExited)
-    }
-    catch {
-        return $false
-    }
+if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec")) {
+    Write-Warning "PeerReadyTimeoutSec is ignored by run_webrtc_stack.ps1; readiness/policy checks now live in API + smoke flows."
 }
-
-# Waits until the relay peer is visible as online in API session peer list.
-function Wait-RelayPeerOnline {
-    param(
-        [string]$ApiBaseUrl,
-        [string]$SessionId,
-        [string]$PeerId,
-        [hashtable]$AuthHeaders,
-        [int]$TimeoutSec = 30,
-        [int]$DelayMs = 500,
-        [System.Diagnostics.Process]$AdapterProcess,
-        [System.Diagnostics.Process]$Exp022Process = $null,
-        [string]$AdapterStdErrPath,
-        [string]$Exp022StdErrPath = ""
-    )
-
-    $deadlineUtc = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Max(5, $TimeoutSec))
-    $peersUrl = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/transport/webrtc/peers"
-
-    while ([DateTimeOffset]::UtcNow -lt $deadlineUtc) {
-        if (-not (Test-ProcessAlive -Process $AdapterProcess)) {
-            $adapterTail = Get-LogTail -Path $AdapterStdErrPath
-            throw "Edge proxy agent exited before relay peer became online.`nAdapter stderr tail:`n$adapterTail"
-        }
-
-        if ($null -ne $Exp022Process -and -not (Test-ProcessAlive -Process $Exp022Process)) {
-            $expTail = Get-LogTail -Path $Exp022StdErrPath
-            throw "exp-022 exited before relay peer became online.`nexp-022 stderr tail:`n$expTail"
-        }
-
-        try {
-            $response = Invoke-RestMethod -Method Get -Uri $peersUrl -Headers $AuthHeaders -TimeoutSec 5
-            $peers = @(Get-CollectionItems -Response $response)
-            $peer = $peers | Where-Object { [string]$_.peerId -eq $PeerId } | Select-Object -First 1
-            if ($null -ne $peer) {
-                $isOnline = $false
-                if ($peer -is [System.Collections.IDictionary] -and $peer.Contains("isOnline")) {
-                    $isOnline = [bool]$peer["isOnline"]
-                }
-                elseif ($peer.PSObject.Properties["isOnline"]) {
-                    $isOnline = [bool]$peer.isOnline
-                }
-
-                if ($isOnline) {
-                    return $true
-                }
-            }
-        }
-        catch {
-        }
-
-        Start-Sleep -Milliseconds ([Math]::Max(100, $DelayMs))
-    }
-
-    return $false
+if ($PSBoundParameters.ContainsKey("TokenScope") -and -not [string]::IsNullOrWhiteSpace($TokenScope)) {
+    Write-Warning "TokenScope is ignored by run_webrtc_stack.ps1; edge agent token scope is managed by agent runtime."
 }
-
-# Obtains bearer token for stack bootstrapping calls.
-function Get-OidcAccessToken {
-    param(
-        [string]$KeycloakBaseUrl,
-        [string]$Realm,
-        [string]$ClientId,
-        [string]$Username,
-        [string]$Password
-    )
-
-    $tokenResp = Invoke-RestMethod -Method Post `
-        -Uri "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$Realm/protocol/openid-connect/token" `
-        -ContentType "application/x-www-form-urlencoded" `
-        -Body @{
-            grant_type = "password"
-            client_id = $ClientId
-            username = $Username
-            password = $Password
-        } `
-        -TimeoutSec 30
-
-    $token = [string]$tokenResp.access_token
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        throw "OIDC token response did not contain access_token."
-    }
-
-    return $token
-}
-
-# Reads response body from a failed HTTP call when available.
-function Get-HttpErrorBody {
-    param([System.Exception]$Exception)
-
-    if ($null -eq $Exception) {
-        return $null
-    }
-
-    try {
-        $responseProperty = $Exception.PSObject.Properties["Response"]
-        $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
-        if ($null -eq $response) {
-            return $null
-        }
-
-        $stream = $response.GetResponseStream()
-        if ($null -eq $stream) {
-            return $null
-        }
-
-        $reader = New-Object System.IO.StreamReader($stream)
-        try {
-            return $reader.ReadToEnd()
-        }
-        finally {
-            $reader.Dispose()
-            $stream.Dispose()
-        }
-    }
-    catch {
-        return $null
-    }
-}
-
-# Ensures effective session route and control lease via server-side control/ensure contract.
-function Ensure-ControlSessionRoute {
-    param(
-        [string]$ApiBaseUrl,
-        [string]$SessionId,
-        [string]$EndpointId,
-        [string]$PrincipalId,
-        [hashtable]$AuthHeaders,
-        [int]$RequestTimeoutSec = 30
-    )
-
-    $ensureBody = @{
-        participantId = "owner:$PrincipalId"
-        requestedBy = $PrincipalId
-        endpointId = $EndpointId
-        profile = "UltraLowLatency"
-        leaseSeconds = 120
-        reason = "webrtc stack bootstrap"
-        autoCreateSessionIfMissing = $true
-        preferLiveRelaySession = $true
-        tenantId = "local-tenant"
-        organizationId = "local-org"
-    }
-
-    $ensureUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($SessionId))/control/ensure"
-    $result = $null
-    $maxAttempts = 20
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        try {
-            $result = Invoke-RestMethod `
-                -Method Post `
-                -Uri $ensureUri `
-                -Headers $AuthHeaders `
-                -TimeoutSec $RequestTimeoutSec `
-                -ContentType "application/json" `
-                -Body ($ensureBody | ConvertTo-Json -Depth 20)
-            break
-        }
-        catch {
-            $errorBody = Get-HttpErrorBody -Exception $_.Exception
-            $message = $_.Exception.Message
-            $transientNoAgent = $message.IndexOf("(400)", [StringComparison]::OrdinalIgnoreCase) -ge 0 `
-                -and -not [string]::IsNullOrWhiteSpace($errorBody) `
-                -and $errorBody.IndexOf("No agent was found for endpoint", [StringComparison]::OrdinalIgnoreCase) -ge 0
-
-            if ($transientNoAgent -and $attempt -lt $maxAttempts) {
-                Start-Sleep -Milliseconds 500
-                continue
-            }
-
-            if ([string]::IsNullOrWhiteSpace($errorBody)) {
-                throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': $message"
-            }
-
-            throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': $message`n$errorBody"
-        }
-    }
-
-    if ($null -eq $result) {
-        throw "Failed to ensure WebRTC stack session route/lease for '$SessionId': no response was produced."
-    }
-
-    $effectiveSessionId = if ($null -ne $result -and $result.PSObject.Properties["effectiveSessionId"]) { [string]$result.effectiveSessionId } else { "" }
-    if ([string]::IsNullOrWhiteSpace($effectiveSessionId)) {
-        return $SessionId
-    }
-
-    return $effectiveSessionId
-}
-
-# Asserts COM port can be opened before runtime startup.
-function Assert-UartPortAvailable {
-    param([string]$Port, [int]$Baud)
-
-    $serialPortType = $null
-    try {
-        $serialPortType = [type]"System.IO.Ports.SerialPort"
-    }
-    catch {
-    }
-
-    if ($null -eq $serialPortType) {
-        foreach ($assemblyName in @("System.IO.Ports", "System")) {
-            try {
-                Add-Type -AssemblyName $assemblyName -ErrorAction Stop
-                $serialPortType = [type]"System.IO.Ports.SerialPort"
-                break
-            }
-            catch {
-            }
-        }
-    }
-
-    if ($null -eq $serialPortType) {
-        Write-Warning "System.IO.Ports.SerialPort type is unavailable in this PowerShell host; skipping COM port probe for $Port."
-        return
-    }
-
-    $serialPort = [System.IO.Ports.SerialPort]::new($Port, $Baud)
-    try {
-        $serialPort.Open()
-    }
-    finally {
-        if ($serialPort.IsOpen) {
-            $serialPort.Close()
-        }
-
-        $serialPort.Dispose()
-    }
+if ($PSBoundParameters.ContainsKey("AdapterDurationSec")) {
+    Write-Warning "AdapterDurationSec is currently informational only; edge-agent runtime remains active until explicitly stopped."
 }
 
 if ($StopExisting) {
@@ -424,8 +134,6 @@ if ($StopExisting) {
         "run_webrtc_stack.ps1"
     )
 }
-
-Assert-UartPortAvailable -Port $UartPort -Baud $UartBaud
 
 if (-not $SkipRuntimeBootstrap) {
     $demoFlowParameters = @{
@@ -463,37 +171,23 @@ if (-not $SkipRuntimeBootstrap) {
     }
 }
 
-if (-not (Wait-HttpHealth -Uri "$($ApiBaseUrl.TrimEnd('/'))/health")) {
-    throw "API health probe failed at $($ApiBaseUrl.TrimEnd('/'))/health."
+$controlHealthUrl = if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    Get-ControlHealthUrl -Url $ControlWsUrl
+}
+else {
+    ""
 }
 
-$accessToken = Get-OidcAccessToken `
-    -KeycloakBaseUrl "http://127.0.0.1:18096" `
-    -Realm "hidbridge-dev" `
-    -ClientId "controlplane-smoke" `
-    -Username $TokenUsername `
-    -Password $TokenPassword
-
-$authHeaders = @{
-    "Authorization" = "Bearer $accessToken"
-}
-
-$session = Ensure-ControlSessionRoute `
-    -ApiBaseUrl $ApiBaseUrl `
-    -SessionId $session `
-    -EndpointId $EndpointId `
-    -PrincipalId $PrincipalId `
-    -AuthHeaders $authHeaders `
-    -RequestTimeoutSec 30
-
-$wsUri = $null
-$wsBind = ""
-$controlHealthUrlForSession = ""
-if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
-    $wsUri = [Uri]$ControlWsUrl
-    $wsBind = if ($wsUri.Host -eq "localhost") { "127.0.0.1" } else { $wsUri.Host }
-    $controlHealthUrlForSession = "http://$($wsUri.Host):$($wsUri.Port)/health"
-}
+@"
+SESSION_ID=$session
+PEER_ID=$peerId
+ENDPOINT_ID=$EndpointId
+PRINCIPAL_ID=$PrincipalId
+TENANT_ID=local-tenant
+ORGANIZATION_ID=local-org
+COMMAND_EXECUTOR=$CommandExecutor
+CONTROL_HEALTH_URL=$controlHealthUrl
+"@ | Set-Content $sessionEnvPath -Encoding ascii
 
 New-Item -ItemType File -Force -Path $exp022Stdout | Out-Null
 New-Item -ItemType File -Force -Path $exp022Stderr | Out-Null
@@ -514,6 +208,8 @@ if ($null -eq $dotnet) {
 
 $exp022Process = $null
 if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+    $wsUri = [Uri]$ControlWsUrl
+    $wsBind = if ($wsUri.Host -eq "localhost") { "127.0.0.1" } else { $wsUri.Host }
     $exp022Args = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
@@ -527,22 +223,7 @@ if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalI
         "-DurationSec", [string]$Exp022DurationSec
     )
     $exp022Process = Start-Process -FilePath $pwsh.Source -ArgumentList $exp022Args -WorkingDirectory $repoRoot -PassThru -RedirectStandardOutput $exp022Stdout -RedirectStandardError $exp022Stderr
-
-    if (-not (Wait-HttpHealth -Uri "http://$($wsUri.Host):$($wsUri.Port)/health")) {
-        throw "exp-022 control health probe failed at http://$($wsUri.Host):$($wsUri.Port)/health."
-    }
 }
-
-@"
-SESSION_ID=$session
-PEER_ID=$peerId
-ENDPOINT_ID=$EndpointId
-PRINCIPAL_ID=$PrincipalId
-TENANT_ID=local-tenant
-ORGANIZATION_ID=local-org
-COMMAND_EXECUTOR=$CommandExecutor
-CONTROL_HEALTH_URL=$controlHealthUrlForSession
-"@ | Set-Content $sessionEnvPath -Encoding ascii
 
 $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_BASEURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_BASEURL", [EnvironmentVariableTarget]::Process)
@@ -553,8 +234,6 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_PRINCIPALID = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PRINCIPALID", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", [EnvironmentVariableTarget]::Process)
-    HIDBRIDGE_EDGE_PROXY_TOKENSCOPE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENSCOPE", [EnvironmentVariableTarget]::Process)
-    HIDBRIDGE_EDGE_PROXY_ACCESSTOKEN = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ACCESSTOKEN", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTPORT = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTBAUD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTBAUD", [EnvironmentVariableTarget]::Process)
@@ -562,6 +241,7 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", [EnvironmentVariableTarget]::Process)
 }
 
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_BASEURL", $ApiBaseUrl, [EnvironmentVariableTarget]::Process)
@@ -572,7 +252,6 @@ $edgeEnvRestore = @{
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PRINCIPALID", $PrincipalId, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", $TokenUsername, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", $TokenPassword, [EnvironmentVariableTarget]::Process)
-[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ACCESSTOKEN", $accessToken, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", $CommandExecutor, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", $UartPort, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTBAUD", [string]$UartBaud, [EnvironmentVariableTarget]::Process)
@@ -580,8 +259,8 @@ $edgeEnvRestore = @{
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE", "true", [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", "255", [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", "254", [EnvironmentVariableTarget]::Process)
-if (-not [string]::IsNullOrWhiteSpace($TokenScope)) {
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENSCOPE", $TokenScope, [EnvironmentVariableTarget]::Process)
+if (-not [string]::IsNullOrWhiteSpace($controlHealthUrl)) {
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", $controlHealthUrl, [EnvironmentVariableTarget]::Process)
 }
 
 $adapterArgs = @(
@@ -595,28 +274,6 @@ foreach ($name in $edgeEnvRestore.Keys) {
     [Environment]::SetEnvironmentVariable($name, $edgeEnvRestore[$name], [EnvironmentVariableTarget]::Process)
 }
 
-$peerReady = Wait-RelayPeerOnline `
-    -ApiBaseUrl $ApiBaseUrl `
-    -SessionId $session `
-    -PeerId $peerId `
-    -AuthHeaders $authHeaders `
-    -TimeoutSec $PeerReadyTimeoutSec `
-    -DelayMs 500 `
-    -AdapterProcess $adapterProcess `
-    -Exp022Process $exp022Process `
-    -AdapterStdErrPath $adapterStderr `
-    -Exp022StdErrPath $exp022Stderr
-
-if (-not $peerReady) {
-    $adapterTail = Get-LogTail -Path $adapterStderr
-    if ($null -ne $exp022Process) {
-        $expTail = Get-LogTail -Path $exp022Stderr
-        throw "WebRTC relay peer '$peerId' did not become online within $PeerReadyTimeoutSec seconds.`nAdapter stderr tail:`n$adapterTail`n`nexp-022 stderr tail:`n$expTail"
-    }
-
-    throw "WebRTC relay peer '$peerId' did not become online within $PeerReadyTimeoutSec seconds.`nAdapter stderr tail:`n$adapterTail"
-}
-
 $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     webBaseUrl = $WebBaseUrl
@@ -625,8 +282,8 @@ $summary = [pscustomobject]@{
     runtimeBootstrapSkipped = [bool]$SkipRuntimeBootstrap
     sessionId = $session
     peerId = $peerId
-    peerReady = $peerReady
-    peerReadyTimeoutSec = $PeerReadyTimeoutSec
+    peerReady = $null
+    peerReadyTimeoutSec = [Math]::Max(5, $PeerReadyTimeoutSec)
     exp022Pid = if ($null -ne $exp022Process) { $exp022Process.Id } else { $null }
     adapterPid = $adapterProcess.Id
     sessionEnvPath = $sessionEnvPath
@@ -657,7 +314,7 @@ if ($null -ne $exp022Process) {
 }
 Write-Host "Session:        $session"
 Write-Host "Peer:           $peerId"
-Write-Host "Peer ready:     $peerReady"
+Write-Host "Peer ready:     (delegated to smoke/readiness checks)"
 if ($null -ne $exp022Process) {
     Write-Host "exp-022 PID:    $($exp022Process.Id)"
 }
