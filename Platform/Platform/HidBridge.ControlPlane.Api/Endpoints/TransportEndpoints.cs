@@ -81,7 +81,7 @@ public static class TransportEndpoints
             var caller = ApiCallerContext.FromHttpContext(httpContext);
             try
             {
-                caller.EnsureViewerAccess();
+                caller.EnsureViewerOrEdgeRelayAccess();
                 await caller.RequireScopedSessionAsync(sessionStore, sessionId, ct);
                 var items = await signaling.ListAsync(
                     sessionId,

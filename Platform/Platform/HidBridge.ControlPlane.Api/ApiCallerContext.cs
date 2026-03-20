@@ -156,6 +156,25 @@ public sealed record ApiCallerContext(
     }
 
     /// <summary>
+    /// Verifies that the caller can either view session data or access edge relay transport paths.
+    /// </summary>
+    public void EnsureViewerOrEdgeRelayAccess()
+    {
+        if (!IsPresent)
+        {
+            return;
+        }
+
+        if (!CanView && !CanAccessEdgeRelay)
+        {
+            throw new ApiAuthorizationException(
+                "viewer_or_edge_relay_access_required",
+                "Caller does not have an operator role that grants viewer or edge relay access.",
+                ["operator.viewer", "operator.moderator", "operator.admin", OperatorPolicyRoles.EdgeRelay]);
+        }
+    }
+
+    /// <summary>
     /// Verifies that the caller has moderator-level operator access.
     /// </summary>
     public void EnsureModeratorAccess()

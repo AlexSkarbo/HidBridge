@@ -252,6 +252,8 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_REQUIREMEDIAREADY = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_REQUIREMEDIAREADY", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE", [EnvironmentVariableTarget]::Process)
 }
 
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_BASEURL", $ApiBaseUrl, [EnvironmentVariableTarget]::Process)
@@ -271,6 +273,15 @@ $edgeEnvRestore = @{
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", "254", [EnvironmentVariableTarget]::Process)
 if (-not [string]::IsNullOrWhiteSpace($controlHealthUrl)) {
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", $controlHealthUrl, [EnvironmentVariableTarget]::Process)
+}
+elseif ([string]::Equals($CommandExecutor, "uart", [StringComparison]::OrdinalIgnoreCase)) {
+    # UART acceptance path can run without capture/runtime media probe.
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", "", [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE", "true", [EnvironmentVariableTarget]::Process)
+}
+
+if (-not [string]::Equals($CommandExecutor, "uart", [StringComparison]::OrdinalIgnoreCase)) {
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE", "false", [EnvironmentVariableTarget]::Process)
 }
 
 $adapterArgs = @(

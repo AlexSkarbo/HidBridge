@@ -80,7 +80,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
         var assumeReady = _options.AssumeMediaReadyWithoutProbe || !_options.RequireMediaReady;
         return BuildSnapshot(
             isReady: assumeReady,
-            state: "NoProbeConfigured",
+            state: assumeReady ? "Ready" : "NoProbeConfigured",
             failureReason: assumeReady ? null : "MediaHealthUrl is not configured.");
     }
 
@@ -188,6 +188,13 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
             && Uri.TryCreate(options.MediaHealthUrl, UriKind.Absolute, out var explicitUri))
         {
             return explicitUri;
+        }
+
+        // UART executor does not depend on legacy control websocket runtime, so
+        // media readiness must come from an explicit MediaHealthUrl when required.
+        if (options.GetCommandExecutorKind() != EdgeProxyCommandExecutorKind.ControlWs)
+        {
+            return null;
         }
 
         if (!Uri.TryCreate(options.ControlWsUrl, UriKind.Absolute, out var controlWsUri))

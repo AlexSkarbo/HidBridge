@@ -76,6 +76,26 @@ public sealed class ApiCallerContextTests
     }
 
     [Fact]
+    public void EnsureViewerOrEdgeRelayAccess_AllowsEdgeRole()
+    {
+        var caller = new ApiCallerContext("user-1", "edge@example.com", "tenant-a", "org-a", ["operator.edge"]);
+
+        caller.EnsureViewerOrEdgeRelayAccess();
+    }
+
+    [Fact]
+    public void EnsureViewerOrEdgeRelayAccess_RejectsCallerWithoutViewerOrEdgeRole()
+    {
+        var caller = new ApiCallerContext("user-1", "edge@example.com", "tenant-a", "org-a", ["offline_access"]);
+
+        var exception = Assert.Throws<ApiAuthorizationException>(() => caller.EnsureViewerOrEdgeRelayAccess());
+
+        Assert.Equal("viewer_or_edge_relay_access_required", exception.Code);
+        Assert.Contains("operator.viewer", exception.RequiredRoles ?? []);
+        Assert.Contains("operator.edge", exception.RequiredRoles ?? []);
+    }
+
+    [Fact]
     public void EnsureAdminAccess_RejectsModeratorRole()
     {
         var caller = new ApiCallerContext("user-1", "operator@example.com", "tenant-a", "org-a", ["operator.moderator"]);

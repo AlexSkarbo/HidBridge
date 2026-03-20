@@ -7,6 +7,10 @@ param(
     [int]$RequestTimeoutSec = 15,
     [int]$ControlHealthAttempts = 20,
     [int]$ControlHealthDelayMs = 500,
+    [int]$KeycloakHealthAttempts = 20,
+    [int]$KeycloakHealthDelayMs = 500,
+    [int]$TokenRequestAttempts = 5,
+    [int]$TokenRequestDelayMs = 500,
     [switch]$SkipControlHealthCheck,
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = 20,
@@ -54,6 +58,68 @@ function Wait-ControlHealth {
     }
 
     return $false
+}
+
+# Waits until Keycloak realm endpoint responds and confirms the realm name.
+function Wait-KeycloakRealmHealth {
+    param(
+        [string]$BaseUrl,
+        [string]$Realm,
+        [int]$Attempts,
+        [int]$DelayMs
+    )
+
+    $realmUri = "$($BaseUrl.TrimEnd('/'))/realms/$Realm"
+    for ($i = 0; $i -lt $Attempts; $i++) {
+        try {
+            $response = Invoke-RestMethod -Method Get -Uri $realmUri -TimeoutSec 2
+            $realmValue = [string]$response.realm
+            if (-not [string]::IsNullOrWhiteSpace($realmValue) -and [string]::Equals($realmValue, $Realm, [StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        catch {
+        }
+
+        Start-Sleep -Milliseconds $DelayMs
+    }
+
+    return $false
+}
+
+# Requests one OIDC access token with retry to absorb transient startup/network races.
+function Request-KeycloakTokenWithRetry {
+    param(
+        [string]$TokenEndpoint,
+        [int]$TimeoutSec,
+        [int]$Attempts,
+        [int]$DelayMs,
+        [hashtable]$Body
+    )
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return Invoke-RestMethod `
+                -Method Post `
+                -Uri $TokenEndpoint `
+                -TimeoutSec $TimeoutSec `
+                -ContentType "application/x-www-form-urlencoded" `
+                -Body $Body
+        }
+        catch {
+            $lastError = $_.Exception
+            if ($attempt -lt $Attempts) {
+                Start-Sleep -Milliseconds $DelayMs
+            }
+        }
+    }
+
+    if ($null -eq $lastError) {
+        throw "Keycloak token request failed: unknown error."
+    }
+
+    throw "Keycloak token request failed after $Attempts attempt(s): $($lastError.Message)"
 }
 
 # Sends one JSON request and keeps response-body context on failures.
@@ -334,8 +400,18 @@ $effectivePrincipalId = if (-not [string]::IsNullOrWhiteSpace($sessionPrincipalI
 $effectiveTenantId = if (-not [string]::IsNullOrWhiteSpace($sessionTenantId)) { $sessionTenantId } else { $TenantId }
 $effectiveOrganizationId = if (-not [string]::IsNullOrWhiteSpace($sessionOrganizationId)) { $sessionOrganizationId } else { $OrganizationId }
 
+$keycloakRealmUri = "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$RealmName"
+if (-not (Wait-KeycloakRealmHealth -BaseUrl $KeycloakBaseUrl -Realm $RealmName -Attempts ([Math]::Max(1, $KeycloakHealthAttempts)) -DelayMs ([Math]::Max(100, $KeycloakHealthDelayMs)))) {
+    throw "Keycloak realm endpoint is not ready: $keycloakRealmUri"
+}
+
 $tokenEndpoint = "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$RealmName/protocol/openid-connect/token"
-$tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenEndpoint -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) -ContentType "application/x-www-form-urlencoded" -Body @{
+$tokenResponse = Request-KeycloakTokenWithRetry `
+    -TokenEndpoint $tokenEndpoint `
+    -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) `
+    -Attempts ([Math]::Max(1, $TokenRequestAttempts)) `
+    -DelayMs ([Math]::Max(100, $TokenRequestDelayMs)) `
+    -Body @{
     grant_type = "password"
     client_id = $TokenClientId
     username = $TokenUsername
