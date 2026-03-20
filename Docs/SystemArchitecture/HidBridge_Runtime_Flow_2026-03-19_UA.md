@@ -1,7 +1,7 @@
 # HidBridge — Runtime Flow Baseline (2026-03-19)
 
-Версія: `1.0`  
-Дата: `2026-03-19`  
+Версія: `1.1`  
+Дата: `2026-03-20`  
 Мова: `Українська`
 
 ---
@@ -65,6 +65,10 @@ Edge рівень не прив'язаний до core-container lifecycle:
 1. Edge-agent публікує `media readiness` snapshot.
 2. API включає media-сигнали в transport health/readiness.
 3. Media-ready може бути обов'язковою умовою WebRTC readiness policy.
+4. Для `UART` control-only acceptance без capture probe:
+   - `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true`,
+   - agent публікує `MediaState=Ready` при відсутньому probe URL,
+   - readiness policy не блокується через `NoProbeConfigured`.
 
 ## 3.3 Telemetry/Diagnostics path
 
@@ -89,6 +93,11 @@ Business policy не повинна жити в скриптах.
 3. route/provider consistency checks,
 4. SLO aggregation і alert classification,
 5. security enforcement (auth scope + roles + audit trail).
+
+Критичне уточнення:
+
+1. `operator.edge` має серверний доступ до relay-потоку, включно з `GET /transport/webrtc/signals` (viewer **або** edge-relay доступ).
+2. Це прибирає скриптові fallback-и для peer polling/signaling і переносить policy в API layer.
 
 ---
 
@@ -165,3 +174,20 @@ Runtime baseline вважається підтвердженим, коли:
 3. edge-agent smoke/acceptance дає `Applied` у контрольному сценарії,
 4. diagnostics endpoint-и віддають typed readiness/health/SLO payload.
 
+Рекомендований acceptance lane:
+
+1. `platform-runtime` (`API/Web/Keycloak/Postgres` у docker).
+2. `webrtc-edge-agent-acceptance` у `CommandExecutor=uart` + `SkipRuntimeBootstrap`.
+3. Очікуваний результат: `WebRTC Stack=PASS`, `WebRTC Edge Agent Smoke=PASS`, status `Applied`.
+
+---
+
+## 10. Що більше не є runtime policy
+
+PowerShell сценарії не є source of truth для:
+
+1. session auto-create fallback policy,
+2. relay readiness/retry policy,
+3. lease arbitration logic.
+
+Це все закріплено в `ControlPlane.Api` use-cases/endpoints; скрипти залишаються orchestration/testing harness.

@@ -452,6 +452,8 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
   - in controlws mode add `-AllowLegacyControlWs -ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
+  - when runtime is already running in Docker profile (`platform-runtime`), add `-SkipRuntimeBootstrap` to avoid local API/Web restart conflicts on `18093/18110`.
+  - in `CommandExecutor=uart` path stack bootstrap now auto-sets `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true` (control-only acceptance without capture probe).
 - include the WebRTC smoke as part of `demo-flow`:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor uart`
   - exp-022 compatibility mode:

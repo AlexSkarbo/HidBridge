@@ -1,6 +1,6 @@
 # Docs/SystemArchitecture — Index (UA)
 
-Оновлено: `2026-03-19`
+Оновлено: `2026-03-20`
 
 ## Базові документи
 
@@ -14,6 +14,7 @@
 
 3. Актуальний runtime baseline (канонічний flow для поточної ітерації):
 - `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
+  - Оновлено `2026-03-20`: зафіксовано `operator.edge` relay-read access, UART no-probe media readiness semantics, acceptance lane (`platform-runtime` + `webrtc-edge-agent-acceptance`).
 
 ## Нормативні доповнення (Agent-first архітектура)
 

@@ -52,11 +52,13 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 - `UARTINJECTTIMEOUTMS` (default: `200`)
 - `UARTINJECTRETRIES` (default: `2`)
 - `UARTRELEASEPORTAFTEREXECUTE` (default: `false`)
-- `MEDIAHEALTHURL` (optional, defaults to `http(s)://<control-ws-host>/health` when `CONTROLWSURL` is set)
+- `MEDIAHEALTHURL` (optional)
+  - for `COMMANDEXECUTOR=controlws`: defaults to `http(s)://<control-ws-host>/health` when not set;
+  - for `COMMANDEXECUTOR=uart`: not auto-derived from `CONTROLWSURL` (set explicitly only when real capture probe exists).
 - `MEDIAHEALTHTIMEOUTSEC` (default: `3`)
 - `MEDIASTREAMID` (default: `edge-main`)
 - `MEDIASOURCE` (default: `edge-capture`)
-- `REQUIREMEDIAREADY` (default: `false`, used by server-side readiness policy when enabled)
+- `REQUIREMEDIAREADY` (default: `true`, used by server-side readiness policy)
 - `ASSUMEMEDIAREADYWITHOUTPROBE` (default: `false`)
 - `PRINCIPALID` (default: `smoke-runner`)
 - `TENANTID` / `ORGANIZATIONID`
@@ -89,3 +91,9 @@ dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy
 - if a refresh token exists, the agent refreshes proactively (`TOKENREFRESHSKEWSEC`) and on HTTP `401`;
 - if refresh grant fails, the agent falls back to password grant only when `ALLOWPASSWORDGRANTFALLBACK=true`;
 - default caller role header is `operator.edge` (override via `OPERATORROLESCSV` only when stricter API scope requires it).
+
+## UART + media readiness notes
+
+- If API readiness policy requires media (`HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY=true`) and you run UART-only control path without capture probe, set:
+  - `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true`
+- In this mode the agent reports media state as `Ready` (not `NoProbeConfigured`) so server-side readiness can pass for control-only acceptance scenarios.
