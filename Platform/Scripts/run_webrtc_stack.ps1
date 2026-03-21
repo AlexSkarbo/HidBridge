@@ -100,14 +100,97 @@ function Get-ControlHealthUrl {
     }
 }
 
+# Returns true when API /health responds with status=ok.
+function Test-ApiHealth {
+    param([string]$BaseUrl)
+
+    try {
+        $response = Invoke-RestMethod -Method Get -Uri "$($BaseUrl.TrimEnd('/'))/health" -TimeoutSec 5
+        return ($null -ne $response -and [string]::Equals([string]$response.status, "ok", [StringComparison]::OrdinalIgnoreCase))
+    }
+    catch {
+        return $false
+    }
+}
+
+# Returns true when Web base URL responds successfully.
+function Test-WebHealth {
+    param([string]$BaseUrl)
+
+    try {
+        $response = Invoke-WebRequest -Method Get -Uri $BaseUrl -UseBasicParsing -TimeoutSec 5
+        return ($null -ne $response -and $response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+    }
+    catch {
+        return $false
+    }
+}
+
+# Reads API runtime authentication authority when available.
+function Resolve-ApiAuthAuthority {
+    param([string]$BaseUrl)
+
+    try {
+        $runtime = Invoke-RestMethod -Method Get -Uri "$($BaseUrl.TrimEnd('/'))/api/v1/runtime/uart" -TimeoutSec 5
+        if ($runtime.PSObject.Properties["authentication"] -and $null -ne $runtime.authentication) {
+            $authority = [string]$runtime.authentication.authority
+            if (-not [string]::IsNullOrWhiteSpace($authority)) {
+                return $authority.TrimEnd('/')
+            }
+        }
+    }
+    catch {
+    }
+
+    return ""
+}
+
+# Returns true when Keycloak realm endpoint responds with matching realm.
+function Test-KeycloakRealmHealth {
+    param(
+        [string]$BaseUrl,
+        [string]$Realm
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BaseUrl) -or [string]::IsNullOrWhiteSpace($Realm)) {
+        return $false
+    }
+
+    try {
+        $response = Invoke-RestMethod -Method Get -Uri "$($BaseUrl.TrimEnd('/'))/realms/$Realm" -TimeoutSec 3
+        return [string]::Equals([string]$response.realm, $Realm, [StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+# Extracts realm name from authority path like /realms/{realm}.
+function Get-RealmNameFromAuthorityPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+
+    $segments = $Path.Trim('/').Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
+    for ($i = 0; $i -lt $segments.Length - 1; $i++) {
+        if ([string]::Equals($segments[$i], "realms", [StringComparison]::OrdinalIgnoreCase)) {
+            return [string]$segments[$i + 1]
+        }
+    }
+
+    return ""
+}
+
 if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec")) {
-    Write-Warning "PeerReadyTimeoutSec is ignored by run_webrtc_stack.ps1; readiness/policy checks now live in API + smoke flows."
+    Write-Warning "PeerReadyTimeoutSec is deprecated for webrtc-stack and ignored. Readiness checks run in smoke/acceptance via API policy."
 }
 if ($PSBoundParameters.ContainsKey("TokenScope") -and -not [string]::IsNullOrWhiteSpace($TokenScope)) {
-    Write-Warning "TokenScope is ignored by run_webrtc_stack.ps1; edge agent token scope is managed by agent runtime."
+    Write-Warning "TokenScope is deprecated for webrtc-stack and ignored. Edge agent token scope is runtime-managed."
 }
 if ($PSBoundParameters.ContainsKey("AdapterDurationSec")) {
-    Write-Warning "AdapterDurationSec is currently informational only; edge-agent runtime remains active until explicitly stopped."
+    Write-Warning "AdapterDurationSec is deprecated for webrtc-stack and ignored. Stop stack processes explicitly."
 }
 
 if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
@@ -119,13 +202,23 @@ if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalI
     Write-Warning "Legacy controlws executor enabled for webrtc-stack (exp-022 compatibility mode)."
 }
 
+$effectiveSkipRuntimeBootstrap = $SkipRuntimeBootstrap
+if (-not $effectiveSkipRuntimeBootstrap) {
+    $apiHealthy = Test-ApiHealth -BaseUrl $ApiBaseUrl
+    $webHealthy = Test-WebHealth -BaseUrl $WebBaseUrl
+    if ($apiHealthy -and $webHealthy) {
+        Write-Warning "Detected healthy runtime at API/Web endpoints. Skipping runtime bootstrap and reusing running services."
+        $effectiveSkipRuntimeBootstrap = $true
+    }
+}
+
 if ($StopExisting) {
     $dotnetNeedles = @(
         "exp-022-datachanneldotnet",
         "HidBridge.EdgeProxy.Agent",
         "run_webrtc_stack.ps1"
     )
-    if (-not $SkipRuntimeBootstrap) {
+    if (-not $effectiveSkipRuntimeBootstrap) {
         $dotnetNeedles = @(
             "HidBridge.ControlPlane.Api",
             "HidBridge.ControlPlane.Web"
@@ -145,10 +238,11 @@ if ($StopExisting) {
     )
 }
 
-if (-not $SkipRuntimeBootstrap) {
+if (-not $effectiveSkipRuntimeBootstrap) {
     $demoFlowParameters = @{
         ApiBaseUrl = $ApiBaseUrl
         WebBaseUrl = $WebBaseUrl
+        SkipDoctor = $true
         SkipDemoGate = $true
     }
     if ($SkipIdentityReset) { $demoFlowParameters.SkipIdentityReset = $true }
@@ -244,6 +338,8 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_PRINCIPALID = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PRINCIPALID", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTPORT = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTBAUD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTBAUD", [EnvironmentVariableTarget]::Process)
@@ -256,6 +352,38 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE", [EnvironmentVariableTarget]::Process)
 }
 
+$edgeProxyKeycloakBaseUrl = "http://127.0.0.1:18096"
+$edgeProxyKeycloakRealm = "hidbridge-dev"
+$keycloakBaseCandidates = [System.Collections.Generic.List[string]]::new()
+$apiAuthAuthority = Resolve-ApiAuthAuthority -BaseUrl $ApiBaseUrl
+if (-not [string]::IsNullOrWhiteSpace($apiAuthAuthority)) {
+    $authUri = $null
+    if ([Uri]::TryCreate($apiAuthAuthority, [UriKind]::Absolute, [ref]$authUri)) {
+        $authorityBase = "$($authUri.Scheme)://$($authUri.Host):$($authUri.Port)"
+        $keycloakBaseCandidates.Add($authorityBase) | Out-Null
+        $realmFromAuthority = Get-RealmNameFromAuthorityPath -Path $authUri.AbsolutePath
+        if (-not [string]::IsNullOrWhiteSpace($realmFromAuthority)) {
+            $edgeProxyKeycloakRealm = $realmFromAuthority
+        }
+    }
+}
+
+if ($effectiveSkipRuntimeBootstrap -and $keycloakBaseCandidates -notcontains "http://host.docker.internal:18096") {
+    $keycloakBaseCandidates.Add("http://host.docker.internal:18096") | Out-Null
+}
+foreach ($candidate in @("http://127.0.0.1:18096", "http://localhost:18096")) {
+    if ($keycloakBaseCandidates -notcontains $candidate) {
+        $keycloakBaseCandidates.Add($candidate) | Out-Null
+    }
+}
+
+foreach ($candidate in $keycloakBaseCandidates) {
+    if (Test-KeycloakRealmHealth -BaseUrl $candidate -Realm $edgeProxyKeycloakRealm) {
+        $edgeProxyKeycloakBaseUrl = $candidate
+        break
+    }
+}
+
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_BASEURL", $ApiBaseUrl, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_SESSIONID", $session, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PEERID", $peerId, [EnvironmentVariableTarget]::Process)
@@ -264,6 +392,8 @@ $edgeEnvRestore = @{
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PRINCIPALID", $PrincipalId, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", $TokenUsername, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", $TokenPassword, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL", $edgeProxyKeycloakBaseUrl, [EnvironmentVariableTarget]::Process)
+[Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM", $edgeProxyKeycloakRealm, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", $CommandExecutor, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", $UartPort, [EnvironmentVariableTarget]::Process)
 [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTBAUD", [string]$UartBaud, [EnvironmentVariableTarget]::Process)
@@ -290,6 +420,23 @@ $adapterArgs = @(
     "-c", "Debug"
 )
 $adapterProcess = Start-Process -FilePath $dotnet.Source -ArgumentList $adapterArgs -WorkingDirectory $repoRoot -PassThru -RedirectStandardOutput $adapterStdout -RedirectStandardError $adapterStderr
+Start-Sleep -Milliseconds 500
+$adapterProcess.Refresh()
+if ($adapterProcess.HasExited) {
+    $stderrTail = ""
+    try {
+        $stderrTail = (Get-Content -Path $adapterStderr -Tail 40 -ErrorAction Stop) -join [Environment]::NewLine
+    }
+    catch {
+        $stderrTail = ""
+    }
+
+    if ([string]::IsNullOrWhiteSpace($stderrTail)) {
+        throw "Edge proxy agent exited early with code $($adapterProcess.ExitCode). See: $adapterStderr"
+    }
+
+    throw "Edge proxy agent exited early with code $($adapterProcess.ExitCode).`n$stderrTail"
+}
 
 foreach ($name in $edgeEnvRestore.Keys) {
     [Environment]::SetEnvironmentVariable($name, $edgeEnvRestore[$name], [EnvironmentVariableTarget]::Process)
@@ -300,11 +447,11 @@ $summary = [pscustomobject]@{
     webBaseUrl = $WebBaseUrl
     commandExecutor = $CommandExecutor
     controlWsUrl = $ControlWsUrl
-    runtimeBootstrapSkipped = [bool]$SkipRuntimeBootstrap
+    edgeProxyKeycloakBaseUrl = $edgeProxyKeycloakBaseUrl
+    edgeProxyKeycloakRealm = $edgeProxyKeycloakRealm
+    runtimeBootstrapSkipped = [bool]$effectiveSkipRuntimeBootstrap
     sessionId = $session
     peerId = $peerId
-    peerReady = $null
-    peerReadyTimeoutSec = [Math]::Max(5, $PeerReadyTimeoutSec)
     exp022Pid = if ($null -ne $exp022Process) { $exp022Process.Id } else { $null }
     adapterPid = $adapterProcess.Id
     sessionEnvPath = $sessionEnvPath

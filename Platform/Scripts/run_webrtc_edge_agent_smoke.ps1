@@ -7,7 +7,7 @@ param(
     [int]$RequestTimeoutSec = 15,
     [int]$ControlHealthAttempts = 20,
     [int]$ControlHealthDelayMs = 500,
-    [int]$KeycloakHealthAttempts = 20,
+    [int]$KeycloakHealthAttempts = 60,
     [int]$KeycloakHealthDelayMs = 500,
     [int]$TokenRequestAttempts = 5,
     [int]$TokenRequestDelayMs = 500,
@@ -16,6 +16,8 @@ param(
     [int]$TransportHealthAttempts = 20,
     [int]$TransportHealthDelayMs = 500,
     [string]$TokenClientId = "controlplane-smoke",
+    [string]$TokenClientSecret = "",
+    [string]$TokenScope = "openid profile email",
     [string]$TokenUsername = "operator.smoke.admin",
     [string]$TokenPassword = "ChangeMe123!",
     [string]$PrincipalId = "smoke-runner",
@@ -98,6 +100,7 @@ function Request-KeycloakTokenWithRetry {
     )
 
     $lastError = $null
+    $lastErrorResponseBody = ""
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         try {
             return Invoke-RestMethod `
@@ -109,6 +112,27 @@ function Request-KeycloakTokenWithRetry {
         }
         catch {
             $lastError = $_.Exception
+            $lastErrorResponseBody = ""
+            try {
+                $responseProperty = $lastError.PSObject.Properties["Response"]
+                $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
+                if ($null -ne $response) {
+                    $stream = $response.GetResponseStream()
+                    if ($null -ne $stream) {
+                        $reader = New-Object System.IO.StreamReader($stream)
+                        try {
+                            $lastErrorResponseBody = $reader.ReadToEnd()
+                        }
+                        finally {
+                            $reader.Dispose()
+                            $stream.Dispose()
+                        }
+                    }
+                }
+            }
+            catch {
+            }
+
             if ($attempt -lt $Attempts) {
                 Start-Sleep -Milliseconds $DelayMs
             }
@@ -119,7 +143,51 @@ function Request-KeycloakTokenWithRetry {
         throw "Keycloak token request failed: unknown error."
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($lastErrorResponseBody)) {
+        throw "Keycloak token request failed after $Attempts attempt(s): $($lastError.Message)`n$lastErrorResponseBody"
+    }
+
     throw "Keycloak token request failed after $Attempts attempt(s): $($lastError.Message)"
+}
+
+# Attempts to read active API auth authority from runtime settings so token issuer can match API validation authority.
+function Resolve-ApiAuthAuthority {
+    param(
+        [string]$BaseUrl,
+        [int]$TimeoutSec
+    )
+
+    try {
+        $runtime = Invoke-RestMethod -Method Get -Uri "$($BaseUrl.TrimEnd('/'))/api/v1/runtime/uart" -TimeoutSec $TimeoutSec
+        if ($runtime.PSObject.Properties["authentication"] -and $null -ne $runtime.authentication) {
+            $authority = [string]$runtime.authentication.authority
+            if (-not [string]::IsNullOrWhiteSpace($authority)) {
+                return $authority.TrimEnd('/')
+            }
+        }
+    }
+    catch {
+    }
+
+    return ""
+}
+
+# Extracts realm name from authority path like /realms/{realm}.
+function Get-RealmNameFromAuthorityPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+
+    $segments = $Path.Trim('/').Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
+    for ($i = 0; $i -lt $segments.Length - 1; $i++) {
+        if ([string]::Equals($segments[$i], "realms", [StringComparison]::OrdinalIgnoreCase)) {
+            return [string]$segments[$i + 1]
+        }
+    }
+
+    return ""
 }
 
 # Sends one JSON request and keeps response-body context on failures.
@@ -400,27 +468,133 @@ $effectivePrincipalId = if (-not [string]::IsNullOrWhiteSpace($sessionPrincipalI
 $effectiveTenantId = if (-not [string]::IsNullOrWhiteSpace($sessionTenantId)) { $sessionTenantId } else { $TenantId }
 $effectiveOrganizationId = if (-not [string]::IsNullOrWhiteSpace($sessionOrganizationId)) { $sessionOrganizationId } else { $OrganizationId }
 
-$keycloakRealmUri = "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$RealmName"
-if (-not (Wait-KeycloakRealmHealth -BaseUrl $KeycloakBaseUrl -Realm $RealmName -Attempts ([Math]::Max(1, $KeycloakHealthAttempts)) -DelayMs ([Math]::Max(100, $KeycloakHealthDelayMs)))) {
-    throw "Keycloak realm endpoint is not ready: $keycloakRealmUri"
+$effectiveKeycloakBaseUrl = $KeycloakBaseUrl.TrimEnd('/')
+$effectiveRealmName = $RealmName
+$runtimeAuthAuthority = Resolve-ApiAuthAuthority -BaseUrl $ApiBaseUrl -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+if (-not [string]::IsNullOrWhiteSpace($runtimeAuthAuthority)) {
+    $runtimeAuthUri = $null
+    if ([Uri]::TryCreate($runtimeAuthAuthority, [UriKind]::Absolute, [ref]$runtimeAuthUri)) {
+        $runtimeRealmName = Get-RealmNameFromAuthorityPath -Path $runtimeAuthUri.AbsolutePath
+        if (-not [string]::IsNullOrWhiteSpace($runtimeRealmName)) {
+            $effectiveRealmName = $runtimeRealmName
+        }
+    }
 }
 
-$tokenEndpoint = "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$RealmName/protocol/openid-connect/token"
-$tokenResponse = Request-KeycloakTokenWithRetry `
-    -TokenEndpoint $tokenEndpoint `
-    -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) `
-    -Attempts ([Math]::Max(1, $TokenRequestAttempts)) `
-    -DelayMs ([Math]::Max(100, $TokenRequestDelayMs)) `
-    -Body @{
-    grant_type = "password"
-    client_id = $TokenClientId
-    username = $TokenUsername
-    password = $TokenPassword
+$tokenAuthorityCandidates = [System.Collections.Generic.List[string]]::new()
+if (-not [string]::IsNullOrWhiteSpace($runtimeAuthAuthority)) {
+    $tokenAuthorityCandidates.Add($runtimeAuthAuthority.TrimEnd('/')) | Out-Null
 }
 
-$accessToken = [string]$tokenResponse.access_token
+$defaultAuthorities = @(
+    "$($KeycloakBaseUrl.TrimEnd('/'))/realms/$effectiveRealmName",
+    "http://127.0.0.1:18096/realms/$effectiveRealmName",
+    "http://localhost:18096/realms/$effectiveRealmName",
+    "http://host.docker.internal:18096/realms/$effectiveRealmName"
+)
+
+foreach ($authorityCandidate in $defaultAuthorities) {
+    if ($tokenAuthorityCandidates -notcontains $authorityCandidate) {
+        $tokenAuthorityCandidates.Add($authorityCandidate) | Out-Null
+    }
+}
+$scopeCandidates = [System.Collections.Generic.List[string]]::new()
+if (-not [string]::IsNullOrWhiteSpace($TokenScope)) {
+    $scopeCandidates.Add($TokenScope) | Out-Null
+}
+if ($scopeCandidates -notcontains "openid") {
+    $scopeCandidates.Add("openid") | Out-Null
+}
+if ($scopeCandidates -notcontains "") {
+    $scopeCandidates.Add("") | Out-Null
+}
+
+$accessToken = ""
+$effectiveKeycloakBaseUrl = ""
+$tokenAcquireErrors = [System.Collections.Generic.List[string]]::new()
+$probeUri = "$($ApiBaseUrl.TrimEnd('/'))/api/v1/dashboards/inventory"
+
+foreach ($authorityCandidate in $tokenAuthorityCandidates) {
+    $authorityUri = $null
+    if (-not [Uri]::TryCreate($authorityCandidate, [UriKind]::Absolute, [ref]$authorityUri)) {
+        continue
+    }
+
+    $candidateRealmName = Get-RealmNameFromAuthorityPath -Path $authorityUri.AbsolutePath
+    if ([string]::IsNullOrWhiteSpace($candidateRealmName)) {
+        $candidateRealmName = $effectiveRealmName
+    }
+
+    $candidateBase = "$($authorityUri.Scheme)://$($authorityUri.Host):$($authorityUri.Port)".TrimEnd('/')
+    if (-not (Wait-KeycloakRealmHealth -BaseUrl $candidateBase -Realm $candidateRealmName -Attempts ([Math]::Max(1, $KeycloakHealthAttempts)) -DelayMs ([Math]::Max(100, $KeycloakHealthDelayMs)))) {
+        $tokenAcquireErrors.Add("authority=${authorityCandidate}: realm endpoint not ready") | Out-Null
+        continue
+    }
+
+    $tokenEndpoint = "$($candidateBase)/realms/$candidateRealmName/protocol/openid-connect/token"
+    foreach ($scopeCandidate in $scopeCandidates) {
+        $tokenBody = @{
+            grant_type = "password"
+            client_id = $TokenClientId
+            username = $TokenUsername
+            password = $TokenPassword
+        }
+        if (-not [string]::IsNullOrWhiteSpace($TokenClientSecret)) {
+            $tokenBody.client_secret = $TokenClientSecret
+        }
+        if (-not [string]::IsNullOrWhiteSpace($scopeCandidate)) {
+            $tokenBody.scope = $scopeCandidate
+        }
+
+        try {
+            $tokenResponse = Request-KeycloakTokenWithRetry `
+                -TokenEndpoint $tokenEndpoint `
+                -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec)) `
+                -Attempts ([Math]::Max(1, $TokenRequestAttempts)) `
+                -DelayMs ([Math]::Max(100, $TokenRequestDelayMs)) `
+                -Body $tokenBody
+
+            $candidateAccessToken = [string]$tokenResponse.access_token
+            if ([string]::IsNullOrWhiteSpace($candidateAccessToken)) {
+                throw "Token response did not contain access_token."
+            }
+
+            $probeHeaders = @{
+                Authorization = "Bearer $candidateAccessToken"
+                "X-HidBridge-UserId" = $effectivePrincipalId
+                "X-HidBridge-PrincipalId" = $effectivePrincipalId
+                "X-HidBridge-TenantId" = $effectiveTenantId
+                "X-HidBridge-OrganizationId" = $effectiveOrganizationId
+                "X-HidBridge-Role" = "operator.admin,operator.moderator,operator.viewer"
+            }
+
+            try {
+                $null = Invoke-SmokeJson -Method "GET" -Uri $probeUri -Headers $probeHeaders -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+            }
+            catch {
+                $probeStatus = Get-HttpStatusCode -Exception $_.Exception
+                if ($probeStatus -eq 401) {
+                    throw "Probe endpoint rejected bearer token with 401."
+                }
+            }
+
+            $accessToken = $candidateAccessToken
+            $effectiveKeycloakBaseUrl = $candidateBase
+            break
+        }
+        catch {
+            $scopeLabel = if ([string]::IsNullOrWhiteSpace($scopeCandidate)) { "<empty>" } else { $scopeCandidate }
+            $tokenAcquireErrors.Add("authority=$authorityCandidate; scope=${scopeLabel}: $($_.Exception.Message)") | Out-Null
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($accessToken)) {
+        break
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($accessToken)) {
-    throw "Token response did not contain access_token."
+    throw "Keycloak token request failed for all authority/scope candidates: $($tokenAcquireErrors -join '; ')"
 }
 
 $authHeaders = @{

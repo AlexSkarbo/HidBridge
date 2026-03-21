@@ -5,8 +5,19 @@ param(
     [switch]$AllowLegacyControlWs,
     [string]$ControlHealthUrl = "http://127.0.0.1:28092/health",
     [string]$ControlWsUrl = "",
+    [string]$KeycloakBaseUrl = "http://127.0.0.1:18096",
+    [string]$RealmName = "hidbridge-dev",
+    [string]$TokenClientId = "controlplane-smoke",
+    [string]$TokenClientSecret = "",
+    [string]$TokenScope = "openid profile email",
+    [string]$TokenUsername = "operator.smoke.admin",
+    [string]$TokenPassword = "ChangeMe123!",
     [int]$RequestTimeoutSec = 15,
     [int]$ControlHealthAttempts = 20,
+    [int]$KeycloakHealthAttempts = 60,
+    [int]$KeycloakHealthDelayMs = 500,
+    [int]$TokenRequestAttempts = 5,
+    [int]$TokenRequestDelayMs = 500,
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = 20,
     [int]$TransportHealthDelayMs = 500,
@@ -122,9 +133,20 @@ try {
 
     $smokeParameters = @{
         ApiBaseUrl = $ApiBaseUrl
+        KeycloakBaseUrl = $KeycloakBaseUrl
+        RealmName = $RealmName
+        TokenClientId = $TokenClientId
+        TokenClientSecret = $TokenClientSecret
+        TokenScope = $TokenScope
+        TokenUsername = $TokenUsername
+        TokenPassword = $TokenPassword
         ControlHealthUrl = $ControlHealthUrl
         RequestTimeoutSec = [Math]::Max(1, $RequestTimeoutSec)
         ControlHealthAttempts = [Math]::Max(1, $ControlHealthAttempts)
+        KeycloakHealthAttempts = [Math]::Max(1, $KeycloakHealthAttempts)
+        KeycloakHealthDelayMs = [Math]::Max(100, $KeycloakHealthDelayMs)
+        TokenRequestAttempts = [Math]::Max(1, $TokenRequestAttempts)
+        TokenRequestDelayMs = [Math]::Max(100, $TokenRequestDelayMs)
         TransportHealthAttempts = [Math]::Max([Math]::Max(1, $TransportHealthAttempts), $minTransportAttemptsByTimeout)
         TransportHealthDelayMs = $effectiveTransportHealthDelayMs
         PrincipalId = $PrincipalId

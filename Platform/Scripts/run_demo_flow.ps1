@@ -162,10 +162,22 @@ function Stop-PortListeners {
         }
 
         try {
+            $existingProcess = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue
+            if ($null -eq $existingProcess) {
+                Write-Warning "Preflight cleanup ($Label): PID $listenerPid already stopped before port $Port cleanup."
+                continue
+            }
+
             Stop-Process -Id $listenerPid -Force -ErrorAction Stop
             Write-Host "Preflight cleanup ($Label): stopped listener PID $listenerPid on port $Port."
         }
         catch {
+            $existingProcess = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue
+            if ($null -eq $existingProcess) {
+                Write-Warning "Preflight cleanup ($Label): PID $listenerPid exited during port $Port cleanup."
+                continue
+            }
+
             throw "Preflight cleanup ($Label) failed to stop PID $listenerPid on port $Port."
         }
     }

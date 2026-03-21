@@ -363,13 +363,15 @@ if ($PSBoundParameters.ContainsKey("Exp022DurationSec") -and $Exp022DurationSec 
 
 if ($PSBoundParameters.ContainsKey("AdapterDurationSec") -and $AdapterDurationSec -gt 0) {
     if ($Task -eq "webrtc-stack") {
-        $effectiveForwardArgs.Add("-AdapterDurationSec") | Out-Null
-        $effectiveForwardArgs.Add([string]$AdapterDurationSec) | Out-Null
+        Write-Warning "AdapterDurationSec is deprecated for webrtc-stack and ignored."
     }
 }
 
 if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec") -and $PeerReadyTimeoutSec -gt 0) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
+    if ($Task -eq "webrtc-stack") {
+        Write-Warning "PeerReadyTimeoutSec is deprecated for webrtc-stack and ignored."
+    }
+    elseif ($Task -eq "webrtc-edge-agent-acceptance") {
         $effectiveForwardArgs.Add("-PeerReadyTimeoutSec") | Out-Null
         $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
     }
