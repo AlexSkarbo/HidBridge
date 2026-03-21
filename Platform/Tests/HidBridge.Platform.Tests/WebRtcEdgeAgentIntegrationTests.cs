@@ -319,6 +319,8 @@ public sealed class WebRtcEdgeAgentIntegrationTests
 
         public int OfflineCallCount { get; private set; }
 
+        public bool SessionExists { get; set; } = true;
+
         public List<IReadOnlyDictionary<string, string>> OnlineMetadataHistory { get; } = [];
         public List<MediaRegistrationSnapshot> MediaRegistrations { get; } = [];
 
@@ -328,6 +330,65 @@ public sealed class WebRtcEdgeAgentIntegrationTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (request.Method == HttpMethod.Post
+                && path.EndsWith($"/api/v1/sessions/{SessionId}/control/ensure", StringComparison.Ordinal))
+            {
+                var sessionCreated = !SessionExists;
+                SessionExists = true;
+                return JsonOk(new
+                {
+                    requestedSessionId = SessionId,
+                    effectiveSessionId = SessionId,
+                    lease = new
+                    {
+                        participantId = "owner:smoke-runner",
+                        principalId = "smoke-runner",
+                        grantedBy = "smoke-runner",
+                        grantedAtUtc = DateTimeOffset.UtcNow,
+                        expiresAtUtc = DateTimeOffset.UtcNow.AddSeconds(30),
+                    },
+                    sessionCreated,
+                    sessionReused = false,
+                    resolvedAtUtc = DateTimeOffset.UtcNow,
+                });
+            }
+
+            if (request.Method == HttpMethod.Get
+                && path.EndsWith($"/api/v1/sessions/{SessionId}", StringComparison.Ordinal))
+            {
+                return SessionExists
+                    ? JsonOk(new { sessionId = SessionId })
+                    : new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = JsonContent.Create(new { sessionId = SessionId, error = "missing-session" }),
+                    };
+            }
+
+            if (request.Method == HttpMethod.Post
+                && path.EndsWith("/api/v1/sessions", StringComparison.Ordinal))
+            {
+                SessionExists = true;
+                return JsonOk(new
+                {
+                    sessionId = SessionId,
+                    profile = "UltraLowLatency",
+                    requestedBy = "smoke-runner",
+                    targetAgentId = AgentId,
+                    targetEndpointId = EndpointId,
+                    shareMode = "Owner",
+                    transportProvider = "WebRtcDataChannel",
+                });
+            }
+
+            if (!SessionExists
+                && path.StartsWith($"/api/v1/sessions/{SessionId}/transport/", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = JsonContent.Create(new { sessionId = SessionId, error = "missing-session-route" }),
+                };
+            }
+
             if (request.Method == HttpMethod.Post
                 && path.EndsWith($"/api/v1/sessions/{SessionId}/transport/webrtc/peers/{PeerId}/online", StringComparison.Ordinal))
             {

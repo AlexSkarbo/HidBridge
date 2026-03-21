@@ -16,6 +16,42 @@ namespace HidBridge.Platform.Tests;
 public sealed class EdgeProxyWorkerLifecycleTests
 {
     /// <summary>
+    /// Ensures worker can recover startup when control-ensure endpoint is unavailable and session route must be created explicitly.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_ControlEnsureNotFound_CreatesSessionRouteBeforePublishingTelemetry()
+    {
+        var handler = new RelayApiHandler(commandEnvelope: null)
+        {
+            SessionExists = false,
+            ReturnNotFoundForControlEnsure = true,
+        };
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(1.0));
+        var worker = CreateWorker(factory, hidAdapter);
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+            _ = await handler.OnlinePayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(handler.SessionExists);
+        Assert.Equal(1, handler.SessionOpenCallCount);
+        Assert.True(handler.OnlineSeen);
+    }
+
+    /// <summary>
     /// Ensures worker sends least-privilege role header by default.
     /// </summary>
     [Fact]
@@ -207,6 +243,143 @@ public sealed class EdgeProxyWorkerLifecycleTests
     }
 
     /// <summary>
+    /// Ensures command-deck action set keeps mapping to relay payloads and receives Applied acknowledgments.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_CommandDeckActionSet_MapsArgsAndAcksApplied()
+    {
+        var commandEnvelopes = new object[]
+        {
+            BuildEnvelope(1, "cmd-deck-text", "keyboard.text", new Dictionary<string, object?> { ["text"] = "Hello from MicroMeet" }),
+            BuildEnvelope(2, "cmd-deck-shortcut", "keyboard.shortcut", new Dictionary<string, object?> { ["shortcut"] = "CTRL+ALT+M" }),
+            BuildEnvelope(3, "cmd-deck-move", "mouse.move", new Dictionary<string, object?> { ["dx"] = 24, ["dy"] = 12 }),
+            BuildEnvelope(4, "cmd-deck-click", "mouse.click", new Dictionary<string, object?> { ["button"] = "left", ["holdMs"] = 25 }),
+            BuildEnvelope(5, "cmd-deck-wheel", "mouse.wheel", new Dictionary<string, object?> { ["delta"] = 1 }),
+            BuildEnvelope(6, "cmd-deck-button-down", "mouse.button", new Dictionary<string, object?> { ["button"] = "left", ["down"] = true }),
+            BuildEnvelope(7, "cmd-deck-button-up", "mouse.button", new Dictionary<string, object?> { ["button"] = "left", ["down"] = false }),
+            BuildEnvelope(8, "cmd-deck-press", "keyboard.press", new Dictionary<string, object?> { ["usage"] = 4, ["modifiers"] = 0 }),
+            BuildEnvelope(9, "cmd-deck-reset", "keyboard.reset", new Dictionary<string, object?>()),
+        };
+        var handler = new RelayApiHandler(commandEnvelopes);
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(7.5));
+        var worker = CreateWorker(factory, hidAdapter);
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+            await WaitUntilAsync(
+                () => hidAdapter.Executed.Count >= commandEnvelopes.Length,
+                TimeSpan.FromSeconds(8),
+                "Edge worker did not execute full command-deck action set.");
+            await WaitUntilAsync(
+                () => handler.AckPayloads.Count >= commandEnvelopes.Length,
+                TimeSpan.FromSeconds(8),
+                "Relay did not record ACKs for full command-deck action set.");
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Collection(
+            hidAdapter.Executed,
+            command =>
+            {
+                Assert.Equal("keyboard.text", command.Action);
+                Assert.Equal("Hello from MicroMeet", command.Args.Text);
+            },
+            command =>
+            {
+                Assert.Equal("keyboard.shortcut", command.Action);
+                Assert.Equal("CTRL+ALT+M", command.Args.Shortcut);
+            },
+            command =>
+            {
+                Assert.Equal("mouse.move", command.Action);
+                Assert.Equal(24, command.Args.Dx);
+                Assert.Equal(12, command.Args.Dy);
+            },
+            command =>
+            {
+                Assert.Equal("mouse.click", command.Action);
+                Assert.Equal("left", command.Args.Button);
+                Assert.Equal(25, command.Args.HoldMs);
+            },
+            command =>
+            {
+                Assert.Equal("mouse.wheel", command.Action);
+                Assert.Equal(1, command.Args.Delta);
+            },
+            command =>
+            {
+                Assert.Equal("mouse.button", command.Action);
+                Assert.Equal("left", command.Args.Button);
+                Assert.True(command.Args.Down);
+            },
+            command =>
+            {
+                Assert.Equal("mouse.button", command.Action);
+                Assert.Equal("left", command.Args.Button);
+                Assert.False(command.Args.Down);
+            },
+            command =>
+            {
+                Assert.Equal("keyboard.press", command.Action);
+                Assert.Equal(4, command.Args.Usage);
+                Assert.Equal(0, command.Args.Modifiers);
+            },
+            command => Assert.Equal("keyboard.reset", command.Action));
+
+        Assert.All(
+            handler.AckPayloads,
+            payload => Assert.Contains("\"status\":\"Applied\"", payload, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Builds one deterministic relay command envelope for lifecycle regression tests.
+    /// </summary>
+    private static object BuildEnvelope(
+        int sequence,
+        string commandId,
+        string action,
+        IDictionary<string, object?> args)
+        => new
+        {
+            sequence,
+            command = new
+            {
+                commandId,
+                action,
+                timeoutMs = 5000,
+                args,
+            },
+        };
+
+    /// <summary>
+    /// Waits until predicate returns true or throws timeout failure.
+    /// </summary>
+    private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout, string failureMessage)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (predicate())
+            {
+                return;
+            }
+
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+
+        throw new TimeoutException(failureMessage);
+    }
+
+    /// <summary>
     /// Creates worker with deterministic options for lifecycle tests.
     /// </summary>
     private static EdgeProxyWorker CreateWorker(
@@ -248,14 +421,30 @@ public sealed class EdgeProxyWorkerLifecycleTests
     /// </summary>
     private sealed class RelayApiHandler : HttpMessageHandler
     {
-        private readonly object? _commandEnvelope;
-        private int _commandPollCount;
+        private readonly Queue<object> _commandEnvelopes;
         private int _onlineCallCount;
 
         public RelayApiHandler(object? commandEnvelope)
         {
-            _commandEnvelope = commandEnvelope;
+            _commandEnvelopes = new Queue<object>();
+            if (commandEnvelope is IEnumerable<object> envelopes && commandEnvelope is not string)
+            {
+                foreach (var envelope in envelopes)
+                {
+                    _commandEnvelopes.Enqueue(envelope);
+                }
+            }
+            else if (commandEnvelope is not null)
+            {
+                _commandEnvelopes.Enqueue(commandEnvelope);
+            }
         }
+
+        public bool SessionExists { get; set; } = true;
+
+        public bool ReturnNotFoundForControlEnsure { get; set; }
+
+        public int SessionOpenCallCount { get; private set; }
 
         public bool OnlineSeen { get; private set; }
 
@@ -272,6 +461,8 @@ public sealed class EdgeProxyWorkerLifecycleTests
         public List<string> OnlineAuthorizationHeaders { get; } = [];
 
         public TaskCompletionSource<string> AckPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public List<string> AckPayloads { get; } = [];
 
         public TaskCompletionSource<string> OnlinePayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<string> MediaPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -305,6 +496,77 @@ public sealed class EdgeProxyWorkerLifecycleTests
                 });
             }
 
+            if (request.Method == HttpMethod.Post
+                && path.EndsWith("/api/v1/sessions/session-1/control/ensure", StringComparison.Ordinal))
+            {
+                if (ReturnNotFoundForControlEnsure)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = JsonContent.Create(new { sessionId = "session-1", error = "not-found" }),
+                    };
+                }
+
+                var sessionCreated = !SessionExists;
+                SessionExists = true;
+                return JsonOk(new
+                {
+                    requestedSessionId = "session-1",
+                    effectiveSessionId = "session-1",
+                    lease = new
+                    {
+                        participantId = "owner:smoke-runner",
+                        principalId = "smoke-runner",
+                        grantedBy = "smoke-runner",
+                        grantedAtUtc = DateTimeOffset.UtcNow,
+                        expiresAtUtc = DateTimeOffset.UtcNow.AddSeconds(30),
+                    },
+                    sessionCreated,
+                    sessionReused = false,
+                    resolvedAtUtc = DateTimeOffset.UtcNow,
+                });
+            }
+
+            if (request.Method == HttpMethod.Get
+                && path.EndsWith("/api/v1/sessions/session-1", StringComparison.Ordinal))
+            {
+                if (!SessionExists)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = JsonContent.Create(new { sessionId = "session-1", error = "missing-session" }),
+                    };
+                }
+
+                return JsonOk(new { sessionId = "session-1" });
+            }
+
+            if (request.Method == HttpMethod.Post
+                && path.EndsWith("/api/v1/sessions", StringComparison.Ordinal))
+            {
+                SessionOpenCallCount++;
+                SessionExists = true;
+                return JsonOk(new
+                {
+                    sessionId = "session-1",
+                    profile = "UltraLowLatency",
+                    requestedBy = "smoke-runner",
+                    targetAgentId = "agent-1",
+                    targetEndpointId = "endpoint-1",
+                    shareMode = "Owner",
+                    transportProvider = "WebRtcDataChannel",
+                });
+            }
+
+            if (!SessionExists
+                && path.StartsWith("/api/v1/sessions/session-1/transport/", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = JsonContent.Create(new { sessionId = "session-1", error = "missing-session-route" }),
+                };
+            }
+
             if (request.Method == HttpMethod.Post && path.EndsWith("/transport/webrtc/peers/peer-1/online", StringComparison.Ordinal))
             {
                 _onlineCallCount++;
@@ -332,10 +594,9 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/transport/webrtc/commands", StringComparison.Ordinal))
             {
-                _commandPollCount++;
-                if (_commandPollCount == 1 && _commandEnvelope is not null)
+                if (_commandEnvelopes.Count > 0)
                 {
-                    return JsonOk(new { items = new[] { _commandEnvelope } });
+                    return JsonOk(new { items = new[] { _commandEnvelopes.Dequeue() } });
                 }
 
                 return JsonOk(new { items = Array.Empty<object>() });
@@ -349,6 +610,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
             if (request.Method == HttpMethod.Post && path.Contains("/transport/webrtc/commands/", StringComparison.Ordinal) && path.EndsWith("/ack", StringComparison.Ordinal))
             {
+                AckPayloads.Add(body);
                 AckPayloadTask.TrySetResult(body);
                 return JsonOk(new { accepted = true });
             }

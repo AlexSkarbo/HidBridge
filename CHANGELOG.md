@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-21 (webrtc command-deck regression coverage)
+
+Summary:
+
+- Added regression coverage for edge-agent startup route ensure behavior when session route is missing.
+- Added regression coverage for full Web command-deck HID scenario set to protect payload mapping and ACK stability.
+- Updated integration test relay backplane handlers for current API startup contract (`control/ensure` + explicit session existence fallback).
+
+Detailed notes:
+
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyWorkerLifecycleTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcEdgeAgentIntegrationTests.cs`
+
 ## 2026-03-21
 
 Summary:
