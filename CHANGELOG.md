@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-21
+
+Summary:
+
+- Added strict ops verification lane: `ops-slo-security-verify` with JSON output and strict fail flags.
+- Integrated SLO/security verification into `ci-local` and `full` orchestration flows.
+- Switched platform runtime defaults to strict security posture in Docker (`auth enabled`, `header fallback disabled`, strict bearer/caller-context patterns).
+- Switched Web runtime login to OIDC-only strict mode for platform runtime profile.
+- Added robust token-authority fallback in ops verify script and fixed PowerShell `$Host` collision issue.
+- Updated platform and architecture docs for strict runtime + SLO/security verification flow.
+
+Detailed notes:
+
+- `Platform/README.md`
+- `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
+- `Docs/SystemArchitecture/README.md`
+
 ## 2026-02-19
 
 Summary:
