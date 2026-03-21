@@ -93,6 +93,11 @@ public sealed class ApiRuntimeSettings
     public required bool WebRtcEnableConnectorBridge { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether WebRTC transport enables direct DCD control-channel bridge prior to signal/relay fallback.
+    /// </summary>
+    public required bool WebRtcEnableDcdControlBridge { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether WebRTC readiness policy requires media path readiness.
     /// </summary>
     public required bool WebRtcRequireMediaReady { get; init; }

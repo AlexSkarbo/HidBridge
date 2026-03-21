@@ -3,6 +3,8 @@ using HidBridge.Contracts;
 using System.Runtime.CompilerServices;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HidBridge.Application;
 
@@ -37,6 +39,11 @@ public sealed class WebRtcTransportRuntimeOptions
     /// Gets or sets a value indicating whether command dispatch is bridged through connector execute path.
     /// </summary>
     public bool EnableConnectorBridge { get; init; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether API transport should try direct DCD control-channel dispatch before signal/relay fallback.
+    /// </summary>
+    public bool EnableDcdControlBridge { get; init; }
 }
 
 /// <summary>
@@ -218,11 +225,21 @@ public sealed class ConnectorBackedRealtimeTransport : IRealtimeTransport
 /// </summary>
 public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
     private readonly IConnectorRegistry _connectorRegistry;
     private readonly IEndpointSnapshotStore _endpointSnapshotStore;
     private readonly WebRtcCommandRelayService _commandRelay;
+    private readonly IWebRtcSignalingStore _signalingStore;
+    private readonly IWebRtcDcdControlBridge? _dcdControlBridge;
     private readonly WebRtcTransportRuntimeOptions _options;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _connectedRoutes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _signalCursors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _signalGates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Creates the WebRTC DataChannel transport adapter.
@@ -231,12 +248,16 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
         IConnectorRegistry connectorRegistry,
         IEndpointSnapshotStore endpointSnapshotStore,
         WebRtcCommandRelayService commandRelay,
-        WebRtcTransportRuntimeOptions options)
+        IWebRtcSignalingStore signalingStore,
+        WebRtcTransportRuntimeOptions options,
+        IWebRtcDcdControlBridge? dcdControlBridge = null)
     {
         _connectorRegistry = connectorRegistry;
         _endpointSnapshotStore = endpointSnapshotStore;
         _commandRelay = commandRelay;
+        _signalingStore = signalingStore;
         _options = options;
+        _dcdControlBridge = dcdControlBridge;
     }
 
     /// <inheritdoc />
@@ -276,6 +297,24 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
                     "E_TRANSPORT_DISCONNECTED",
                     "WebRTC transport route is not connected.",
                     true));
+        }
+
+        if (!string.IsNullOrWhiteSpace(route.SessionId))
+        {
+            if (_options.EnableDcdControlBridge && _dcdControlBridge is not null)
+            {
+                var dcdAck = await _dcdControlBridge.TrySendAsync(route, command, cancellationToken);
+                if (dcdAck is not null)
+                {
+                    return dcdAck;
+                }
+            }
+
+            var directAck = await TrySendDirectSignalCommandAsync(route, command, cancellationToken);
+            if (directAck is not null)
+            {
+                return directAck;
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(route.SessionId)
@@ -380,6 +419,8 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
         var connected = _connectedRoutes.ContainsKey(routeKey) || relayOnlinePeers > 0;
         var bridgeMode = relayOnlinePeers > 0
             ? "webrtc-relay"
+            : _options.EnableDcdControlBridge
+                ? "dcd-control-bridge"
             : _options.EnableConnectorBridge
                 ? "connector-bridge"
                 : "disabled";
@@ -390,6 +431,7 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
             ["connected"] = connected,
             ["capabilityRequired"] = _options.RequireDataChannelCapability,
             ["endpointSupportsWebRtc"] = endpointSupportsWebRtc,
+            ["dcdControlBridgeEnabled"] = _options.EnableDcdControlBridge,
             ["bridgeMode"] = bridgeMode,
         };
         foreach (var pair in relayMetrics)
@@ -402,6 +444,316 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
             connected,
             connected ? "Connected" : "Disconnected",
             metrics);
+    }
+
+    /// <summary>
+    /// Attempts direct DCD command delivery through signaling inbox/ack path.
+    /// Returns null when no direct-capable peer is available for the route.
+    /// </summary>
+    private async Task<CommandAckBody?> TrySendDirectSignalCommandAsync(
+        RealtimeTransportRouteContext route,
+        CommandRequestBody command,
+        CancellationToken cancellationToken)
+    {
+        var sessionId = route.SessionId;
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return null;
+        }
+
+        var directPeer = await ResolveDirectSignalPeerAsync(route, cancellationToken);
+        if (directPeer is null)
+        {
+            return null;
+        }
+
+        var routeKey = BuildRouteKey(route);
+        var gate = _signalGates.GetOrAdd(routeKey, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var controlPeerId = BuildControlPlanePeerId(sessionId);
+            await _signalingStore.AppendAsync(
+                sessionId,
+                WebRtcSignalKind.Command,
+                controlPeerId,
+                directPeer.PeerId,
+                JsonSerializer.Serialize(BuildSignalCommand(command), JsonOptions),
+                mid: null,
+                mLineIndex: null,
+                cancellationToken);
+
+            _signalCursors.TryGetValue(routeKey, out var afterSequence);
+            var timeout = TimeSpan.FromMilliseconds(Math.Max(command.TimeoutMs, 100));
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
+
+            while (true)
+            {
+                timeoutCts.Token.ThrowIfCancellationRequested();
+
+                var signals = await _signalingStore.ListAsync(
+                    sessionId,
+                    recipientPeerId: controlPeerId,
+                    afterSequence: afterSequence > 0 ? afterSequence : null,
+                    limit: 100,
+                    timeoutCts.Token);
+                foreach (var signal in signals.OrderBy(static x => x.Sequence))
+                {
+                    afterSequence = Math.Max(afterSequence, signal.Sequence);
+                    if (signal.Kind != WebRtcSignalKind.Ack)
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(signal.SenderPeerId, directPeer.PeerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!TryParseSignalAck(signal.Payload, command.CommandId, out var ack))
+                    {
+                        continue;
+                    }
+
+                    _signalCursors[routeKey] = afterSequence;
+                    return MarkDcdDirectMetric(ack);
+                }
+
+                _signalCursors[routeKey] = afterSequence;
+                await Task.Delay(50, timeoutCts.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new CommandAckBody(
+                command.CommandId,
+                CommandStatus.Timeout,
+                new ErrorInfo(
+                    ErrorDomain.Transport,
+                    "E_TRANSPORT_TIMEOUT",
+                    "WebRTC direct signal ACK timeout.",
+                    true),
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["transportEngineDcdDirect"] = 1d,
+                });
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Resolves one online peer that advertises DCD transport-engine metadata for the current route.
+    /// </summary>
+    private async Task<WebRtcPeerStateBody?> ResolveDirectSignalPeerAsync(
+        RealtimeTransportRouteContext route,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(route.SessionId))
+        {
+            return null;
+        }
+
+        var peers = await _commandRelay.ListPeersAsync(route.SessionId, cancellationToken);
+        return peers
+            .Where(static peer => peer.IsOnline)
+            .Where(peer => IsRoutePeerMatch(route, peer))
+            .Where(static peer => IsDcdDirectPeer(peer.Metadata))
+            .OrderByDescending(static peer => peer.LastSeenAtUtc)
+            .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Checks whether peer endpoint metadata is compatible with route endpoint selector.
+    /// </summary>
+    private static bool IsRoutePeerMatch(RealtimeTransportRouteContext route, WebRtcPeerStateBody peer)
+    {
+        return string.IsNullOrWhiteSpace(route.EndpointId)
+            || string.IsNullOrWhiteSpace(peer.EndpointId)
+            || string.Equals(route.EndpointId, peer.EndpointId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Checks whether peer metadata marks this peer as DCD direct-command capable.
+    /// </summary>
+    private static bool IsDcdDirectPeer(IReadOnlyDictionary<string, string>? metadata)
+    {
+        if (metadata is null || !metadata.TryGetValue("transportEngine", out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value
+            .Trim()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return normalized is "dcd" or "datachanneldotnet";
+    }
+
+    /// <summary>
+    /// Builds one direct-signal command payload from command request.
+    /// </summary>
+    private static TransportCommandMessageBody BuildSignalCommand(CommandRequestBody command)
+    {
+        return new TransportCommandMessageBody(
+            Kind: TransportMessageKind.Command,
+            CommandId: command.CommandId,
+            SessionId: command.SessionId,
+            Action: command.Action,
+            Args: BuildTransportHidArgs(command.Args),
+            TimeoutMs: Math.Max(1000, command.TimeoutMs),
+            CreatedAtUtc: DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Converts dynamic command args into typed transport HID args payload.
+    /// </summary>
+    private static TransportHidCommandArgsBody BuildTransportHidArgs(IReadOnlyDictionary<string, object?> args)
+    {
+        return new TransportHidCommandArgsBody(
+            Text: ReadString(args, "text"),
+            Shortcut: ReadString(args, "shortcut"),
+            Usage: ReadInt(args, "usage"),
+            Modifiers: ReadInt(args, "modifiers"),
+            Dx: ReadInt(args, "dx"),
+            Dy: ReadInt(args, "dy"),
+            Wheel: ReadInt(args, "wheel"),
+            Delta: ReadInt(args, "delta"),
+            Button: ReadString(args, "button"),
+            Down: ReadBool(args, "down"),
+            HoldMs: ReadInt(args, "holdMs"),
+            InterfaceSelector: ReadInt(args, "itfSel"));
+    }
+
+    /// <summary>
+    /// Parses one direct ACK signal payload and validates command identity.
+    /// </summary>
+    private static bool TryParseSignalAck(string payload, string commandId, out CommandAckBody ack)
+    {
+        ack = default!;
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            var transportAck = JsonSerializer.Deserialize<TransportAckMessageBody>(payload, JsonOptions);
+            if (transportAck is not null
+                && transportAck.Kind == TransportMessageKind.Ack
+                && string.Equals(transportAck.CommandId, commandId, StringComparison.OrdinalIgnoreCase))
+            {
+                ack = new CommandAckBody(
+                    transportAck.CommandId,
+                    transportAck.Status,
+                    transportAck.Error,
+                    transportAck.Metrics);
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        try
+        {
+            var commandAck = JsonSerializer.Deserialize<CommandAckBody>(payload, JsonOptions);
+            if (commandAck is not null
+                && string.Equals(commandAck.CommandId, commandId, StringComparison.OrdinalIgnoreCase))
+            {
+                ack = commandAck;
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Adds deterministic marker for direct DCD command path.
+    /// </summary>
+    private static CommandAckBody MarkDcdDirectMetric(CommandAckBody ack)
+    {
+        var metrics = ack.Metrics is null
+            ? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, double>(ack.Metrics, StringComparer.OrdinalIgnoreCase);
+        metrics["transportEngineDcdDirect"] = 1d;
+        return ack with { Metrics = metrics };
+    }
+
+    /// <summary>
+    /// Builds deterministic control-plane recipient peer id for direct DCD signal replies.
+    /// </summary>
+    private static string BuildControlPlanePeerId(string sessionId)
+        => $"controlplane:{sessionId}";
+
+    /// <summary>
+    /// Reads string argument by key.
+    /// </summary>
+    private static string? ReadString(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        return args.TryGetValue(key, out var value) ? value?.ToString() : null;
+    }
+
+    /// <summary>
+    /// Reads integer argument by key.
+    /// </summary>
+    private static int? ReadInt(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        if (value is JsonElement jsonElement)
+        {
+            if (jsonElement.ValueKind == JsonValueKind.Number && jsonElement.TryGetInt32(out var jsonNumber))
+            {
+                return jsonNumber;
+            }
+
+            if (jsonElement.ValueKind == JsonValueKind.String
+                && int.TryParse(jsonElement.GetString(), out var jsonStringNumber))
+            {
+                return jsonStringNumber;
+            }
+        }
+
+        return int.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
+
+    /// <summary>
+    /// Reads boolean argument by key.
+    /// </summary>
+    private static bool? ReadBool(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        if (value is JsonElement jsonElement)
+        {
+            if (jsonElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                return jsonElement.GetBoolean();
+            }
+
+            if (jsonElement.ValueKind == JsonValueKind.String
+                && bool.TryParse(jsonElement.GetString(), out var jsonStringBool))
+            {
+                return jsonStringBool;
+            }
+        }
+
+        return bool.TryParse(value.ToString(), out var parsed) ? parsed : null;
     }
 
     private async Task<EndpointSnapshot> RequireEndpointSnapshotAsync(string? endpointId, CancellationToken cancellationToken)

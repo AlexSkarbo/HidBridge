@@ -103,11 +103,19 @@ var webRtcRequireCapability = bool.TryParse(builder.Configuration["HIDBRIDGE_WEB
     && parsedWebRtcRequireCapability;
 var webRtcEnableConnectorBridge = !bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE"], out var parsedWebRtcEnableConnectorBridge)
     || parsedWebRtcEnableConnectorBridge;
+var webRtcEnableDcdControlBridge = bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_ENABLE_DCD_CONTROL_BRIDGE"], out var parsedWebRtcEnableDcdControlBridge)
+    && parsedWebRtcEnableDcdControlBridge;
 var webRtcRequireMediaReady = bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY"], out var parsedWebRtcRequireMediaReady)
     && parsedWebRtcRequireMediaReady;
 var webRtcPeerStaleAfterSec = int.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_PEER_STALE_AFTER_SEC"], out var parsedWebRtcPeerStaleAfterSec)
     ? parsedWebRtcPeerStaleAfterSec
     : 15;
+var webRtcDcdControlBridgeConnectTimeoutMs = int.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_DCD_CONNECT_TIMEOUT_MS"], out var parsedWebRtcDcdConnectTimeoutMs)
+    ? parsedWebRtcDcdConnectTimeoutMs
+    : 1200;
+var webRtcDcdControlBridgePollIntervalMs = int.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_DCD_POLL_INTERVAL_MS"], out var parsedWebRtcDcdPollIntervalMs)
+    ? parsedWebRtcDcdPollIntervalMs
+    : 30;
 var transportFallbackToDefaultOnWebRtcError = !bool.TryParse(builder.Configuration["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"], out var parsedTransportFallbackToDefaultOnWebRtcError)
     || parsedTransportFallbackToDefaultOnWebRtcError;
 
@@ -150,6 +158,12 @@ builder.Services.AddSingleton(new WebRtcTransportRuntimeOptions
 {
     RequireDataChannelCapability = webRtcRequireCapability,
     EnableConnectorBridge = webRtcEnableConnectorBridge,
+    EnableDcdControlBridge = webRtcEnableDcdControlBridge,
+});
+builder.Services.AddSingleton(new WebRtcDcdControlBridgeOptions
+{
+    ConnectTimeoutMs = Math.Clamp(webRtcDcdControlBridgeConnectTimeoutMs, 100, 10_000),
+    PollIntervalMs = Math.Clamp(webRtcDcdControlBridgePollIntervalMs, 10, 1_000),
 });
 builder.Services.AddSingleton(new WebRtcCommandRelayOptions
 {
@@ -160,6 +174,7 @@ builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
     EnableDefaultProviderFallbackOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
 });
 builder.Services.AddSingleton<WebRtcCommandRelayService>();
+builder.Services.AddSingleton<IWebRtcDcdControlBridge, WebRtcDcdControlBridge>();
 builder.Services.AddSingleton<SessionMediaRegistryService>();
 builder.Services.AddSingleton(transportSloOptions);
 builder.Services.AddSingleton<TransportSloDiagnosticsService>();
@@ -179,7 +194,9 @@ builder.Services.AddSingleton<IRealtimeTransport>(sp =>
         sp.GetRequiredService<IConnectorRegistry>(),
         sp.GetRequiredService<IEndpointSnapshotStore>(),
         sp.GetRequiredService<WebRtcCommandRelayService>(),
-        sp.GetRequiredService<WebRtcTransportRuntimeOptions>()));
+        sp.GetRequiredService<IWebRtcSignalingStore>(),
+        sp.GetRequiredService<WebRtcTransportRuntimeOptions>(),
+        sp.GetService<IWebRtcDcdControlBridge>()));
 builder.Services.AddSingleton<IRealtimeTransportFactory, DefaultRealtimeTransportFactory>();
 builder.Services.AddSessionOrchestrator();
 builder.Services.AddSingleton(maintenanceOptions);
@@ -198,6 +215,7 @@ builder.Services.AddSingleton<ReplayArchiveDiagnosticsService>();
 builder.Services.AddSingleton<PolicyGovernanceDiagnosticsService>();
 builder.Services.AddSingleton<PolicyGovernanceManagementService>();
 builder.Services.AddSingleton<WebRtcSignalingService>();
+builder.Services.AddSingleton<IWebRtcSignalingStore>(sp => sp.GetRequiredService<WebRtcSignalingService>());
 
 var uartPort = builder.Configuration["HIDBRIDGE_UART_PORT"] ?? "COM6";
 var uartMasterSecret = builder.Configuration["HIDBRIDGE_UART_MASTER_SECRET"] ?? string.Empty;
@@ -260,6 +278,7 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     UartUsesMasterSecret = !string.IsNullOrWhiteSpace(uartMasterSecret),
     WebRtcRequireCapability = webRtcRequireCapability,
     WebRtcEnableConnectorBridge = webRtcEnableConnectorBridge,
+    WebRtcEnableDcdControlBridge = webRtcEnableDcdControlBridge,
     WebRtcRequireMediaReady = webRtcRequireMediaReady,
     WebRtcPeerStaleAfterSec = Math.Clamp(webRtcPeerStaleAfterSec, 1, 3600),
     TransportFallbackToDefaultOnWebRtcError = transportFallbackToDefaultOnWebRtcError,

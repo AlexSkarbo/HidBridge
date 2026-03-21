@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-21 (pr-next-2.2 api dcd control bridge + diagnostics)
+
+Summary:
+
+- Added optional API-side DCD bridge (`IWebRtcDcdControlBridge`) that can dispatch HID commands through DataChannelDotnet before existing signal/relay paths.
+- Added runtime flag `EnableDcdControlBridge` with deterministic diagnostics (`dcdControlBridgeEnabled`, `bridgeMode=dcd-control-bridge` when applicable).
+- Registered/configured DCD bridge in API runtime via environment settings.
+- Added regression tests for bridge-success and bridge-fallback flows in `WebRtcDataChannelRealtimeTransport`.
+- Pinned `Microsoft.EntityFrameworkCore.Relational` in SQL persistence project to stabilize EF runtime assembly resolution after package updates.
+
+Detailed notes:
+
+- `Platform/Core/HidBridge.Application/WebRtcDcdControlBridge.cs` (new)
+- `Platform/Core/HidBridge.Application/RealtimeTransportFactory.cs`
+- `Platform/Core/HidBridge.Application/HidBridge.Application.csproj`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Program.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/ApiRuntimeSettings.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Endpoints/SystemEndpoints.cs`
+- `Platform/Platform/HidBridge.Persistence.Sql/HidBridge.Persistence.Sql.csproj`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcDataChannelRealtimeTransportTests.cs`
+
 ## 2026-03-21 (pr-1 deterministic uart protocol tests + retry seam)
 
 Summary:

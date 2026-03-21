@@ -77,6 +77,7 @@ public static class SystemEndpoints
             {
                 runtimeSettings.WebRtcRequireCapability,
                 runtimeSettings.WebRtcEnableConnectorBridge,
+                runtimeSettings.WebRtcEnableDcdControlBridge,
                 runtimeSettings.WebRtcRequireMediaReady,
                 runtimeSettings.WebRtcPeerStaleAfterSec,
                 runtimeSettings.TransportFallbackToDefaultOnWebRtcError,
