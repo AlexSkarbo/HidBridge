@@ -112,6 +112,8 @@ public enum WebRtcSignalKind
     IceCandidate,
     Bye,
     Heartbeat,
+    Command,
+    Ack,
 }
 
 /// <summary>
@@ -562,6 +564,7 @@ public sealed record SessionTransportHealthBody(
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
     string? MediaSource = null,
+    string? MediaPlaybackUrl = null,
     string? MediaStreamKind = null,
     MediaVideoDescriptorBody? MediaVideo = null,
     MediaAudioDescriptorBody? MediaAudio = null);
@@ -590,6 +593,7 @@ public sealed record SessionTransportReadinessBody(
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
     string? MediaSource = null,
+    string? MediaPlaybackUrl = null,
     string? MediaStreamKind = null,
     MediaVideoDescriptorBody? MediaVideo = null,
     MediaAudioDescriptorBody? MediaAudio = null,
@@ -627,6 +631,7 @@ public sealed record SessionMediaStreamRegistrationBody(
     DateTimeOffset ReportedAtUtc,
     string? FailureReason = null,
     string? Source = null,
+    string? PlaybackUrl = null,
     string? StreamKind = null,
     MediaVideoDescriptorBody? Video = null,
     MediaAudioDescriptorBody? Audio = null,
@@ -646,6 +651,7 @@ public sealed record SessionMediaStreamSnapshotBody(
     DateTimeOffset UpdatedAtUtc,
     string? FailureReason = null,
     string? Source = null,
+    string? PlaybackUrl = null,
     string? StreamKind = null,
     MediaVideoDescriptorBody? Video = null,
     MediaAudioDescriptorBody? Audio = null,

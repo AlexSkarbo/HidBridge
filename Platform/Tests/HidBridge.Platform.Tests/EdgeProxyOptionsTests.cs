@@ -67,6 +67,57 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
+    public void IsValid_DefaultTransportEngine_UsesRelayCompat()
+    {
+        var options = CreateBaselineOptions();
+        options.TransportEngine = string.Empty;
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(EdgeProxyTransportEngineKind.RelayCompat, options.GetTransportEngineKind());
+    }
+
+    [Fact]
+    public void IsValid_RejectsUnknownTransportEngine()
+    {
+        var options = CreateBaselineOptions();
+        options.TransportEngine = "unsupported-engine";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("TransportEngine", error);
+    }
+
+    [Fact]
+    public void IsValid_DcdTransportEngine_IsAcceptedAsPreviewMode()
+    {
+        var options = CreateBaselineOptions();
+        options.TransportEngine = "dcd";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(EdgeProxyTransportEngineKind.DataChannelDotNet, options.GetTransportEngineKind());
+    }
+
+    [Fact]
+    public void Normalize_DcdAllowRelayFallback_DefaultsTrue()
+    {
+        var options = CreateBaselineOptions();
+
+        options.Normalize();
+
+        Assert.True(options.DcdAllowRelayFallback);
+    }
+
+    [Fact]
     public void IsValid_RejectsInvalidMediaHealthUrl()
     {
         var options = CreateBaselineOptions();

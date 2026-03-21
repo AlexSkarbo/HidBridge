@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-03-21 (pr-next-3 dcd direct signal command path with optional relay fallback)
+
+Summary:
+
+- Implemented preview `TransportEngine=dcd` direct command processing from signaling inbox (`WebRtcSignalKind.Command`).
+- Added direct ACK signaling path (`WebRtcSignalKind.Ack`) with DCD marker metric `transportEngineDcdDirect=1`.
+- Added option `DcdAllowRelayFallback` (default `true`) so DCD mode can fallback to relay queue when no direct signal commands are available.
+- Extended worker transport loop to use pluggable control transport engines (`relay` default, `dcd` preview).
+- Added regression coverage for relay-compat mode, dcd preview mode, and direct-signal ACK publish flow.
+
+Detailed notes:
+
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/Transport/IEdgeControlTransportEngine.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/Transport/RelayCompatControlEngine.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/Transport/DataChannelDotNetControlEngine.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyTransportEngineKind.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyOptions.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyWorker.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy.Agent.csproj`
+- `Platform/Shared/HidBridge.Contracts/Messages.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyOptionsTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyWorkerLifecycleTests.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/README.md`
+- `Platform/README.md`
+
 ## 2026-03-21 (pr-next-2.2 api dcd control bridge + diagnostics)
 
 Summary:

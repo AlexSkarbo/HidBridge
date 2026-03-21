@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HidBridge.Edge.Abstractions;
 using HidBridge.Contracts;
 using HidBridge.EdgeProxy.Agent;
@@ -189,6 +190,151 @@ public sealed class EdgeProxyWorkerLifecycleTests
             TimeSpan.FromSeconds(5),
             TestContext.Current.CancellationToken);
         Assert.True(handler.OfflineSeen);
+    }
+
+    /// <summary>
+    /// Ensures explicit relay transport-engine selection keeps existing Applied ACK behavior unchanged.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_TransportEngineRelayCompat_KeepsAppliedAckBehavior()
+    {
+        var handler = new RelayApiHandler(
+            commandEnvelope: new
+            {
+                sequence = 1,
+                command = new
+                {
+                    commandId = "cmd-relay-engine",
+                    action = "mouse.move",
+                    timeoutMs = 5000,
+                    args = new Dictionary<string, object?> { ["dx"] = 1, ["dy"] = 2 },
+                },
+            });
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(11.0));
+        var worker = CreateWorker(factory, hidAdapter, options => options.TransportEngine = "relay-compat");
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+
+            var ackPayload = await handler.AckPayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"status\":\"Applied\"", ackPayload, StringComparison.Ordinal);
+            Assert.Contains("\"transportRelayMode\":1", ackPayload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Ensures preview DCD transport-engine keeps relay-compatible command execution and tags ACK metrics.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_TransportEngineDcdPreview_KeepsAppliedAckBehavior()
+    {
+        var handler = new RelayApiHandler(
+            commandEnvelope: new
+            {
+                sequence = 1,
+                command = new
+                {
+                    commandId = "cmd-dcd-engine",
+                    action = "mouse.click",
+                    timeoutMs = 5000,
+                    args = new Dictionary<string, object?> { ["button"] = "left" },
+                },
+            });
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(12.0));
+        var worker = CreateWorker(factory, hidAdapter, options => options.TransportEngine = "dcd");
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+
+            var ackPayload = await handler.AckPayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"status\":\"Applied\"", ackPayload, StringComparison.Ordinal);
+            Assert.Contains("\"transportRelayMode\":1", ackPayload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Ensures DCD transport-engine can execute direct signal commands and return ACK via signaling channel.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_TransportEngineDcd_DirectSignalCommand_PublishesAckSignal()
+    {
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter() },
+        };
+        var signalCommand = new WebRtcSignalMessageBody(
+            SessionId: "session-1",
+            Sequence: 1,
+            Kind: WebRtcSignalKind.Command,
+            SenderPeerId: "peer-controlplane",
+            RecipientPeerId: "peer-1",
+            Payload: JsonSerializer.Serialize(
+                new TransportCommandMessageBody(
+                    Kind: TransportMessageKind.Command,
+                    CommandId: "cmd-dcd-direct",
+                    SessionId: "session-1",
+                    Action: "keyboard.text",
+                    Args: new TransportHidCommandArgsBody(Text: "hello-dcd"),
+                    TimeoutMs: 5000,
+                    CreatedAtUtc: DateTimeOffset.UtcNow),
+                jsonOptions),
+            CreatedAtUtc: DateTimeOffset.UtcNow);
+        var handler = new RelayApiHandler(commandEnvelope: null, signalMessages: [signalCommand]);
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(7.0));
+        var worker = CreateWorker(factory, hidAdapter, options =>
+        {
+            options.TransportEngine = "dcd";
+            options.DcdAllowRelayFallback = false;
+        });
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+
+            var ackSignalPayload = await handler.AckSignalPayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"status\":\"Applied\"", ackSignalPayload, StringComparison.Ordinal);
+            Assert.Contains("\"transportEngineDcdDirect\":1", ackSignalPayload, StringComparison.Ordinal);
+
+            Assert.Single(hidAdapter.Executed);
+            Assert.Equal("cmd-dcd-direct", hidAdapter.Executed[0].CommandId);
+            Assert.Equal("hello-dcd", hidAdapter.Executed[0].Args.Text);
+            Assert.False(handler.AckPayloadTask.Task.IsCompleted, "Direct DCD mode should publish ACK via signaling, not relay ACK endpoint.");
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
     }
 
     /// <summary>
@@ -422,11 +568,18 @@ public sealed class EdgeProxyWorkerLifecycleTests
     private sealed class RelayApiHandler : HttpMessageHandler
     {
         private readonly Queue<object> _commandEnvelopes;
+        private readonly List<WebRtcSignalMessageBody> _signalMessages;
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() },
+        };
         private int _onlineCallCount;
 
-        public RelayApiHandler(object? commandEnvelope)
+        public RelayApiHandler(object? commandEnvelope, IReadOnlyList<WebRtcSignalMessageBody>? signalMessages = null)
         {
             _commandEnvelopes = new Queue<object>();
+            _signalMessages = signalMessages?.ToList() ?? [];
             if (commandEnvelope is IEnumerable<object> envelopes && commandEnvelope is not string)
             {
                 foreach (var envelope in envelopes)
@@ -466,6 +619,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
         public TaskCompletionSource<string> OnlinePayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<string> MediaPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<string> AckSignalPayloadTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource<bool> OfflineTask { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -583,13 +737,40 @@ public sealed class EdgeProxyWorkerLifecycleTests
 
             if (request.Method == HttpMethod.Post && path.EndsWith("/transport/webrtc/signals", StringComparison.Ordinal))
             {
-                HeartbeatSeen = true;
+                var signal = JsonSerializer.Deserialize<WebRtcSignalPublishBody>(body, JsonOptions);
+                if (signal is not null)
+                {
+                    if (signal.Kind == WebRtcSignalKind.Heartbeat)
+                    {
+                        HeartbeatSeen = true;
+                    }
+                    else if (signal.Kind == WebRtcSignalKind.Ack)
+                    {
+                        AckSignalPayloadTask.TrySetResult(signal.Payload);
+                    }
+                }
+
                 return JsonOk(new { ok = true });
             }
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/transport/webrtc/signals", StringComparison.Ordinal))
             {
-                return JsonOk(new { items = Array.Empty<object>() });
+                var recipientPeerId = ReadQueryValue(request, "recipientPeerId");
+                var afterSequence = TryReadQueryInt(request, "afterSequence");
+                var limit = TryReadQueryInt(request, "limit") ?? 20;
+                var effectiveLimit = Math.Clamp(limit, 1, 500);
+
+                var items = _signalMessages
+                    .Where(x => !afterSequence.HasValue || x.Sequence > afterSequence.Value)
+                    .Where(x =>
+                        string.IsNullOrWhiteSpace(recipientPeerId)
+                        || string.IsNullOrWhiteSpace(x.RecipientPeerId)
+                        || string.Equals(x.RecipientPeerId, recipientPeerId, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(x => x.Sequence)
+                    .Take(effectiveLimit)
+                    .ToArray();
+
+                return JsonOk(new { items });
             }
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/transport/webrtc/commands", StringComparison.Ordinal))
@@ -637,6 +818,55 @@ public sealed class EdgeProxyWorkerLifecycleTests
             {
                 Content = JsonContent.Create(payload),
             };
+        }
+
+        /// <summary>
+        /// Reads one query parameter from request URI.
+        /// </summary>
+        private static string? ReadQueryValue(HttpRequestMessage request, string key)
+        {
+            var query = request.RequestUri?.Query;
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return null;
+            }
+
+            foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var pair = part.Split('=', 2);
+                if (pair.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(Uri.UnescapeDataString(pair[0]), key, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (pair.Length == 1)
+                {
+                    return string.Empty;
+                }
+
+                return Uri.UnescapeDataString(pair[1]);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Reads one integer query parameter from request URI.
+        /// </summary>
+        private static int? TryReadQueryInt(HttpRequestMessage request, string key)
+        {
+            var raw = ReadQueryValue(request, key);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            return int.TryParse(raw, out var value) ? value : null;
         }
     }
 

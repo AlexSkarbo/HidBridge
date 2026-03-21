@@ -130,7 +130,7 @@ Default ControlPlane API:
 - transport diagnostics/signaling:
   - `GET /api/v1/sessions/{sessionId}/transport/health?provider={uart|webrtc}`
     - response now includes typed relay peer readiness fields when available: `onlinePeerCount`, `lastPeerSeenAtUtc`, `lastPeerState`, `lastPeerFailureReason`, `lastPeerConsecutiveFailures`, `lastPeerReconnectBackoffMs`, `lastRelayAckAtUtc`
-    - response also includes typed edge media diagnostics when available: `mediaReady`, `mediaState`, `mediaFailureReason`, `mediaReportedAtUtc`, `mediaStreamId`, `mediaSource`
+    - response also includes typed edge media diagnostics when available: `mediaReady`, `mediaState`, `mediaFailureReason`, `mediaReportedAtUtc`, `mediaStreamId`, `mediaSource`, `mediaPlaybackUrl`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/signals`
   - `GET /api/v1/sessions/{sessionId}/transport/webrtc/signals?recipientPeerId={peerId}&afterSequence={n}&limit={n}`
   - `POST /api/v1/sessions/{sessionId}/transport/webrtc/peers/{peerId}/online`
@@ -360,8 +360,12 @@ Edge-agent as external process (outside docker):
   - `HIDBRIDGE_EDGE_PROXY_PEERID=<peer-id>`
   - `HIDBRIDGE_EDGE_PROXY_ENDPOINTID=<endpoint-id>`
   - `HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR=uart`
+  - `HIDBRIDGE_EDGE_PROXY_TRANSPORTENGINE=relay` (`dcd` preview consumes direct signal commands first and can fallback to relay queue)
+  - `HIDBRIDGE_EDGE_PROXY_DCDALLOWRELAYFALLBACK=true` (set `false` to enforce direct-signal-only behavior in `dcd` mode)
+  - `HIDBRIDGE_EDGE_PROXY_MEDIAENGINE=none` (`ffmpeg-dcd` is preview scaffold; current production media path remains probe-driven)
   - `HIDBRIDGE_EDGE_PROXY_UARTPORT=COM6`
   - `HIDBRIDGE_EDGE_PROXY_UARTHMACKEY=your-master-secret`
+  - `HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL=http://127.0.0.1:8080/live.m3u8` (optional media preview URL surfaced in Web transport diagnostics)
 
 Final runtime flow (no script policy dependency):
 - production path:

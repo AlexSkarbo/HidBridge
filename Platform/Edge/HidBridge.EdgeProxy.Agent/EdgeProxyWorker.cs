@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net;
 using HidBridge.Edge.Abstractions;
+using HidBridge.EdgeProxy.Agent.Transport;
 using HidBridge.Contracts;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -31,6 +32,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     private readonly ICaptureAdapter _captureAdapter;
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
+    private readonly IEdgeControlTransportEngine _controlTransportEngine;
     private readonly Dictionary<string, string> _callerHeaders;
     private readonly SemaphoreSlim _tokenRefreshGate = new(1, 1);
     private DateTimeOffset _lastHeartbeatAtUtc = DateTimeOffset.MinValue;
@@ -60,6 +62,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         _captureAdapter = captureAdapter;
         _options = options.Value;
         _logger = logger;
+        _controlTransportEngine = CreateControlTransportEngine(_options.GetTransportEngineKind(), _options, logger);
         _accessToken = _options.AccessToken;
         _refreshToken = _options.TokenRefreshToken;
         _effectiveSessionId = _options.SessionId;
@@ -87,13 +90,14 @@ public sealed class EdgeProxyWorker : BackgroundService
         await EnsureEffectiveSessionRouteAsync(stoppingToken);
 
         _logger.LogInformation(
-            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}",
+            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}, TransportEngine={TransportEngine}",
             _options.SessionId,
             _effectiveSessionId,
             _options.PeerId,
             _options.EndpointId,
             _options.GetCommandExecutorKind(),
-            _options.ControlWsUrl);
+            _options.ControlWsUrl,
+            _options.GetTransportEngineKind());
 
         var consecutiveFailures = 0;
         while (!stoppingToken.IsCancellationRequested)
@@ -261,36 +265,53 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// </summary>
     private async Task PollAndProcessCommandsAsync(CancellationToken cancellationToken)
     {
-        var query = $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/commands?peerId={Uri.EscapeDataString(_options.PeerId)}&limit={_options.BatchLimit}";
-        if (_lastCommandSequence.HasValue)
-        {
-            query += $"&afterSequence={_lastCommandSequence.Value}";
-        }
+        var context = new EdgeControlTransportContext(
+            EffectiveSessionId: _effectiveSessionId,
+            PeerId: _options.PeerId,
+            BatchLimit: _options.BatchLimit,
+            QueryCommandsAsync: GetCollectionAsync<WebRtcCommandEnvelopeBody>,
+            QuerySignalsAsync: GetCollectionAsync<WebRtcSignalMessageBody>,
+            ExecuteCommandAsync: ExecuteCommandAsync,
+            PublishAckAsync: PublishCommandAckAsync,
+            PublishSignalAsync: PublishSignalAsync);
 
-        var envelopes = await GetCollectionAsync<WebRtcCommandEnvelopeBody>(query, cancellationToken);
-        foreach (var envelope in envelopes.OrderBy(x => x.Sequence))
-        {
-            if (envelope.Command is null || string.IsNullOrWhiteSpace(envelope.Command.CommandId))
-            {
-                _lastCommandSequence = envelope.Sequence;
-                continue;
-            }
+        _lastCommandSequence = await _controlTransportEngine.PollAndProcessCommandsAsync(
+            context,
+            _lastCommandSequence,
+            cancellationToken);
+    }
 
-            var ack = await ExecuteCommandAsync(envelope.Command, cancellationToken);
-            using var ackResponse = await SendAsync(HttpMethod.Post,
-                $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/commands/{Uri.EscapeDataString(envelope.Command.CommandId)}/ack",
-                ack,
-                cancellationToken,
-                allowNotFound: true);
-            if (ackResponse.StatusCode == HttpStatusCode.NotFound)
-            {
-                _logger.LogDebug(
-                    "Relay ACK target was not found for command {CommandId}; it was likely expired or already acknowledged.",
-                    envelope.Command.CommandId);
-            }
+    /// <summary>
+    /// Publishes one relay ACK payload for command queue transport.
+    /// </summary>
+    private async Task<HttpStatusCode> PublishCommandAckAsync(
+        string commandId,
+        TransportAckMessageBody ack,
+        CancellationToken cancellationToken)
+    {
+        using var ackResponse = await SendAsync(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/commands/{Uri.EscapeDataString(commandId)}/ack",
+            ack,
+            cancellationToken,
+            allowNotFound: true);
+        return ackResponse.StatusCode;
+    }
 
-            _lastCommandSequence = envelope.Sequence;
-        }
+    /// <summary>
+    /// Publishes one signaling payload through canonical API endpoint.
+    /// </summary>
+    private async Task<HttpStatusCode> PublishSignalAsync(
+        WebRtcSignalPublishBody signal,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/signals",
+            signal,
+            cancellationToken,
+            allowNotFound: true);
+        return response.StatusCode;
     }
 
     /// <summary>
@@ -643,6 +664,22 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
 
         return metadata;
+    }
+
+    /// <summary>
+    /// Creates concrete control transport engine according to configured mode.
+    /// </summary>
+    private static IEdgeControlTransportEngine CreateControlTransportEngine(
+        EdgeProxyTransportEngineKind transportEngineKind,
+        EdgeProxyOptions options,
+        ILogger<EdgeProxyWorker> logger)
+    {
+        return transportEngineKind switch
+        {
+            EdgeProxyTransportEngineKind.RelayCompat => new RelayCompatControlEngine(logger),
+            EdgeProxyTransportEngineKind.DataChannelDotNet => new DataChannelDotNetControlEngine(logger, options.DcdAllowRelayFallback),
+            _ => throw new InvalidOperationException($"Unsupported transport engine kind '{transportEngineKind}'."),
+        };
     }
 
     /// <summary>

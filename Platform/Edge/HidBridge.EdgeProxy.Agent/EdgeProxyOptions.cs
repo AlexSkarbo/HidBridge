@@ -24,6 +24,37 @@ public sealed class EdgeProxyOptions
     /// </summary>
     public string CommandExecutor { get; set; } = "uart";
 
+    /// <summary>
+    /// Selects edge control transport engine: <c>relay</c> (default) or preview <c>dcd</c> (direct signal commands + optional relay fallback).
+    /// </summary>
+    public string TransportEngine { get; set; } = "relay";
+
+    /// <summary>
+    /// Allows preview <c>TransportEngine=dcd</c> to fall back to relay command queue when no direct signal commands are available.
+    /// </summary>
+    public bool DcdAllowRelayFallback { get; set; } = true;
+
+    /// <summary>
+    /// Selects media runtime engine: <c>none</c> (default) or preview <c>ffmpeg-dcd</c>.
+    /// </summary>
+    public string MediaEngine { get; set; } = "none";
+
+    /// <summary>
+    /// Optional ffmpeg executable path used by <c>MediaEngine=ffmpeg-dcd</c>.
+    /// </summary>
+    public string FfmpegExecutablePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional ffmpeg arguments template used by <c>MediaEngine=ffmpeg-dcd</c>.
+    /// Supports placeholders: <c>{sessionId}</c>, <c>{peerId}</c>, <c>{endpointId}</c>, <c>{streamId}</c>, <c>{source}</c>, <c>{baseUrl}</c>.
+    /// </summary>
+    public string FfmpegArgumentsTemplate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Graceful ffmpeg stop timeout in milliseconds before forced kill.
+    /// </summary>
+    public int FfmpegStopTimeoutMs { get; set; } = 3000;
+
     [Required]
     public string ControlWsUrl { get; set; } = "ws://127.0.0.1:28092/ws/control";
 
@@ -98,6 +129,11 @@ public sealed class EdgeProxyOptions
     public string MediaSource { get; set; } = "edge-capture";
 
     /// <summary>
+    /// Optional playback URL surfaced in transport diagnostics (for example <c>http://127.0.0.1:8080/live.m3u8</c>).
+    /// </summary>
+    public string MediaPlaybackUrl { get; set; } = string.Empty;
+
+    /// <summary>
     /// Requires media probe to report ready before readiness policy can pass.
     /// </summary>
     public bool RequireMediaReady { get; set; } = true;
@@ -157,6 +193,11 @@ public sealed class EdgeProxyOptions
     {
         BaseUrl = BaseUrl.TrimEnd('/');
         CommandExecutor = (CommandExecutor ?? string.Empty).Trim();
+        TransportEngine = (TransportEngine ?? string.Empty).Trim();
+        MediaEngine = (MediaEngine ?? string.Empty).Trim();
+        FfmpegExecutablePath = (FfmpegExecutablePath ?? string.Empty).Trim();
+        FfmpegArgumentsTemplate = (FfmpegArgumentsTemplate ?? string.Empty).Trim();
+        FfmpegStopTimeoutMs = Math.Max(250, FfmpegStopTimeoutMs);
         PollIntervalMs = Math.Max(100, PollIntervalMs);
         BatchLimit = Math.Clamp(BatchLimit, 1, 500);
         HeartbeatIntervalSec = Math.Max(3, HeartbeatIntervalSec);
@@ -177,6 +218,7 @@ public sealed class EdgeProxyOptions
         TokenScope = TokenScope?.Trim() ?? string.Empty;
         TokenClientSecret = TokenClientSecret?.Trim() ?? string.Empty;
         TokenRefreshToken = TokenRefreshToken?.Trim() ?? string.Empty;
+        MediaPlaybackUrl = MediaPlaybackUrl?.Trim() ?? string.Empty;
         OperatorRolesCsv = string.Join(
             ",",
             (OperatorRolesCsv ?? string.Empty)
@@ -204,6 +246,32 @@ public sealed class EdgeProxyOptions
     }
 
     /// <summary>
+    /// Resolves configured control transport engine kind.
+    /// </summary>
+    public EdgeProxyTransportEngineKind GetTransportEngineKind()
+    {
+        if (TryParseTransportEngineKind(TransportEngine, out var kind))
+        {
+            return kind;
+        }
+
+        return EdgeProxyTransportEngineKind.RelayCompat;
+    }
+
+    /// <summary>
+    /// Resolves configured media runtime engine kind.
+    /// </summary>
+    public EdgeProxyMediaEngineKind GetMediaEngineKind()
+    {
+        if (TryParseMediaEngineKind(MediaEngine, out var kind))
+        {
+            return kind;
+        }
+
+        return EdgeProxyMediaEngineKind.None;
+    }
+
+    /// <summary>
     /// Validates that required connection and identity settings are present.
     /// </summary>
     /// <param name="error">Validation error message.</param>
@@ -219,6 +287,18 @@ public sealed class EdgeProxyOptions
         if (!TryParseCommandExecutorKind(CommandExecutor, out var executorKind))
         {
             error = $"CommandExecutor '{CommandExecutor}' is not supported. Use 'controlws' or 'uart'.";
+            return false;
+        }
+
+        if (!TryParseTransportEngineKind(TransportEngine, out _))
+        {
+            error = $"TransportEngine '{TransportEngine}' is not supported. Use 'relay' or 'dcd'.";
+            return false;
+        }
+
+        if (!TryParseMediaEngineKind(MediaEngine, out _))
+        {
+            error = $"MediaEngine '{MediaEngine}' is not supported. Use 'none' or 'ffmpeg-dcd'.";
             return false;
         }
 
@@ -286,6 +366,64 @@ public sealed class EdgeProxyOptions
             case "controlws":
             case "websocket":
                 kind = EdgeProxyCommandExecutorKind.ControlWs;
+                return true;
+            default:
+                kind = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Parses control transport engine from configuration aliases.
+    /// </summary>
+    private static bool TryParseTransportEngineKind(string? value, out EdgeProxyTransportEngineKind kind)
+    {
+        var normalized = (value ?? string.Empty)
+            .Trim()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+
+        switch (normalized)
+        {
+            case "":
+            case "relay":
+            case "relaycompat":
+            case "compat":
+                kind = EdgeProxyTransportEngineKind.RelayCompat;
+                return true;
+            case "dcd":
+            case "datachanneldotnet":
+                kind = EdgeProxyTransportEngineKind.DataChannelDotNet;
+                return true;
+            default:
+                kind = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Parses media engine mode from configuration aliases.
+    /// </summary>
+    private static bool TryParseMediaEngineKind(string? value, out EdgeProxyMediaEngineKind kind)
+    {
+        var normalized = (value ?? string.Empty)
+            .Trim()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+
+        switch (normalized)
+        {
+            case "":
+            case "none":
+            case "disabled":
+                kind = EdgeProxyMediaEngineKind.None;
+                return true;
+            case "ffmpegdcd":
+            case "ffmpegdatachanneldotnet":
+            case "dcdffmpeg":
+                kind = EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet;
                 return true;
             default:
                 kind = default;
