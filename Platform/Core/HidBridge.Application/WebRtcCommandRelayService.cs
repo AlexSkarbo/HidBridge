@@ -9,7 +9,28 @@ namespace HidBridge.Application;
 /// </summary>
 public sealed class WebRtcCommandRelayService
 {
+    private readonly WebRtcCommandRelayOptions _options;
+    private readonly Func<DateTimeOffset> _clock;
     private readonly ConcurrentDictionary<string, SessionRelayState> _sessions = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Creates relay service with default transient-peer options.
+    /// </summary>
+    public WebRtcCommandRelayService()
+        : this(options: null, clock: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates relay service with explicit options and optional clock override (used by tests).
+    /// </summary>
+    public WebRtcCommandRelayService(
+        WebRtcCommandRelayOptions? options,
+        Func<DateTimeOffset>? clock = null)
+    {
+        _options = options ?? new WebRtcCommandRelayOptions();
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
+    }
 
     /// <summary>
     /// Marks a peer online for a session and returns the resulting peer snapshot.
@@ -23,7 +44,7 @@ public sealed class WebRtcCommandRelayService
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = _sessions.GetOrAdd(sessionId, static _ => new SessionRelayState());
-        return Task.FromResult(state.UpsertPeer(sessionId, peerId, endpointId, isOnline: true, metadata));
+        return Task.FromResult(state.UpsertPeer(sessionId, peerId, endpointId, isOnline: true, metadata, _clock()));
     }
 
     /// <summary>
@@ -36,7 +57,7 @@ public sealed class WebRtcCommandRelayService
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = _sessions.GetOrAdd(sessionId, static _ => new SessionRelayState());
-        return Task.FromResult(state.UpsertPeer(sessionId, peerId, endpointId: null, isOnline: false, metadata: null));
+        return Task.FromResult(state.UpsertPeer(sessionId, peerId, endpointId: null, isOnline: false, metadata: null, _clock()));
     }
 
     /// <summary>
@@ -52,7 +73,7 @@ public sealed class WebRtcCommandRelayService
             return Task.FromResult<IReadOnlyList<WebRtcPeerStateBody>>([]);
         }
 
-        return Task.FromResult(state.ListPeers());
+        return Task.FromResult(state.ListPeers(_clock(), _options.PeerStaleAfter));
     }
 
     /// <summary>
@@ -65,7 +86,7 @@ public sealed class WebRtcCommandRelayService
             return false;
         }
 
-        return _sessions.TryGetValue(sessionId, out var state) && state.HasOnlinePeer(endpointId);
+        return _sessions.TryGetValue(sessionId, out var state) && state.HasOnlinePeer(endpointId, _clock(), _options.PeerStaleAfter);
     }
 
     /// <summary>
@@ -79,7 +100,7 @@ public sealed class WebRtcCommandRelayService
         cancellationToken.ThrowIfCancellationRequested();
         var sessionId = route.SessionId ?? command.SessionId;
         var state = _sessions.GetOrAdd(sessionId, static _ => new SessionRelayState());
-        return Task.FromResult(state.EnqueueCommand(sessionId, route.EndpointId, command));
+        return Task.FromResult(state.EnqueueCommand(sessionId, route.EndpointId, command, _clock()));
     }
 
     /// <summary>
@@ -133,7 +154,7 @@ public sealed class WebRtcCommandRelayService
             return Task.FromResult(false);
         }
 
-        return Task.FromResult(state.PublishAck(ack));
+        return Task.FromResult(state.PublishAck(ack, _clock()));
     }
 
     /// <summary>
@@ -179,10 +200,12 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerMediaAudioChannels"] = null,
                 ["lastPeerMediaAudioSampleRateHz"] = null,
                 ["lastPeerMediaAudioBitrateKbps"] = null,
+                ["lastPeerIsStale"] = false,
+                ["peerStaleAfterSec"] = _options.PeerStaleAfterSec,
             });
         }
 
-        return Task.FromResult(state.GetMetrics(endpointId));
+        return Task.FromResult(state.GetMetrics(endpointId, _clock(), _options.PeerStaleAfter));
     }
 
     private sealed class SessionRelayState
@@ -203,9 +226,9 @@ public sealed class WebRtcCommandRelayService
             string peerId,
             string? endpointId,
             bool isOnline,
-            IReadOnlyDictionary<string, string>? metadata)
+            IReadOnlyDictionary<string, string>? metadata,
+            DateTimeOffset nowUtc)
         {
-            var nowUtc = DateTimeOffset.UtcNow;
             _peers.TryGetValue(peerId, out var previousSnapshot);
             var snapshot = _peers.AddOrUpdate(
                 peerId,
@@ -267,14 +290,17 @@ public sealed class WebRtcCommandRelayService
             }
         }
 
-        public IReadOnlyList<WebRtcPeerStateBody> ListPeers()
+        public IReadOnlyList<WebRtcPeerStateBody> ListPeers(DateTimeOffset nowUtc, TimeSpan peerStaleAfter)
             => _peers.Values
                 .OrderBy(x => x.PeerId, StringComparer.OrdinalIgnoreCase)
+                .Select(peer => IsPeerStale(peer, nowUtc, peerStaleAfter)
+                    ? peer with { IsOnline = false }
+                    : peer)
                 .ToArray();
 
-        public bool HasOnlinePeer(string? endpointId)
+        public bool HasOnlinePeer(string? endpointId, DateTimeOffset nowUtc, TimeSpan peerStaleAfter)
             => _peers.Values.Any(peer =>
-                peer.IsOnline
+                IsPeerAvailable(peer, nowUtc, peerStaleAfter)
                 && (string.IsNullOrWhiteSpace(endpointId)
                     || string.IsNullOrWhiteSpace(peer.EndpointId)
                     || string.Equals(peer.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase)));
@@ -282,7 +308,8 @@ public sealed class WebRtcCommandRelayService
         public WebRtcCommandEnvelopeBody EnqueueCommand(
             string sessionId,
             string? endpointId,
-            CommandRequestBody command)
+            CommandRequestBody command,
+            DateTimeOffset nowUtc)
         {
             var sequence = Interlocked.Increment(ref _nextCommandSequence);
             var recipientPeerId = command.Args.TryGetValue("recipientPeerId", out var recipientValue)
@@ -294,7 +321,7 @@ public sealed class WebRtcCommandRelayService
                 EndpointId: endpointId,
                 RecipientPeerId: string.IsNullOrWhiteSpace(recipientPeerId) ? null : recipientPeerId,
                 Command: command,
-                CreatedAtUtc: DateTimeOffset.UtcNow);
+                CreatedAtUtc: nowUtc);
 
             _commands.Enqueue(envelope);
             while (_commands.Count > 2000 && _commands.TryDequeue(out _))
@@ -348,11 +375,11 @@ public sealed class WebRtcCommandRelayService
             }
         }
 
-        public bool PublishAck(CommandAckBody ack)
+        public bool PublishAck(CommandAckBody ack, DateTimeOffset nowUtc)
         {
             lock (_sync)
             {
-                _lastRelayAckAtUtc = DateTimeOffset.UtcNow;
+                _lastRelayAckAtUtc = nowUtc;
             }
             if (!_pendingAcks.TryRemove(ack.CommandId, out var pendingAck))
             {
@@ -363,7 +390,7 @@ public sealed class WebRtcCommandRelayService
             return true;
         }
 
-        public IReadOnlyDictionary<string, object?> GetMetrics(string? endpointId)
+        public IReadOnlyDictionary<string, object?> GetMetrics(string? endpointId, DateTimeOffset nowUtc, TimeSpan peerStaleAfter)
         {
             var matchingPeers = _peers.Values
                 .Where(peer =>
@@ -372,9 +399,10 @@ public sealed class WebRtcCommandRelayService
                     || string.Equals(peer.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(peer => peer.LastSeenAtUtc)
                 .ToArray();
-            var onlinePeerCount = matchingPeers.Count(peer => peer.IsOnline);
+            var onlinePeerCount = matchingPeers.Count(peer => IsPeerAvailable(peer, nowUtc, peerStaleAfter));
             var latestPeer = matchingPeers.FirstOrDefault();
             var latestMetadata = latestPeer?.Metadata;
+            var latestPeerIsStale = IsPeerStale(latestPeer, nowUtc, peerStaleAfter);
             DateTimeOffset? lastRelayAckAtUtc;
             DateTimeOffset? firstPeerSeenAtUtc;
             DateTimeOffset? firstPeerReadyAtUtc;
@@ -399,8 +427,8 @@ public sealed class WebRtcCommandRelayService
                 ["queuedCommandCount"] = _commands.Count,
                 ["lastRelayAckAtUtc"] = lastRelayAckAtUtc,
                 ["lastPeerSeenAtUtc"] = latestPeer?.LastSeenAtUtc,
-                ["lastPeerState"] = TryReadMetadataValue(latestMetadata, "state"),
-                ["lastPeerFailureReason"] = TryReadMetadataValue(latestMetadata, "failureReason"),
+                ["lastPeerState"] = latestPeerIsStale ? "Stale" : TryReadMetadataValue(latestMetadata, "state"),
+                ["lastPeerFailureReason"] = latestPeerIsStale ? "peer_stale_timeout" : TryReadMetadataValue(latestMetadata, "failureReason"),
                 ["lastPeerConsecutiveFailures"] = TryReadMetadataValue(latestMetadata, "consecutiveFailures"),
                 ["lastPeerReconnectBackoffMs"] = TryReadMetadataValue(latestMetadata, "reconnectBackoffMs"),
                 ["firstPeerSeenAtUtc"] = firstPeerSeenAtUtc,
@@ -424,8 +452,24 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerMediaAudioChannels"] = TryReadMetadataValue(latestMetadata, "mediaAudioChannels"),
                 ["lastPeerMediaAudioSampleRateHz"] = TryReadMetadataValue(latestMetadata, "mediaAudioSampleRateHz"),
                 ["lastPeerMediaAudioBitrateKbps"] = TryReadMetadataValue(latestMetadata, "mediaAudioBitrateKbps"),
+                ["lastPeerIsStale"] = latestPeerIsStale,
+                ["peerStaleAfterSec"] = Math.Round(peerStaleAfter.TotalSeconds),
             };
         }
+
+        /// <summary>
+        /// Returns true when one peer can receive relay commands for the current checkpoint.
+        /// </summary>
+        private static bool IsPeerAvailable(WebRtcPeerStateBody? peer, DateTimeOffset nowUtc, TimeSpan peerStaleAfter)
+            => peer is not null && peer.IsOnline && !IsPeerStale(peer, nowUtc, peerStaleAfter);
+
+        /// <summary>
+        /// Returns true when peer heartbeat age is outside allowed freshness window.
+        /// </summary>
+        private static bool IsPeerStale(WebRtcPeerStateBody? peer, DateTimeOffset nowUtc, TimeSpan peerStaleAfter)
+            => peer is not null
+               && peer.IsOnline
+               && nowUtc - peer.LastSeenAtUtc > peerStaleAfter;
 
         private static string? TryReadMetadataValue(IReadOnlyDictionary<string, string>? metadata, string key)
         {

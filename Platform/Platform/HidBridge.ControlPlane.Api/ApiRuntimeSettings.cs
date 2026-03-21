@@ -98,6 +98,11 @@ public sealed class ApiRuntimeSettings
     public required bool WebRtcRequireMediaReady { get; init; }
 
     /// <summary>
+    /// Gets the peer heartbeat staleness threshold (seconds) used by WebRTC relay online-peer detection.
+    /// </summary>
+    public required int WebRtcPeerStaleAfterSec { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether transport routing falls back to the default provider after WebRTC transport errors.
     /// </summary>
     public required bool TransportFallbackToDefaultOnWebRtcError { get; init; }

@@ -177,6 +177,69 @@ public sealed class WebRtcDataChannelRealtimeTransportTests
         Assert.Equal(0, connector.ExecuteCount);
     }
 
+    [Fact]
+    public async Task SendCommandAsync_UsesConnectorBridge_WhenPeerPresenceIsStale()
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var connector = new FakeConnector(
+            "agent-1",
+            "endpoint-1",
+            new ConnectorCommandResult("cmd-stale", CommandStatus.Applied));
+        var registry = new FakeConnectorRegistry(connector);
+        var endpointStore = new FakeEndpointSnapshotStore(
+            new EndpointSnapshot(
+                "endpoint-1",
+                [
+                    new CapabilityDescriptor(CapabilityNames.TransportWebRtcDataChannelV1, "1.0"),
+                    new CapabilityDescriptor(CapabilityNames.HidKeyboardV1, "1.0"),
+                ],
+                DateTimeOffset.UtcNow));
+        var relay = new WebRtcCommandRelayService(
+            new WebRtcCommandRelayOptions
+            {
+                PeerStaleAfterSec = 5,
+            },
+            clock: () => nowUtc);
+        var transport = new WebRtcDataChannelRealtimeTransport(
+            registry,
+            endpointStore,
+            relay,
+            new WebRtcTransportRuntimeOptions
+            {
+                RequireDataChannelCapability = true,
+                EnableConnectorBridge = true,
+            });
+        var route = new RealtimeTransportRouteContext("agent-1", EndpointId: "endpoint-1", SessionId: "session-stale");
+
+        await relay.MarkPeerOnlineAsync(
+            "session-stale",
+            "peer-1",
+            "endpoint-1",
+            new Dictionary<string, string>(),
+            TestContext.Current.CancellationToken);
+
+        nowUtc = nowUtc.AddSeconds(7);
+        await transport.ConnectAsync(route, TestContext.Current.CancellationToken);
+
+        var ack = await transport.SendCommandAsync(
+            route,
+            new CommandRequestBody(
+                CommandId: "cmd-stale",
+                SessionId: "session-stale",
+                Channel: CommandChannel.DataChannel,
+                Action: "keyboard.text",
+                Args: new Dictionary<string, object?> { ["text"] = "hello" },
+                TimeoutMs: 500,
+                IdempotencyKey: "cmd-stale"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(CommandStatus.Applied, ack.Status);
+        Assert.NotNull(ack.Metrics);
+        Assert.True(ack.Metrics!.ContainsKey("transportBridgeMode"));
+        Assert.False(ack.Metrics.ContainsKey("transportRelayMode"));
+        Assert.Equal(1, connector.ExecuteCount);
+    }
+
     private sealed class FakeConnectorRegistry : IConnectorRegistry
     {
         private readonly IConnector _connector;

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-03-21 (pr-b relay stale-peer guard + smoke retry stabilization)
+
+Summary:
+
+- Added WebRTC relay stale-peer guard so expired heartbeat snapshots no longer count as online peers.
+- Added configurable relay staleness threshold (`HIDBRIDGE_WEBRTC_PEER_STALE_AFTER_SEC`, default `15s`) and exposed it via runtime diagnostics.
+- Hardened edge-agent smoke by adding bounded retry for transient transport command outcomes (`Timeout` / `E_TRANSPORT_*`) with readiness re-check between attempts.
+- Added regression tests covering stale-peer behavior and bridge fallback when relay peer presence is stale.
+
+Detailed notes:
+
+- `Platform/Core/HidBridge.Application/WebRtcCommandRelayOptions.cs`
+- `Platform/Core/HidBridge.Application/WebRtcCommandRelayService.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Program.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/ApiRuntimeSettings.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Endpoints/SystemEndpoints.cs`
+- `Platform/Scripts/run_webrtc_edge_agent_smoke.ps1`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcCommandRelayServiceTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcDataChannelRealtimeTransportTests.cs`
+
 ## 2026-03-21 (pr-a typed media contract + edge/api/ui propagation)
 
 Summary:

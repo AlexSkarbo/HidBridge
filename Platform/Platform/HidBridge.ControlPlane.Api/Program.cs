@@ -105,6 +105,9 @@ var webRtcEnableConnectorBridge = !bool.TryParse(builder.Configuration["HIDBRIDG
     || parsedWebRtcEnableConnectorBridge;
 var webRtcRequireMediaReady = bool.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY"], out var parsedWebRtcRequireMediaReady)
     && parsedWebRtcRequireMediaReady;
+var webRtcPeerStaleAfterSec = int.TryParse(builder.Configuration["HIDBRIDGE_WEBRTC_PEER_STALE_AFTER_SEC"], out var parsedWebRtcPeerStaleAfterSec)
+    ? parsedWebRtcPeerStaleAfterSec
+    : 15;
 var transportFallbackToDefaultOnWebRtcError = !bool.TryParse(builder.Configuration["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"], out var parsedTransportFallbackToDefaultOnWebRtcError)
     || parsedTransportFallbackToDefaultOnWebRtcError;
 
@@ -147,6 +150,10 @@ builder.Services.AddSingleton(new WebRtcTransportRuntimeOptions
 {
     RequireDataChannelCapability = webRtcRequireCapability,
     EnableConnectorBridge = webRtcEnableConnectorBridge,
+});
+builder.Services.AddSingleton(new WebRtcCommandRelayOptions
+{
+    PeerStaleAfterSec = Math.Clamp(webRtcPeerStaleAfterSec, 1, 3600),
 });
 builder.Services.AddSingleton(new DispatchCommandRuntimeOptions
 {
@@ -254,6 +261,7 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     WebRtcRequireCapability = webRtcRequireCapability,
     WebRtcEnableConnectorBridge = webRtcEnableConnectorBridge,
     WebRtcRequireMediaReady = webRtcRequireMediaReady,
+    WebRtcPeerStaleAfterSec = Math.Clamp(webRtcPeerStaleAfterSec, 1, 3600),
     TransportFallbackToDefaultOnWebRtcError = transportFallbackToDefaultOnWebRtcError,
     AgentId = agentId,
     EndpointId = endpointId,

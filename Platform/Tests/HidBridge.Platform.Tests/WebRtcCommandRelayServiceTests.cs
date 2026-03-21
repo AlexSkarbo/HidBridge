@@ -157,4 +157,35 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.NotNull(ack);
         Assert.Equal(CommandStatus.Applied, ack!.Status);
     }
+
+    [Fact]
+    public async Task HasOnlinePeer_ReturnsFalse_WhenPeerHeartbeatIsStale()
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var service = new WebRtcCommandRelayService(
+            new WebRtcCommandRelayOptions
+            {
+                PeerStaleAfterSec = 5,
+            },
+            clock: () => nowUtc);
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        _ = await service.MarkPeerOnlineAsync(
+            "session-stale",
+            "peer-1",
+            "endpoint-1",
+            new Dictionary<string, string> { ["state"] = "Connected" },
+            cancellationToken);
+
+        Assert.True(service.HasOnlinePeer("session-stale", "endpoint-1"));
+
+        nowUtc = nowUtc.AddSeconds(7);
+        Assert.False(service.HasOnlinePeer("session-stale", "endpoint-1"));
+
+        var metrics = await service.GetSessionMetricsAsync("session-stale", "endpoint-1", cancellationToken);
+        Assert.Equal("0", metrics["onlinePeerCount"]?.ToString());
+        Assert.Equal("Stale", metrics["lastPeerState"]?.ToString());
+        Assert.Equal("peer_stale_timeout", metrics["lastPeerFailureReason"]?.ToString());
+        Assert.Equal("True", metrics["lastPeerIsStale"]?.ToString());
+    }
 }

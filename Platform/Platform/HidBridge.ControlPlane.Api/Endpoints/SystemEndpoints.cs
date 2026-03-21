@@ -77,6 +77,8 @@ public static class SystemEndpoints
             {
                 runtimeSettings.WebRtcRequireCapability,
                 runtimeSettings.WebRtcEnableConnectorBridge,
+                runtimeSettings.WebRtcRequireMediaReady,
+                runtimeSettings.WebRtcPeerStaleAfterSec,
                 runtimeSettings.TransportFallbackToDefaultOnWebRtcError,
             },
             runtimeSettings.AgentId,

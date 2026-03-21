@@ -26,6 +26,8 @@ param(
     [string]$CommandAction = "keyboard.text",
     [string]$CommandText = "",
     [int]$TimeoutMs = 8000,
+    [int]$CommandAttempts = 3,
+    [int]$CommandRetryDelayMs = 750,
     [switch]$SkipControlLeaseRequest,
     [int]$LeaseSeconds = 120,
     [string]$OutputJsonPath = "Platform/.logs/webrtc-edge-agent-smoke.result.json"
@@ -311,6 +313,32 @@ function ConvertTo-NullableInt {
     }
 
     return $null
+}
+
+# Returns $true when command result should be retried due to transient transport instability.
+function Test-RetryableSmokeCommandResult {
+    param([object]$CommandResult)
+
+    if ($null -eq $CommandResult) {
+        return $false
+    }
+
+    $status = [string](Get-PropertyValue -InputObject $CommandResult -Name "status")
+    if ([string]::Equals($status, "Timeout", [StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    if (-not [string]::Equals($status, "Rejected", [StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    $error = Get-PropertyValue -InputObject $CommandResult -Name "error"
+    $errorCode = [string](Get-PropertyValue -InputObject $error -Name "code")
+    if ([string]::IsNullOrWhiteSpace($errorCode)) {
+        return $false
+    }
+
+    return $errorCode.StartsWith("E_TRANSPORT_", [StringComparison]::OrdinalIgnoreCase)
 }
 
 # Polls server-side readiness endpoint (with transport-health fallback for older API builds).
@@ -699,44 +727,91 @@ else {
     $transportReadiness = $null
 }
 
-$commandId = "cmd-webrtc-smoke-" + [DateTimeOffset]::UtcNow.ToString("HHmmss")
 $effectiveText = if ([string]::IsNullOrWhiteSpace($CommandText)) { "hello webrtc $([DateTimeOffset]::UtcNow.ToString('HH:mm:ss'))" } else { $CommandText }
-$commandBody = @{
-    commandId = $commandId
-    sessionId = $sessionId
-    channel = "Hid"
-    action = $CommandAction
-    args = @{
-        text = $effectiveText
-        transportProvider = "webrtc-datachannel"
-        recipientPeerId = $peerId
-        participantId = "owner:$effectivePrincipalId"
-        principalId = $effectivePrincipalId
-    }
-    timeoutMs = [Math]::Max(1000, $TimeoutMs)
-    idempotencyKey = "idem-$commandId"
-    tenantId = $effectiveTenantId
-    organizationId = $effectiveOrganizationId
-}
-
-try {
-    $commandResult = Invoke-SmokeJson `
-        -Method "POST" `
-        -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/commands" `
-        -Headers $authHeaders `
-        -Body $commandBody `
-        -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
-}
-catch {
-    $statusCode = Get-HttpStatusCode -Exception $_.Exception
-    if ($statusCode -eq 404) {
-        throw "WebRTC edge-agent smoke command returned 404 for session '$sessionId'. Re-run webrtc-stack and retry."
+$maxCommandAttempts = [Math]::Max(1, $CommandAttempts)
+$effectiveCommandRetryDelayMs = [Math]::Max(100, $CommandRetryDelayMs)
+$commandAttemptsLog = [System.Collections.Generic.List[object]]::new()
+$commandResult = $null
+$commandId = ""
+$status = ""
+for ($attempt = 1; $attempt -le $maxCommandAttempts; $attempt++) {
+    $commandId = "cmd-webrtc-smoke-" + [DateTimeOffset]::UtcNow.ToString("HHmmssfff")
+    $commandBody = @{
+        commandId = $commandId
+        sessionId = $sessionId
+        channel = "Hid"
+        action = $CommandAction
+        args = @{
+            text = $effectiveText
+            transportProvider = "webrtc-datachannel"
+            recipientPeerId = $peerId
+            participantId = "owner:$effectivePrincipalId"
+            principalId = $effectivePrincipalId
+        }
+        timeoutMs = [Math]::Max(1000, $TimeoutMs)
+        idempotencyKey = "idem-$commandId"
+        tenantId = $effectiveTenantId
+        organizationId = $effectiveOrganizationId
     }
 
-    throw
+    try {
+        $attemptResult = Invoke-SmokeJson `
+            -Method "POST" `
+            -Uri "$($ApiBaseUrl.TrimEnd('/'))/api/v1/sessions/$([Uri]::EscapeDataString($sessionId))/commands" `
+            -Headers $authHeaders `
+            -Body $commandBody `
+            -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+    }
+    catch {
+        $statusCode = Get-HttpStatusCode -Exception $_.Exception
+        if ($statusCode -eq 404) {
+            throw "WebRTC edge-agent smoke command returned 404 for session '$sessionId'. Re-run webrtc-stack and retry."
+        }
+
+        throw
+    }
+
+    $attemptStatus = [string](Get-PropertyValue -InputObject $attemptResult -Name "status")
+    $commandAttemptsLog.Add([pscustomobject]@{
+        attempt = $attempt
+        commandId = $commandId
+        status = $attemptStatus
+        reportedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
+    }) | Out-Null
+
+    $commandResult = $attemptResult
+    $status = $attemptStatus
+    if ([string]::Equals($attemptStatus, "Applied", [StringComparison]::OrdinalIgnoreCase)) {
+        break
+    }
+
+    if ($attempt -ge $maxCommandAttempts -or -not (Test-RetryableSmokeCommandResult -CommandResult $attemptResult)) {
+        break
+    }
+
+    Write-Warning "Smoke command attempt #$attempt returned '$attemptStatus'. Rechecking transport readiness before retry."
+    if (-not $SkipTransportHealthCheck) {
+        try {
+            $transportReadiness = Wait-RelayTransportReady `
+                -ApiBaseUrl $ApiBaseUrl `
+                -SessionId $sessionId `
+                -Headers $authHeaders `
+                -Attempts ([Math]::Max(1, $TransportHealthAttempts)) `
+                -DelayMs ([Math]::Max(100, $TransportHealthDelayMs)) `
+                -TimeoutSec ([Math]::Max(1, $RequestTimeoutSec))
+        }
+        catch {
+            Write-Warning "Transport readiness re-check before retry failed: $($_.Exception.Message)"
+        }
+    }
+
+    Start-Sleep -Milliseconds $effectiveCommandRetryDelayMs
 }
 
-$status = [string]$commandResult.status
+if ($null -eq $commandResult) {
+    throw "WebRTC edge-agent smoke did not produce command result."
+}
+
 $summary = [pscustomobject]@{
     apiBaseUrl = $ApiBaseUrl
     controlHealthUrl = $ControlHealthUrl
@@ -748,6 +823,8 @@ $summary = [pscustomobject]@{
     commandAction = $CommandAction
     commandStatus = $status
     commandResponse = $commandResult
+    commandAttemptsConfigured = $maxCommandAttempts
+    commandAttempts = $commandAttemptsLog
     transportReadiness = $transportReadiness
 }
 
@@ -770,6 +847,10 @@ Write-Host "Session:  $sessionId"
 Write-Host "Peer:     $peerId"
 Write-Host "Command:  $commandId"
 Write-Host "Result:   $status"
+if ($commandAttemptsLog.Count -gt 1) {
+    $attemptSummary = ($commandAttemptsLog | ForEach-Object { "#$($_.attempt)=$($_.status)" }) -join ", "
+    Write-Host "Attempts: $attemptSummary"
+}
 if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
     Write-Host "Summary:  $OutputJsonPath"
 }
