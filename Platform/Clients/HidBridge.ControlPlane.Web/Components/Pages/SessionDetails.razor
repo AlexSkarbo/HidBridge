@@ -333,6 +333,30 @@
                             <span class="hid-field-label">@T["CommandShortcutLabel"]</span>
                             <input class="hid-input" @bind="_demoShortcut" />
                         </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandMouseDxLabel"]</span>
+                            <input class="hid-input" type="number" @bind="_demoMouseDx" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandMouseDyLabel"]</span>
+                            <input class="hid-input" type="number" @bind="_demoMouseDy" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandMouseWheelLabel"]</span>
+                            <input class="hid-input" type="number" @bind="_demoMouseWheelDelta" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandMouseButtonLabel"]</span>
+                            <input class="hid-input" @bind="_demoMouseButton" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandKeyboardUsageLabel"]</span>
+                            <input class="hid-input" type="number" min="0" max="255" @bind="_demoKeyboardUsage" />
+                        </label>
+                        <label class="hid-field">
+                            <span class="hid-field-label">@T["CommandKeyboardModifiersLabel"]</span>
+                            <input class="hid-input" type="number" min="0" max="255" @bind="_demoKeyboardModifiers" />
+                        </label>
                     </div>
 
                     <div class="hid-candidate-stack">
@@ -398,6 +422,91 @@
                                     <button class="hid-button-secondary hid-button-sm"
                                             disabled="@_busy"
                                             @onclick="SendDemoMouseClickCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioMouseWheelTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioMouseWheelHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioMouseWheelId)">@GetScenarioBadgeLabel(CommandScenarioMouseWheelId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoMouseWheelCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioMouseButtonDownTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioMouseButtonDownHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioMouseButtonDownId)">@GetScenarioBadgeLabel(CommandScenarioMouseButtonDownId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoMouseButtonDownCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioMouseButtonUpTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioMouseButtonUpHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioMouseButtonUpId)">@GetScenarioBadgeLabel(CommandScenarioMouseButtonUpId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoMouseButtonUpCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioKeyboardPressTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioKeyboardPressHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioKeyboardPressId)">@GetScenarioBadgeLabel(CommandScenarioKeyboardPressId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoKeyboardPressCommandAsync">
+                                        @T["RunDemoScenario"]
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hid-candidate-card">
+                            <div class="hid-candidate-card-header">
+                                <div>
+                                    <div class="hid-candidate-title">@T["CommandScenarioKeyboardResetTitle"]</div>
+                                    <div class="hid-list-subtitle">@T["CommandScenarioKeyboardResetHelp"]</div>
+                                </div>
+                                <div class="hid-candidate-actions">
+                                    <span class="@GetScenarioBadgeClass(CommandScenarioKeyboardResetId)">@GetScenarioBadgeLabel(CommandScenarioKeyboardResetId)</span>
+                                    <button class="hid-button-secondary hid-button-sm"
+                                            disabled="@_busy"
+                                            @onclick="SendDemoKeyboardResetCommandAsync">
                                         @T["RunDemoScenario"]
                                     </button>
                                 </div>
@@ -664,6 +773,12 @@
     private CommandAckViewModel? _lastCommandAck;
     private string _demoCommandText = "Hello from MicroMeet";
     private string _demoShortcut = "CTRL+ALT+M";
+    private int _demoMouseDx = 24;
+    private int _demoMouseDy = 12;
+    private int _demoMouseWheelDelta = 1;
+    private string _demoMouseButton = "left";
+    private int _demoKeyboardUsage = 4;
+    private int _demoKeyboardModifiers;
     private readonly Dictionary<string, CommandScenarioSnapshot> _commandScenarioSnapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<CommandAuditTrailEntry> _commandAuditTrail = [];
     private const int CommandAuditTrailCapacity = 6;
@@ -671,6 +786,11 @@
     private const string CommandScenarioShortcutId = "shortcut";
     private const string CommandScenarioMouseId = "mouse";
     private const string CommandScenarioMouseClickId = "mouse-click";
+    private const string CommandScenarioMouseWheelId = "mouse-wheel";
+    private const string CommandScenarioMouseButtonDownId = "mouse-button-down";
+    private const string CommandScenarioMouseButtonUpId = "mouse-button-up";
+    private const string CommandScenarioKeyboardPressId = "keyboard-press";
+    private const string CommandScenarioKeyboardResetId = "keyboard-reset";
     private static readonly string[] SessionRoles = ["Observer", "Controller", "Presenter"];
     private static readonly TimeSpan RecoveryStatePollInterval = TimeSpan.FromSeconds(3);
     private CancellationTokenSource? _recoveryPollingCts;
@@ -1010,8 +1130,8 @@
             T["CommandScenarioMouseTitle"],
             "mouse.move",
             string.Format(T["CommandDispatchedMessage"], "mouse.move"),
-            new KeyValuePair<string, object?>("dx", 24),
-            new KeyValuePair<string, object?>("dy", 12));
+            new KeyValuePair<string, object?>("dx", _demoMouseDx),
+            new KeyValuePair<string, object?>("dy", _demoMouseDy));
 
     private Task SendDemoMouseClickCommandAsync()
         => DispatchDemoCommandAsync(
@@ -1019,8 +1139,50 @@
             T["CommandScenarioMouseClickTitle"],
             "mouse.click",
             string.Format(T["CommandDispatchedMessage"], "mouse.click"),
-            new KeyValuePair<string, object?>("button", "left"),
+            new KeyValuePair<string, object?>("button", NormalizeMouseButton(_demoMouseButton)),
             new KeyValuePair<string, object?>("holdMs", 25));
+
+    private Task SendDemoMouseWheelCommandAsync()
+        => DispatchDemoCommandAsync(
+            CommandScenarioMouseWheelId,
+            T["CommandScenarioMouseWheelTitle"],
+            "mouse.wheel",
+            string.Format(T["CommandDispatchedMessage"], "mouse.wheel"),
+            new KeyValuePair<string, object?>("delta", _demoMouseWheelDelta));
+
+    private Task SendDemoMouseButtonDownCommandAsync()
+        => DispatchDemoCommandAsync(
+            CommandScenarioMouseButtonDownId,
+            T["CommandScenarioMouseButtonDownTitle"],
+            "mouse.button",
+            string.Format(T["CommandDispatchedMessage"], "mouse.button"),
+            new KeyValuePair<string, object?>("button", NormalizeMouseButton(_demoMouseButton)),
+            new KeyValuePair<string, object?>("down", true));
+
+    private Task SendDemoMouseButtonUpCommandAsync()
+        => DispatchDemoCommandAsync(
+            CommandScenarioMouseButtonUpId,
+            T["CommandScenarioMouseButtonUpTitle"],
+            "mouse.button",
+            string.Format(T["CommandDispatchedMessage"], "mouse.button"),
+            new KeyValuePair<string, object?>("button", NormalizeMouseButton(_demoMouseButton)),
+            new KeyValuePair<string, object?>("down", false));
+
+    private Task SendDemoKeyboardPressCommandAsync()
+        => DispatchDemoCommandAsync(
+            CommandScenarioKeyboardPressId,
+            T["CommandScenarioKeyboardPressTitle"],
+            "keyboard.press",
+            string.Format(T["CommandDispatchedMessage"], "keyboard.press"),
+            new KeyValuePair<string, object?>("usage", ClampByte(_demoKeyboardUsage)),
+            new KeyValuePair<string, object?>("modifiers", ClampByte(_demoKeyboardModifiers)));
+
+    private Task SendDemoKeyboardResetCommandAsync()
+        => DispatchDemoCommandAsync(
+            CommandScenarioKeyboardResetId,
+            T["CommandScenarioKeyboardResetTitle"],
+            "keyboard.reset",
+            string.Format(T["CommandDispatchedMessage"], "keyboard.reset"));
 
     private async Task DispatchDemoCommandAsync(
         string scenarioId,
@@ -1191,6 +1353,22 @@
             OperatorRoles = Identity.OperatorRoles,
         };
     }
+
+    private static string NormalizeMouseButton(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "left";
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized is "left" or "right" or "middle"
+            ? normalized
+            : "left";
+    }
+
+    private static byte ClampByte(int value)
+        => (byte)Math.Clamp(value, byte.MinValue, byte.MaxValue);
 
     private string GetScenarioBadgeLabel(string scenarioId)
         => _commandScenarioSnapshots.TryGetValue(scenarioId, out var snapshot)
