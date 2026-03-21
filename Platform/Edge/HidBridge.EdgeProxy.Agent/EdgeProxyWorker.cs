@@ -38,6 +38,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     private string _accessToken;
     private string _refreshToken;
     private DateTimeOffset _accessTokenExpiresAtUtc = DateTimeOffset.MaxValue;
+    private string _effectiveSessionId;
     private bool _peerOnline;
     private EdgeProxyLifecycleState _lifecycleState = EdgeProxyLifecycleState.Starting;
     private DateTimeOffset _lifecycleStateChangedAtUtc = DateTimeOffset.UtcNow;
@@ -60,6 +61,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         _logger = logger;
         _accessToken = _options.AccessToken;
         _refreshToken = _options.TokenRefreshToken;
+        _effectiveSessionId = _options.SessionId;
         _callerHeaders = new(StringComparer.OrdinalIgnoreCase)
         {
             ["X-HidBridge-UserId"] = _options.PrincipalId,
@@ -81,9 +83,12 @@ public sealed class EdgeProxyWorker : BackgroundService
             await RotateAccessTokenAsync(preferRefreshToken: false, stoppingToken, force: true);
         }
 
+        await EnsureEffectiveSessionRouteAsync(stoppingToken);
+
         _logger.LogInformation(
-            "Edge proxy started. Session={SessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}",
+            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}",
             _options.SessionId,
+            _effectiveSessionId,
             _options.PeerId,
             _options.EndpointId,
             _options.GetCommandExecutorKind(),
@@ -219,7 +224,7 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         var heartbeat = new TransportHeartbeatMessageBody(
             Kind: TransportMessageKind.Heartbeat,
-            SessionId: _options.SessionId,
+            SessionId: _effectiveSessionId,
             PeerId: _options.PeerId,
             EndpointId: _options.EndpointId,
             PrincipalId: _options.PrincipalId,
@@ -227,7 +232,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         var payload = JsonSerializer.Serialize(heartbeat, JsonOptions);
 
         await SendAsync(HttpMethod.Post,
-            $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/signals",
+            $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/signals",
             new WebRtcSignalPublishBody(
                 Kind: WebRtcSignalKind.Heartbeat,
                 SenderPeerId: _options.PeerId,
@@ -235,7 +240,7 @@ public sealed class EdgeProxyWorker : BackgroundService
                 Payload: payload),
             cancellationToken);
 
-        var query = $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/signals?recipientPeerId={Uri.EscapeDataString(_options.PeerId)}&limit=20";
+        var query = $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/signals?recipientPeerId={Uri.EscapeDataString(_options.PeerId)}&limit=20";
         if (_lastSignalSequence.HasValue)
         {
             query += $"&afterSequence={_lastSignalSequence.Value}";
@@ -255,7 +260,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// </summary>
     private async Task PollAndProcessCommandsAsync(CancellationToken cancellationToken)
     {
-        var query = $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/commands?peerId={Uri.EscapeDataString(_options.PeerId)}&limit={_options.BatchLimit}";
+        var query = $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/commands?peerId={Uri.EscapeDataString(_options.PeerId)}&limit={_options.BatchLimit}";
         if (_lastCommandSequence.HasValue)
         {
             query += $"&afterSequence={_lastCommandSequence.Value}";
@@ -272,7 +277,7 @@ public sealed class EdgeProxyWorker : BackgroundService
 
             var ack = await ExecuteCommandAsync(envelope.Command, cancellationToken);
             using var ackResponse = await SendAsync(HttpMethod.Post,
-                $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/commands/{Uri.EscapeDataString(envelope.Command.CommandId)}/ack",
+                $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/commands/{Uri.EscapeDataString(envelope.Command.CommandId)}/ack",
                 ack,
                 cancellationToken,
                 allowNotFound: true);
@@ -597,7 +602,7 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         await SendAsync(
             HttpMethod.Post,
-            $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/media/streams",
+            $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/media/streams",
             new
             {
                 peerId = _options.PeerId,
@@ -642,7 +647,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
 
         await SendAsync(HttpMethod.Post,
-            $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(_options.PeerId)}/online",
+            $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(_options.PeerId)}/online",
             new WebRtcPeerPresenceBody(
                 EndpointId: _options.EndpointId,
                 Metadata: effectiveMetadata),
@@ -655,10 +660,156 @@ public sealed class EdgeProxyWorker : BackgroundService
     private async Task MarkPeerOfflineAsync(CancellationToken cancellationToken)
     {
         await SendAsync(HttpMethod.Post,
-            $"/api/v1/sessions/{Uri.EscapeDataString(_options.SessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(_options.PeerId)}/offline",
+            $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(_options.PeerId)}/offline",
             body: null,
             cancellationToken);
     }
+
+    /// <summary>
+    /// Ensures the agent is attached to an API-known session route before transport telemetry is published.
+    /// </summary>
+    private async Task EnsureEffectiveSessionRouteAsync(CancellationToken cancellationToken)
+    {
+        // First pass: ask API to resolve/reuse/create session route with the same policy used by smoke/UI.
+        var ensureBody = new SessionControlEnsureBody(
+            ParticipantId: $"owner:{_options.PrincipalId}",
+            RequestedBy: _options.PrincipalId,
+            EndpointId: _options.EndpointId,
+            Profile: SessionProfile.UltraLowLatency,
+            LeaseSeconds: 30,
+            Reason: "edge-proxy route ensure",
+            AutoCreateSessionIfMissing: true,
+            PreferLiveRelaySession: true,
+            TenantId: _options.TenantId,
+            OrganizationId: _options.OrganizationId,
+            OperatorRoles: ParseOperatorRoles(_options.OperatorRolesCsv));
+
+        try
+        {
+            using var response = await SendAsync(
+                HttpMethod.Post,
+                $"/api/v1/sessions/{Uri.EscapeDataString(_effectiveSessionId)}/control/ensure",
+                ensureBody,
+                cancellationToken,
+                allowNotFound: true);
+
+            if (response.StatusCode != HttpStatusCode.NotFound)
+            {
+                await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var ensureResult = await JsonSerializer.DeserializeAsync<SessionControlEnsureResultBody>(contentStream, JsonOptions, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(ensureResult?.EffectiveSessionId)
+                    && !string.Equals(_effectiveSessionId, ensureResult.EffectiveSessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation(
+                        "Edge proxy session route switched by control ensure: {RequestedSessionId} -> {EffectiveSessionId}.",
+                        _effectiveSessionId,
+                        ensureResult.EffectiveSessionId);
+                    _effectiveSessionId = ensureResult.EffectiveSessionId;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep runtime alive: fallback path below creates route explicitly when needed.
+            _logger.LogWarning(ex, "Control ensure failed for session {SessionId}. Falling back to explicit session existence check.", _effectiveSessionId);
+        }
+
+        await EnsureSessionExistsAsync(_effectiveSessionId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Verifies that session route exists in API storage and creates it when missing.
+    /// </summary>
+    private async Task EnsureSessionExistsAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        using var getResponse = await SendAsync(
+            HttpMethod.Get,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}",
+            body: null,
+            cancellationToken,
+            allowNotFound: true);
+        if (getResponse.StatusCode != HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        _logger.LogWarning("Session route {SessionId} was not found in API store. Creating route explicitly.", sessionId);
+        var targetAgentId = await ResolveTargetAgentIdAsync(cancellationToken);
+        var openBody = new SessionOpenBody(
+            SessionId: sessionId,
+            Profile: SessionProfile.UltraLowLatency,
+            RequestedBy: _options.PrincipalId,
+            TargetAgentId: targetAgentId,
+            TargetEndpointId: _options.EndpointId,
+            ShareMode: SessionRole.Owner,
+            TenantId: _options.TenantId,
+            OrganizationId: _options.OrganizationId,
+            OperatorRoles: ParseOperatorRoles(_options.OperatorRolesCsv),
+            TransportProvider: "WebRtcDataChannel");
+
+        _ = await SendAsync(
+            HttpMethod.Post,
+            "/api/v1/sessions",
+            openBody,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves target agent id for configured endpoint from inventory projection.
+    /// </summary>
+    private async Task<string> ResolveTargetAgentIdAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await SendAsync(
+                HttpMethod.Get,
+                "/api/v1/dashboards/inventory",
+                body: null,
+                cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (json.RootElement.TryGetProperty("endpoints", out var endpoints)
+                && endpoints.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var endpoint in endpoints.EnumerateArray())
+                {
+                    var endpointId = endpoint.TryGetProperty("endpointId", out var endpointIdElement)
+                        ? endpointIdElement.GetString()
+                        : null;
+                    if (!string.Equals(endpointId, _options.EndpointId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var agentId = endpoint.TryGetProperty("agentId", out var agentIdElement)
+                        ? agentIdElement.GetString()
+                        : null;
+                    if (!string.IsNullOrWhiteSpace(agentId))
+                    {
+                        return agentId;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve target agent id from inventory for endpoint {EndpointId}.", _options.EndpointId);
+        }
+
+        // Fallback keeps session creation unblocked; command-route validation later will reveal invalid mapping.
+        return $"agent_hidbridge_uart_{_options.EndpointId}";
+    }
+
+    /// <summary>
+    /// Converts CSV caller roles to immutable role list expected by API bodies.
+    /// </summary>
+    private static IReadOnlyList<string> ParseOperatorRoles(string csv)
+        => string.IsNullOrWhiteSpace(csv)
+            ? []
+            : csv.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(static role => !string.IsNullOrWhiteSpace(role))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
     /// <summary>
     /// Requests a new OIDC token by username/password credentials.

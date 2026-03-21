@@ -295,29 +295,35 @@
                 }
             }
 
-            var sessionId = BuildSessionId(endpoint.EndpointId);
-            var opened = await ApiClient.OpenSessionAsync(new SessionOpenRequestViewModel
-            {
-                SessionId = sessionId,
-                Profile = "Balanced",
-                RequestedBy = Identity.PrincipalId,
-                TargetAgentId = endpoint.AgentId ?? string.Empty,
-                TargetEndpointId = endpoint.EndpointId,
-                ShareMode = "Owner",
-                TenantId = Identity.TenantId,
-                OrganizationId = Identity.OrganizationId,
-                OperatorRoles = Identity.OperatorRoles,
-            });
+            // Always resolve room ownership through server-side control ensure so Launch Room can
+            // reuse a live WebRTC room on the endpoint instead of opening a desynchronized room id.
+            var requestedSessionId = BuildSessionId(endpoint.EndpointId);
+            var ensured = await ApiClient.EnsureControlAsync(
+                requestedSessionId,
+                new SessionControlEnsureRequestViewModel
+                {
+                    ParticipantId = BuildOwnerParticipantId(Identity.PrincipalId),
+                    RequestedBy = Identity.PrincipalId,
+                    EndpointId = endpoint.EndpointId,
+                    Profile = "Balanced",
+                    LeaseSeconds = 30,
+                    Reason = $"room launch by {Identity.PrincipalId}",
+                    AutoCreateSessionIfMissing = true,
+                    PreferLiveRelaySession = true,
+                    TenantId = Identity.TenantId,
+                    OrganizationId = Identity.OrganizationId,
+                    OperatorRoles = Identity.OperatorRoles,
+                });
 
-            if (opened is null)
+            if (ensured is null || string.IsNullOrWhiteSpace(ensured.EffectiveSessionId))
             {
                 _error = T["SessionStartFailed"];
                 return;
             }
 
             await LoadDashboardAsync();
-            _actionMessage = string.Format(T["SessionStartedMessage"], opened.SessionId);
-            Navigation.NavigateTo($"/sessions/{Uri.EscapeDataString(opened.SessionId)}");
+            _actionMessage = string.Format(T["SessionStartedMessage"], ensured.EffectiveSessionId);
+            Navigation.NavigateTo($"/sessions/{Uri.EscapeDataString(ensured.EffectiveSessionId)}");
         }
         catch (ControlPlaneApiUnavailableException exception)
         {
@@ -456,6 +462,9 @@
         var sessionId = $"room-{endpointSegment}-{Guid.NewGuid():N}";
         return sessionId.Length <= 64 ? sessionId : sessionId[..64];
     }
+
+    private static string BuildOwnerParticipantId(string principalId)
+        => $"owner:{principalId}";
 
     private static bool CanStartFromEndpoint(InventoryEndpointCardViewModel endpoint)
         => string.IsNullOrWhiteSpace(endpoint.ActiveSessionId)
