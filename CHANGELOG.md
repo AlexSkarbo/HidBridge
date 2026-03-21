@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-03-21 (pr-b media runtime scaffold: ffmpeg+dcd preview engine, default path unchanged)
+
+Summary:
+
+- Added pluggable edge media runtime engine abstraction to decouple media-process orchestration from command transport path.
+- Added default no-op media runtime engine (`MediaEngine=none`) to preserve existing production behavior.
+- Added preview ffmpeg+dcd runtime scaffold (`MediaEngine=ffmpeg-dcd`) with bounded process lifecycle handling and diagnostics snapshots.
+- Wired media runtime startup/shutdown into edge worker lifecycle and surfaced runtime telemetry in peer metadata + media stream snapshot payloads.
+- Added regression coverage to guarantee Applied ACK relay path remains unchanged when preview media engine is enabled without runtime binaries configured.
+
+Detailed notes:
+
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/Media/IEdgeMediaRuntimeEngine.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/Media/NoOpMediaRuntimeEngine.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/Media/FfmpegDataChannelDotNetMediaRuntimeEngine.cs` (new)
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyWorker.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyOptionsTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyWorkerLifecycleTests.cs`
+
 ## 2026-03-21 (pr-next-3 dcd direct signal command path with optional relay fallback)
 
 Summary:

@@ -338,6 +338,61 @@ public sealed class EdgeProxyWorkerLifecycleTests
     }
 
     /// <summary>
+    /// Ensures preview ffmpeg media-engine process orchestration does not break default relay command execution path.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_MediaEngineFfmpegPreview_KeepsAppliedAckBehavior()
+    {
+        var handler = new RelayApiHandler(
+            commandEnvelope: new
+            {
+                sequence = 1,
+                command = new
+                {
+                    commandId = "cmd-media-engine-preview",
+                    action = "keyboard.text",
+                    timeoutMs = 5000,
+                    args = new Dictionary<string, object?> { ["text"] = "hello" },
+                },
+            });
+        var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:18093", UriKind.Absolute),
+        };
+        var factory = new StaticHttpClientFactory(client);
+        var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(9.0));
+        var worker = CreateWorker(factory, hidAdapter, options => options.MediaEngine = "ffmpeg-dcd");
+
+        try
+        {
+            await worker.StartAsync(TestContext.Current.CancellationToken);
+
+            var ackPayload = await handler.AckPayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"status\":\"Applied\"", ackPayload, StringComparison.Ordinal);
+            Assert.Contains("\"transportRelayMode\":1", ackPayload, StringComparison.Ordinal);
+
+            var onlinePayload = await handler.OnlinePayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"mediaState\":\"Ready\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaRuntimeEngine\":\"FfmpegDataChannelDotNet\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaRuntimeState\":\"NoExecutableConfigured\"", onlinePayload, StringComparison.Ordinal);
+
+            var mediaPayload = await handler.MediaPayloadTask.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            Assert.Contains("\"mediaRuntimeEngine\":\"FfmpegDataChannelDotNet\"", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaRuntimeState\":\"NoExecutableConfigured\"", mediaPayload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await worker.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Ensures command failures are mapped to relay Rejected ACK with normalized error payload.
     /// </summary>
     [Fact]

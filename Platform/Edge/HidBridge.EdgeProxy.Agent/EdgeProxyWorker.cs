@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net;
 using HidBridge.Edge.Abstractions;
+using HidBridge.EdgeProxy.Agent.Media;
 using HidBridge.EdgeProxy.Agent.Transport;
 using HidBridge.Contracts;
 using Microsoft.Extensions.Hosting;
@@ -33,6 +34,7 @@ public sealed class EdgeProxyWorker : BackgroundService
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
     private readonly IEdgeControlTransportEngine _controlTransportEngine;
+    private readonly IEdgeMediaRuntimeEngine _mediaRuntimeEngine;
     private readonly Dictionary<string, string> _callerHeaders;
     private readonly SemaphoreSlim _tokenRefreshGate = new(1, 1);
     private DateTimeOffset _lastHeartbeatAtUtc = DateTimeOffset.MinValue;
@@ -63,6 +65,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         _options = options.Value;
         _logger = logger;
         _controlTransportEngine = CreateControlTransportEngine(_options.GetTransportEngineKind(), _options, logger);
+        _mediaRuntimeEngine = CreateMediaRuntimeEngine(_options.GetMediaEngineKind(), _options, logger);
         _accessToken = _options.AccessToken;
         _refreshToken = _options.TokenRefreshToken;
         _effectiveSessionId = _options.SessionId;
@@ -89,15 +92,32 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         await EnsureEffectiveSessionRouteAsync(stoppingToken);
 
+        try
+        {
+            await _mediaRuntimeEngine.StartAsync(
+                new EdgeMediaRuntimeContext(
+                    SessionId: _effectiveSessionId,
+                    PeerId: _options.PeerId,
+                    EndpointId: _options.EndpointId,
+                    StreamId: _options.MediaStreamId,
+                    Source: _options.MediaSource),
+                stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to start media runtime engine. Worker will continue with probe-driven media readiness path.");
+        }
+
         _logger.LogInformation(
-            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}, TransportEngine={TransportEngine}",
+            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}, TransportEngine={TransportEngine}, MediaEngine={MediaEngine}",
             _options.SessionId,
             _effectiveSessionId,
             _options.PeerId,
             _options.EndpointId,
             _options.GetCommandExecutorKind(),
             _options.ControlWsUrl,
-            _options.GetTransportEngineKind());
+            _options.GetTransportEngineKind(),
+            _options.GetMediaEngineKind());
 
         var consecutiveFailures = 0;
         while (!stoppingToken.IsCancellationRequested)
@@ -191,6 +211,15 @@ public sealed class EdgeProxyWorker : BackgroundService
             {
                 _logger.LogWarning(ex, "Failed to mark peer offline.");
             }
+        }
+
+        try
+        {
+            await _mediaRuntimeEngine.StopAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to stop media runtime engine cleanly.");
         }
     }
 
@@ -459,8 +488,9 @@ public sealed class EdgeProxyWorker : BackgroundService
             StringComparer.OrdinalIgnoreCase);
 
         var mediaSnapshot = await ReadMediaSnapshotSafeAsync(cancellationToken);
-        await PublishMediaStreamSnapshotAsync(mediaSnapshot, cancellationToken);
-        foreach (var pair in BuildMediaMetadata(mediaSnapshot))
+        var mediaRuntimeSnapshot = await ReadMediaRuntimeSnapshotSafeAsync(cancellationToken);
+        await PublishMediaStreamSnapshotAsync(mediaSnapshot, mediaRuntimeSnapshot, cancellationToken);
+        foreach (var pair in BuildMediaMetadata(mediaSnapshot, mediaRuntimeSnapshot))
         {
             metadata[pair.Key] = pair.Value;
         }
@@ -505,6 +535,30 @@ public sealed class EdgeProxyWorker : BackgroundService
                 Metrics: new Dictionary<string, object?>
                 {
                     ["probeErrorType"] = ex.GetType().Name,
+                });
+        }
+    }
+
+    /// <summary>
+    /// Reads media runtime-engine snapshot and converts runtime failures into deterministic diagnostics payloads.
+    /// </summary>
+    private async Task<EdgeMediaRuntimeSnapshot> ReadMediaRuntimeSnapshotSafeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _mediaRuntimeEngine.GetSnapshotAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read media runtime snapshot.");
+            return new EdgeMediaRuntimeSnapshot(
+                IsRunning: false,
+                State: "SnapshotFailed",
+                ReportedAtUtc: DateTimeOffset.UtcNow,
+                FailureReason: ex.Message,
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["runtimeErrorType"] = ex.GetType().Name,
                 });
         }
     }
@@ -583,13 +637,19 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// <summary>
     /// Projects media snapshot fields into peer metadata consumed by relay health/readiness services.
     /// </summary>
-    private static IReadOnlyDictionary<string, string> BuildMediaMetadata(EdgeMediaReadinessSnapshot snapshot)
+    private IReadOnlyDictionary<string, string> BuildMediaMetadata(
+        EdgeMediaReadinessSnapshot snapshot,
+        EdgeMediaRuntimeSnapshot runtimeSnapshot)
     {
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["mediaReady"] = snapshot.IsReady ? "true" : "false",
             ["mediaState"] = string.IsNullOrWhiteSpace(snapshot.State) ? "Unknown" : snapshot.State,
             ["mediaReportedAtUtc"] = snapshot.ReportedAtUtc.ToString("O"),
+            ["mediaRuntimeEngine"] = _options.GetMediaEngineKind().ToString(),
+            ["mediaRuntimeRunning"] = runtimeSnapshot.IsRunning ? "true" : "false",
+            ["mediaRuntimeState"] = string.IsNullOrWhiteSpace(runtimeSnapshot.State) ? "Unknown" : runtimeSnapshot.State,
+            ["mediaRuntimeReportedAtUtc"] = runtimeSnapshot.ReportedAtUtc.ToString("O"),
         };
 
         if (!string.IsNullOrWhiteSpace(snapshot.FailureReason))
@@ -605,6 +665,11 @@ public sealed class EdgeProxyWorker : BackgroundService
         if (!string.IsNullOrWhiteSpace(snapshot.Source))
         {
             metadata["mediaSource"] = snapshot.Source;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.PlaybackUrl))
+        {
+            metadata["mediaPlaybackUrl"] = snapshot.PlaybackUrl;
         }
 
         if (!string.IsNullOrWhiteSpace(snapshot.StreamKind))
@@ -663,6 +728,29 @@ public sealed class EdgeProxyWorker : BackgroundService
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(runtimeSnapshot.FailureReason))
+        {
+            metadata["mediaRuntimeFailureReason"] = runtimeSnapshot.FailureReason;
+        }
+
+        if (runtimeSnapshot.Metrics is not null)
+        {
+            foreach (var pair in runtimeSnapshot.Metrics)
+            {
+                if (pair.Value is null)
+                {
+                    continue;
+                }
+
+                metadata[$"mediaRuntimeMetric.{pair.Key}"] = pair.Value switch
+                {
+                    string value => value,
+                    IFormattable value => value.ToString(null, CultureInfo.InvariantCulture),
+                    _ => pair.Value.ToString() ?? string.Empty,
+                };
+            }
+        }
+
         return metadata;
     }
 
@@ -683,9 +771,28 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     /// <summary>
+    /// Creates concrete media runtime engine according to configured mode.
+    /// </summary>
+    private static IEdgeMediaRuntimeEngine CreateMediaRuntimeEngine(
+        EdgeProxyMediaEngineKind mediaEngineKind,
+        EdgeProxyOptions options,
+        ILogger<EdgeProxyWorker> logger)
+    {
+        return mediaEngineKind switch
+        {
+            EdgeProxyMediaEngineKind.None => new NoOpMediaRuntimeEngine(),
+            EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet => new FfmpegDataChannelDotNetMediaRuntimeEngine(options, logger),
+            _ => throw new InvalidOperationException($"Unsupported media engine kind '{mediaEngineKind}'."),
+        };
+    }
+
+    /// <summary>
     /// Publishes media stream snapshot into the platform media layer for stream-level diagnostics.
     /// </summary>
-    private async Task PublishMediaStreamSnapshotAsync(EdgeMediaReadinessSnapshot snapshot, CancellationToken cancellationToken)
+    private async Task PublishMediaStreamSnapshotAsync(
+        EdgeMediaReadinessSnapshot snapshot,
+        EdgeMediaRuntimeSnapshot runtimeSnapshot,
+        CancellationToken cancellationToken)
     {
         var effectiveStreamId = string.IsNullOrWhiteSpace(snapshot.StreamId)
             ? _options.MediaStreamId
@@ -693,6 +800,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         var effectiveSource = string.IsNullOrWhiteSpace(snapshot.Source)
             ? _options.MediaSource
             : snapshot.Source;
+        var mergedMetrics = MergeMediaMetrics(snapshot.Metrics, runtimeSnapshot);
 
         await SendAsync(
             HttpMethod.Post,
@@ -707,12 +815,46 @@ public sealed class EdgeProxyWorker : BackgroundService
                 reportedAtUtc = snapshot.ReportedAtUtc,
                 failureReason = snapshot.FailureReason,
                 source = effectiveSource,
+                playbackUrl = snapshot.PlaybackUrl,
                 streamKind = snapshot.StreamKind,
                 video = snapshot.Video,
                 audio = snapshot.Audio,
-                metrics = snapshot.Metrics,
+                metrics = mergedMetrics,
             },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Merges probe metrics with media runtime diagnostics while keeping probe as source of truth for readiness.
+    /// </summary>
+    private IReadOnlyDictionary<string, object?> MergeMediaMetrics(
+        IReadOnlyDictionary<string, object?>? probeMetrics,
+        EdgeMediaRuntimeSnapshot runtimeSnapshot)
+    {
+        var merged = new Dictionary<string, object?>(
+            probeMetrics ?? new Dictionary<string, object?>(),
+            StringComparer.OrdinalIgnoreCase)
+        {
+            ["mediaRuntimeEngine"] = _options.GetMediaEngineKind().ToString(),
+            ["mediaRuntimeRunning"] = runtimeSnapshot.IsRunning,
+            ["mediaRuntimeState"] = runtimeSnapshot.State,
+            ["mediaRuntimeReportedAtUtc"] = runtimeSnapshot.ReportedAtUtc,
+        };
+
+        if (!string.IsNullOrWhiteSpace(runtimeSnapshot.FailureReason))
+        {
+            merged["mediaRuntimeFailureReason"] = runtimeSnapshot.FailureReason;
+        }
+
+        if (runtimeSnapshot.Metrics is not null)
+        {
+            foreach (var pair in runtimeSnapshot.Metrics)
+            {
+                merged[$"mediaRuntimeMetric.{pair.Key}"] = pair.Value;
+            }
+        }
+
+        return merged;
     }
 
     /// <summary>

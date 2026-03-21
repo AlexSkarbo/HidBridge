@@ -118,6 +118,47 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
+    public void IsValid_DefaultMediaEngine_UsesNone()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaEngine = string.Empty;
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(EdgeProxyMediaEngineKind.None, options.GetMediaEngineKind());
+    }
+
+    [Fact]
+    public void IsValid_FfmpegMediaEngine_IsAcceptedAsPreviewMode()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaEngine = "ffmpeg-dcd";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet, options.GetMediaEngineKind());
+    }
+
+    [Fact]
+    public void IsValid_RejectsUnknownMediaEngine()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaEngine = "unsupported-media";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("MediaEngine", error);
+    }
+
+    [Fact]
     public void IsValid_RejectsInvalidMediaHealthUrl()
     {
         var options = CreateBaselineOptions();
