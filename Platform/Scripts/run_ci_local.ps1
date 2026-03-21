@@ -8,6 +8,11 @@ param(
     [switch]$SkipBearerSmoke,
     [bool]$IncludeWebRtcEdgeAgentAcceptance = $true,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
+    [bool]$IncludeOpsSloSecurityVerify = $true,
+    [switch]$SkipOpsSloSecurityVerify,
+    [int]$OpsSloWindowMinutes = 60,
+    [switch]$OpsFailOnSloWarning,
+    [switch]$OpsFailOnSecurityWarning,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
     [switch]$AllowLegacyControlWs,
@@ -71,6 +76,31 @@ try {
         }
 
         Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Acceptance" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_webrtc_edge_agent_acceptance.ps1") -Parameters $webrtcAcceptanceParameters -StopOnFailure:$StopOnFailure
+    }
+
+    if (-not $IncludeOpsSloSecurityVerify -and -not $SkipOpsSloSecurityVerify) {
+        throw "Ops SLO + Security verify lane is required for CI gate. Set -SkipOpsSloSecurityVerify only for emergency/local override."
+    }
+
+    if ($IncludeOpsSloSecurityVerify -and -not $SkipOpsSloSecurityVerify) {
+        $opsVerifyParameters = @{
+            BaseUrl = "http://127.0.0.1:18093"
+            SloWindowMinutes = [Math]::Max(5, $OpsSloWindowMinutes)
+            AuthAuthority = $AuthAuthority
+            TokenClientId = "controlplane-smoke"
+            TokenScope = "openid profile email"
+            TokenUsername = "operator.smoke.admin"
+            TokenPassword = "ChangeMe123!"
+            RequireAuditTrailCategories = ($IncludeWebRtcEdgeAgentAcceptance -and -not $SkipWebRtcEdgeAgentAcceptance)
+        }
+        if ($OpsFailOnSloWarning) {
+            $opsVerifyParameters.FailOnSloWarning = $true
+        }
+        if ($OpsFailOnSecurityWarning) {
+            $opsVerifyParameters.FailOnSecurityWarning = $true
+        }
+
+        Invoke-LoggedScript -Results $results -Name "Ops SLO + Security Verify" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_ops_slo_security_verify.ps1") -Parameters $opsVerifyParameters -StopOnFailure:$StopOnFailure
     }
 }
 catch {

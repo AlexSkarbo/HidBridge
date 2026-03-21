@@ -78,6 +78,8 @@ services:
         condition: service_healthy
       hidbridge_identity:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       HIDBRIDGE_PERSISTENCE_PROVIDER: Sql
@@ -91,9 +93,14 @@ services:
       HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES: transport.webrtc.datachannel.v1@1.0
       HIDBRIDGE_UART_PASSIVE_HEALTH_MODE: "true"
       HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE: "true"
-      HIDBRIDGE_AUTH_ENABLED: "false"
-      HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK: "true"
+      HIDBRIDGE_AUTH_ENABLED: "true"
+      HIDBRIDGE_AUTH_AUTHORITY: http://host.docker.internal:18096/realms/hidbridge-dev
+      HIDBRIDGE_AUTH_AUDIENCE: ""
+      HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK: "false"
       HIDBRIDGE_AUTH_REQUIRE_HTTPS_METADATA: "false"
+      HIDBRIDGE_AUTH_BEARER_ONLY_PREFIXES: /api/v1/dashboards;/api/v1/projections;/api/v1/diagnostics;/api/v1/sessions
+      HIDBRIDGE_AUTH_CALLER_CONTEXT_REQUIRED_PREFIXES: /api/v1/sessions
+      HIDBRIDGE_AUTH_HEADER_FALLBACK_DISABLED_PATTERNS: /api/v1/sessions/*/control/request;/api/v1/sessions/*/control/grant;/api/v1/sessions/*/control/force-takeover;/api/v1/sessions/*/control/release;/api/v1/sessions/*/invitations/requests;/api/v1/sessions/*/invitations/*/approve;/api/v1/sessions/*/invitations/*/decline;/api/v1/sessions/*/participants;/api/v1/sessions/*/participants/*;/api/v1/sessions/*/shares;/api/v1/sessions/*/shares/*/accept;/api/v1/sessions/*/shares/*/reject;/api/v1/sessions/*/shares/*/revoke;/api/v1/sessions/*/commands
     ports:
       - "18093:18093"
     volumes:
@@ -108,19 +115,24 @@ services:
     depends_on:
       hidbridge_api:
         condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ControlPlaneApi__BaseUrl: http://hidbridge_api:18093
       ControlPlaneApi__OperatorPrincipalId: smoke-runner
-      ControlPlaneApi__PropagateIdentityHeaders: "true"
+      ControlPlaneApi__PropagateIdentityHeaders: "false"
       ControlPlaneApi__PropagateAccessToken: "true"
-      Identity__Enabled: "false"
+      Identity__Enabled: "true"
       Identity__ProviderDisplayName: Keycloak
-      Identity__Authority: http://hidbridge_identity:8080/realms/hidbridge-dev
+      Identity__Authority: http://host.docker.internal:18096/realms/hidbridge-dev
       Identity__ClientId: controlplane-web
       Identity__ClientSecret: hidbridge-web-dev-secret
       Identity__RequireHttpsMetadata: "false"
       Identity__DisablePushedAuthorization: "true"
+      Identity__Onboarding__KeycloakBaseUrl: http://hidbridge_identity:8080
+      Identity__Onboarding__AdminUser: admin
+      Identity__Onboarding__AdminPassword: admin
     ports:
       - "18110:18110"
 

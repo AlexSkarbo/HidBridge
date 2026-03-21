@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "close-failed-rooms", "close-stale-rooms", "platform-runtime")]
+    [ValidateSet("checks", "tests", "smoke", "smoke-file", "smoke-sql", "smoke-bearer", "doctor", "clean-logs", "ci-local", "full", "export-artifacts", "token-debug", "bearer-rollout", "identity-reset", "identity-onboard", "demo-flow", "demo-seed", "demo-gate", "uart-diagnostics", "webrtc-relay-smoke", "webrtc-peer-adapter", "webrtc-stack", "webrtc-stack-terminal-b", "webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "ops-slo-security-verify", "close-failed-rooms", "close-stale-rooms", "platform-runtime")]
     [string]$Task = "checks",
     [string]$BaseUrl,
     [switch]$RequireDeviceAck,
@@ -21,6 +21,11 @@ param(
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = -1,
     [int]$TransportHealthDelayMs = -1,
+    [int]$SloWindowMinutes = -1,
+    [switch]$AllowAuthDisabled,
+    [switch]$FailOnSloWarning,
+    [switch]$FailOnSecurityWarning,
+    [switch]$RequireAuditTrailCategories,
     [string]$CommandExecutor,
     [string]$ControlWsUrl,
     [string]$UartPort,
@@ -101,6 +106,7 @@ $scriptMap = @{
     "webrtc-stack-terminal-b" = "run_webrtc_stack_terminal_b.ps1"
     "webrtc-edge-agent-smoke" = "run_webrtc_edge_agent_smoke.ps1"
     "webrtc-edge-agent-acceptance" = "run_webrtc_edge_agent_acceptance.ps1"
+    "ops-slo-security-verify" = "run_ops_slo_security_verify.ps1"
     "close-failed-rooms" = "run_close_failed_rooms.ps1"
     "close-stale-rooms" = "run_close_stale_rooms.ps1"
     "platform-runtime" = "run_platform_runtime_profile.ps1"
@@ -133,6 +139,7 @@ if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteS
         "webrtc-relay-smoke",
         "webrtc-peer-adapter",
         "webrtc-edge-agent-acceptance",
+        "ops-slo-security-verify",
         "close-failed-rooms",
         "close-stale-rooms"
     )
@@ -262,6 +269,37 @@ if ($PSBoundParameters.ContainsKey("TransportHealthDelayMs") -and $TransportHeal
     if ($tasksWithTransportHealthDelay -contains $Task) {
         $effectiveForwardArgs.Add("-TransportHealthDelayMs") | Out-Null
         $effectiveForwardArgs.Add([string]$TransportHealthDelayMs) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("SloWindowMinutes") -and $SloWindowMinutes -gt 0) {
+    if ($Task -eq "ops-slo-security-verify") {
+        $effectiveForwardArgs.Add("-SloWindowMinutes") | Out-Null
+        $effectiveForwardArgs.Add([string]$SloWindowMinutes) | Out-Null
+    }
+}
+
+if ($AllowAuthDisabled) {
+    if ($Task -eq "ops-slo-security-verify") {
+        $effectiveForwardArgs.Add("-AllowAuthDisabled") | Out-Null
+    }
+}
+
+if ($FailOnSloWarning) {
+    if ($Task -eq "ops-slo-security-verify") {
+        $effectiveForwardArgs.Add("-FailOnSloWarning") | Out-Null
+    }
+}
+
+if ($FailOnSecurityWarning) {
+    if ($Task -eq "ops-slo-security-verify") {
+        $effectiveForwardArgs.Add("-FailOnSecurityWarning") | Out-Null
+    }
+}
+
+if ($RequireAuditTrailCategories) {
+    if ($Task -eq "ops-slo-security-verify") {
+        $effectiveForwardArgs.Add("-RequireAuditTrailCategories") | Out-Null
     }
 }
 

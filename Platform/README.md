@@ -339,7 +339,17 @@ Docker runtime profile (step `21`):
   - API/Web/Keycloak/Postgres are containerized.
   - edge-agent remains a separate process/host (not container-coupled).
   - default API transport in this profile is `webrtc-datachannel`.
-  - web identity is disabled by default (`Identity__Enabled=false`) to keep local bootstrap deterministic; Keycloak is still started for bearer/OIDC integration tests.
+  - API auth posture is strict-by-default:
+    - `HIDBRIDGE_AUTH_ENABLED=true`
+    - `HIDBRIDGE_AUTH_AUTHORITY=http://host.docker.internal:18096/realms/hidbridge-dev`
+    - `HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK=false`
+    - bearer/caller-context/fallback-disabled coverage is preconfigured in compose env.
+  - web auth posture is strict-by-default:
+    - `Identity__Enabled=true` (OIDC-only; no development fallback identity)
+    - `ControlPlaneApi__PropagateIdentityHeaders=false` (backend caller context comes from bearer claims)
+    - `ControlPlaneApi__PropagateAccessToken=true`
+  - OIDC authority in docker profile is `http://host.docker.internal:18096/realms/hidbridge-dev` so both browser and `hidbridge_web` container can resolve Keycloak consistently.
+  - default dev login for strict OIDC profile: `operator.smoke.admin / ChangeMe123!`.
 
 Edge-agent as external process (outside docker):
 - run on the target host (or nearby edge host):
@@ -454,6 +464,16 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
   - when runtime is already running in Docker profile (`platform-runtime`), add `-SkipRuntimeBootstrap` to avoid local API/Web restart conflicts on `18093/18110`.
   - in `CommandExecutor=uart` path stack bootstrap now auto-sets `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true` (control-only acceptance without capture probe).
+- operational SLO + security verification (step 22/23):
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
+  - this script validates:
+    - transport SLO status + threshold breaches (`ackTimeoutRate`, `relayReadyLatencyP95`, `reconnectFrequencyPerHour`)
+    - runtime auth posture (`auth enabled`, bearer/caller-context coverage, fallback posture)
+    - audit trail presence for command/lease/ack categories (`session.command`, `session.control*`, `transport.ack`)
+  - strict mode knobs:
+    - `-FailOnSloWarning -FailOnSecurityWarning -RequireAuditTrailCategories`
+  - local/dev override when auth is intentionally disabled:
+    - `-AllowAuthDisabled`
 - include the WebRTC smoke as part of `demo-flow`:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor uart`
   - exp-022 compatibility mode:
@@ -777,6 +797,10 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 - `Ops Status` in `HidBridge.ControlPlane.Web` now surfaces latest local operational artifacts via `/ops-artifacts/file?...`.
 - `Platform/run_clean_logs.ps1` prunes old `Platform/.logs` and, optionally, `Platform/.smoke-data`.
 - `Platform/Scripts/Common/ScriptCommon.ps1` contains shared logging and operational helper functions used by the script suite.
+- `Platform/run_ops_slo_security_verify.ps1` performs the SLO/security verify lane used by `ci-local`/`full`:
+  - `ci-local` now includes `Ops SLO + Security Verify` by default.
+  - emergency/local bypass only:
+    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -ForwardArgs @('-SkipOpsSloSecurityVerify')`
 - unified launcher examples:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor`
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task clean-logs -- -KeepDays 5 -IncludeSmokeData`

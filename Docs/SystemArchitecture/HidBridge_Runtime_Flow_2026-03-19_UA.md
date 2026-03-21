@@ -122,6 +122,16 @@ Transport SLO summary включає:
 6. `HIDBRIDGE_SLO_RECONNECT_FREQ_WARN`
 7. `HIDBRIDGE_SLO_RECONNECT_FREQ_CRITICAL`
 
+Operational verification lane (step 22):
+
+1. `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
+2. Скрипт читає `GET /api/v1/diagnostics/transport/slo` і класифікує:
+   - `PASS` для healthy,
+   - `WARN` для warning (або `FAIL` з `-FailOnSloWarning`),
+   - `FAIL` для critical.
+3. У strict режимі CI можна підняти чутливість через:
+   - `-FailOnSloWarning`.
+
 ---
 
 ## 6. Security baseline
@@ -135,6 +145,25 @@ Transport SLO summary включає:
    - fallback на password grant,
    - retry після `401`.
 4. ACK audit trail з session/command/status/error контекстом.
+5. У `docker-compose.platform-runtime.yml` API security увімкнений за замовчуванням:
+   - `HIDBRIDGE_AUTH_ENABLED=true`,
+   - `HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK=false`,
+   - задані bearer/caller-context/fallback-disabled policy env.
+6. У `docker-compose.platform-runtime.yml` web auth теж strict-by-default:
+   - `Identity__Enabled=true` (OIDC-only),
+   - development identity fallback вимкнений у runtime profile,
+   - `ControlPlaneApi__PropagateIdentityHeaders=false`, `ControlPlaneApi__PropagateAccessToken=true`.
+
+Operational verification lane (step 23):
+
+1. Той самий `ops-slo-security-verify` перевіряє runtime security posture:
+   - `authentication.enabled`,
+   - bearer/caller-context coverage,
+   - header-fallback posture,
+   - audit-trail категорії: `session.command`, `session.control*`, `transport.ack`.
+2. `ci-local` і `full` запускають цей verify lane як default gate (`Ops SLO + Security Verify`).
+3. Emergency override доступний лише явним прапором:
+   - `-SkipOpsSloSecurityVerify`.
 
 ---
 

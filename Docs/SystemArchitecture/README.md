@@ -14,7 +14,7 @@
 
 3. Актуальний runtime baseline (канонічний flow для поточної ітерації):
 - `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
-  - Оновлено `2026-03-20`: зафіксовано `operator.edge` relay-read access, UART no-probe media readiness semantics, acceptance lane (`platform-runtime` + `webrtc-edge-agent-acceptance`).
+  - Оновлено `2026-03-20`: зафіксовано `operator.edge` relay-read access, UART no-probe media readiness semantics, acceptance lane (`platform-runtime` + `webrtc-edge-agent-acceptance`), operational verify lane для кроків `22/23` (`ops-slo-security-verify`) і strict-by-default API/Web auth posture у docker runtime profile.
 
 ## Нормативні доповнення (Agent-first архітектура)
 

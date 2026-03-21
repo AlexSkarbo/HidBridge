@@ -8,6 +8,11 @@ param(
     [switch]$SkipCiLocal,
     [bool]$IncludeWebRtcEdgeAgentAcceptance = $true,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
+    [bool]$IncludeOpsSloSecurityVerify = $true,
+    [switch]$SkipOpsSloSecurityVerify,
+    [int]$OpsSloWindowMinutes = 60,
+    [switch]$OpsFailOnSloWarning,
+    [switch]$OpsFailOnSecurityWarning,
     [ValidateSet("uart", "controlws")]
     [string]$WebRtcCommandExecutor = "uart",
     [switch]$AllowLegacyControlWs,
@@ -42,6 +47,11 @@ try {
             AuthAuthority = $AuthAuthority
             IncludeWebRtcEdgeAgentAcceptance = $IncludeWebRtcEdgeAgentAcceptance
             SkipWebRtcEdgeAgentAcceptance = $SkipWebRtcEdgeAgentAcceptance
+            IncludeOpsSloSecurityVerify = $IncludeOpsSloSecurityVerify
+            SkipOpsSloSecurityVerify = $SkipOpsSloSecurityVerify
+            OpsSloWindowMinutes = [Math]::Max(5, $OpsSloWindowMinutes)
+            OpsFailOnSloWarning = $OpsFailOnSloWarning
+            OpsFailOnSecurityWarning = $OpsFailOnSecurityWarning
             WebRtcCommandExecutor = $WebRtcCommandExecutor
             WebRtcControlHealthUrl = $WebRtcControlHealthUrl
             WebRtcPeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)
