@@ -81,6 +81,9 @@ public sealed class WebRtcRelayReadinessService
         var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
         var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
         var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
+        var mediaStreamKind = TryReadMetricString(health.Metrics, "lastPeerMediaStreamKind");
+        var mediaVideo = BuildMediaVideoDescriptor(health.Metrics);
+        var mediaAudio = BuildMediaAudioDescriptor(health.Metrics);
         if (_mediaRegistry is not null)
         {
             var latestMediaSnapshot = await _mediaRegistry.GetLatestAsync(snapshot.SessionId, snapshot.EndpointId, cancellationToken);
@@ -92,6 +95,9 @@ public sealed class WebRtcRelayReadinessService
                 mediaReportedAtUtc = latestMediaSnapshot.ReportedAtUtc;
                 mediaStreamId = latestMediaSnapshot.StreamId;
                 mediaSource = latestMediaSnapshot.Source;
+                mediaStreamKind = latestMediaSnapshot.StreamKind;
+                mediaVideo = latestMediaSnapshot.Video;
+                mediaAudio = latestMediaSnapshot.Audio;
             }
         }
 
@@ -126,6 +132,9 @@ public sealed class WebRtcRelayReadinessService
             MediaReportedAtUtc: mediaReportedAtUtc,
             MediaStreamId: mediaStreamId,
             MediaSource: mediaSource,
+            MediaStreamKind: mediaStreamKind,
+            MediaVideo: mediaVideo,
+            MediaAudio: mediaAudio,
             Metrics: health.Metrics,
             EvaluatedAtUtc: DateTimeOffset.UtcNow);
     }
@@ -258,6 +267,71 @@ public sealed class WebRtcRelayReadinessService
             _ when int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedFallbackInt32) => parsedFallbackInt32,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Reads a metrics dictionary value as double.
+    /// </summary>
+    private static double? TryReadMetricDouble(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            double direct => direct,
+            float f32 => f32,
+            decimal d128 => Convert.ToDouble(d128, CultureInfo.InvariantCulture),
+            int i32 => i32,
+            long i64 => i64,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetDouble(out var parsedJsonDouble) => parsedJsonDouble,
+            JsonElement { ValueKind: JsonValueKind.String } element when double.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedJsonStringDouble) => parsedJsonStringDouble,
+            string text when double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedStringDouble) => parsedStringDouble,
+            _ when double.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedFallbackDouble) => parsedFallbackDouble,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Builds typed video descriptor from relay-health metrics when present.
+    /// </summary>
+    private static MediaVideoDescriptorBody? BuildMediaVideoDescriptor(IReadOnlyDictionary<string, object?> metrics)
+    {
+        var codec = TryReadMetricString(metrics, "lastPeerMediaVideoCodec");
+        var width = TryReadMetricInt32(metrics, "lastPeerMediaVideoWidth");
+        var height = TryReadMetricInt32(metrics, "lastPeerMediaVideoHeight");
+        var frameRate = TryReadMetricDouble(metrics, "lastPeerMediaVideoFrameRate");
+        var bitrateKbps = TryReadMetricInt32(metrics, "lastPeerMediaVideoBitrateKbps");
+
+        return codec is null && width is null && height is null && frameRate is null && bitrateKbps is null
+            ? null
+            : new MediaVideoDescriptorBody(
+                Codec: codec,
+                Width: width,
+                Height: height,
+                FrameRate: frameRate,
+                BitrateKbps: bitrateKbps);
+    }
+
+    /// <summary>
+    /// Builds typed audio descriptor from relay-health metrics when present.
+    /// </summary>
+    private static MediaAudioDescriptorBody? BuildMediaAudioDescriptor(IReadOnlyDictionary<string, object?> metrics)
+    {
+        var codec = TryReadMetricString(metrics, "lastPeerMediaAudioCodec");
+        var channels = TryReadMetricInt32(metrics, "lastPeerMediaAudioChannels");
+        var sampleRateHz = TryReadMetricInt32(metrics, "lastPeerMediaAudioSampleRateHz");
+        var bitrateKbps = TryReadMetricInt32(metrics, "lastPeerMediaAudioBitrateKbps");
+
+        return codec is null && channels is null && sampleRateHz is null && bitrateKbps is null
+            ? null
+            : new MediaAudioDescriptorBody(
+                Codec: codec,
+                Channels: channels,
+                SampleRateHz: sampleRateHz,
+                BitrateKbps: bitrateKbps);
     }
 
     /// <summary>

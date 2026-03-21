@@ -169,6 +169,16 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerMediaReportedAtUtc"] = null,
                 ["lastPeerMediaStreamId"] = null,
                 ["lastPeerMediaSource"] = null,
+                ["lastPeerMediaStreamKind"] = null,
+                ["lastPeerMediaVideoCodec"] = null,
+                ["lastPeerMediaVideoWidth"] = null,
+                ["lastPeerMediaVideoHeight"] = null,
+                ["lastPeerMediaVideoFrameRate"] = null,
+                ["lastPeerMediaVideoBitrateKbps"] = null,
+                ["lastPeerMediaAudioCodec"] = null,
+                ["lastPeerMediaAudioChannels"] = null,
+                ["lastPeerMediaAudioSampleRateHz"] = null,
+                ["lastPeerMediaAudioBitrateKbps"] = null,
             });
         }
 
@@ -404,6 +414,16 @@ public sealed class WebRtcCommandRelayService
                 ["lastPeerMediaReportedAtUtc"] = TryReadMetadataValue(latestMetadata, "mediaReportedAtUtc"),
                 ["lastPeerMediaStreamId"] = TryReadMetadataValue(latestMetadata, "mediaStreamId"),
                 ["lastPeerMediaSource"] = TryReadMetadataValue(latestMetadata, "mediaSource"),
+                ["lastPeerMediaStreamKind"] = TryReadMetadataValue(latestMetadata, "mediaStreamKind"),
+                ["lastPeerMediaVideoCodec"] = TryReadMetadataValue(latestMetadata, "mediaVideoCodec"),
+                ["lastPeerMediaVideoWidth"] = TryReadMetadataValue(latestMetadata, "mediaVideoWidth"),
+                ["lastPeerMediaVideoHeight"] = TryReadMetadataValue(latestMetadata, "mediaVideoHeight"),
+                ["lastPeerMediaVideoFrameRate"] = TryReadMetadataValue(latestMetadata, "mediaVideoFrameRate"),
+                ["lastPeerMediaVideoBitrateKbps"] = TryReadMetadataValue(latestMetadata, "mediaVideoBitrateKbps"),
+                ["lastPeerMediaAudioCodec"] = TryReadMetadataValue(latestMetadata, "mediaAudioCodec"),
+                ["lastPeerMediaAudioChannels"] = TryReadMetadataValue(latestMetadata, "mediaAudioChannels"),
+                ["lastPeerMediaAudioSampleRateHz"] = TryReadMetadataValue(latestMetadata, "mediaAudioSampleRateHz"),
+                ["lastPeerMediaAudioBitrateKbps"] = TryReadMetadataValue(latestMetadata, "mediaAudioBitrateKbps"),
             };
         }
 

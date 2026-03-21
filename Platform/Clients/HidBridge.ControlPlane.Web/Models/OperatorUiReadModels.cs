@@ -295,7 +295,10 @@ public sealed record SessionTransportHealthViewModel(
     string? MediaFailureReason = null,
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
-    string? MediaSource = null);
+    string? MediaSource = null,
+    string? MediaStreamKind = null,
+    MediaVideoDescriptorViewModel? MediaVideo = null,
+    MediaAudioDescriptorViewModel? MediaAudio = null);
 
 /// <summary>
 /// Represents one transport readiness projection for a session route.
@@ -321,6 +324,9 @@ public sealed record SessionTransportReadinessViewModel(
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
     string? MediaSource = null,
+    string? MediaStreamKind = null,
+    MediaVideoDescriptorViewModel? MediaVideo = null,
+    MediaAudioDescriptorViewModel? MediaAudio = null,
     IReadOnlyDictionary<string, object?>? Metrics = null,
     DateTimeOffset? EvaluatedAtUtc = null);
 
@@ -338,7 +344,29 @@ public sealed record SessionMediaStreamSnapshotViewModel(
     DateTimeOffset UpdatedAtUtc,
     string? FailureReason = null,
     string? Source = null,
+    string? StreamKind = null,
+    MediaVideoDescriptorViewModel? Video = null,
+    MediaAudioDescriptorViewModel? Audio = null,
     IReadOnlyDictionary<string, object?>? Metrics = null);
+
+/// <summary>
+/// Represents typed video stream properties visible in operator read models.
+/// </summary>
+public sealed record MediaVideoDescriptorViewModel(
+    string? Codec = null,
+    int? Width = null,
+    int? Height = null,
+    double? FrameRate = null,
+    int? BitrateKbps = null);
+
+/// <summary>
+/// Represents typed audio stream properties visible in operator read models.
+/// </summary>
+public sealed record MediaAudioDescriptorViewModel(
+    string? Codec = null,
+    int? Channels = null,
+    int? SampleRateHz = null,
+    int? BitrateKbps = null);
 
 /// <summary>
 /// Represents one WebRTC signaling message.

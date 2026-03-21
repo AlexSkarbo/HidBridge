@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-21 (pr-a typed media contract + edge/api/ui propagation)
+
+Summary:
+
+- Extended media contracts with typed stream descriptors (`streamKind`, `video`, `audio`) for readiness/health/media-stream payloads.
+- Propagated typed media fields through edge agent publish path, API readiness/health projection, and Web operator read models.
+- Extended transport diagnostics UI with media kind/video/audio cards.
+- Added regression tests for typed media parsing, registry persistence, relay metrics, and readiness projection.
+
+Detailed notes:
+
+- `Platform/Shared/HidBridge.Contracts/Messages.cs`
+- `Platform/Edge/HidBridge.Edge.Abstractions/EdgeRuntimeContracts.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyMediaReadinessProbe.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyWorker.cs`
+- `Platform/Core/HidBridge.Application/SessionMediaRegistryService.cs`
+- `Platform/Core/HidBridge.Application/WebRtcRelayReadinessService.cs`
+- `Platform/Core/HidBridge.Application/WebRtcCommandRelayService.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Endpoints/TransportEndpoints.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Models/OperatorUiReadModels.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionDetails.razor`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Localization/OperatorText.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyMediaReadinessProbeTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/SessionMediaRegistryServiceTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcCommandRelayServiceTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcRelayReadinessServiceTests.cs`
+
 ## 2026-03-21 (webrtc command-deck regression coverage)
 
 Summary:

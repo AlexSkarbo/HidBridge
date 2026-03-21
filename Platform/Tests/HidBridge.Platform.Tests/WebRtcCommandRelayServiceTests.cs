@@ -33,6 +33,16 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Null(metrics["lastPeerMediaReportedAtUtc"]);
         Assert.Null(metrics["lastPeerMediaStreamId"]);
         Assert.Null(metrics["lastPeerMediaSource"]);
+        Assert.Null(metrics["lastPeerMediaStreamKind"]);
+        Assert.Null(metrics["lastPeerMediaVideoCodec"]);
+        Assert.Null(metrics["lastPeerMediaVideoWidth"]);
+        Assert.Null(metrics["lastPeerMediaVideoHeight"]);
+        Assert.Null(metrics["lastPeerMediaVideoFrameRate"]);
+        Assert.Null(metrics["lastPeerMediaVideoBitrateKbps"]);
+        Assert.Null(metrics["lastPeerMediaAudioCodec"]);
+        Assert.Null(metrics["lastPeerMediaAudioChannels"]);
+        Assert.Null(metrics["lastPeerMediaAudioSampleRateHz"]);
+        Assert.Null(metrics["lastPeerMediaAudioBitrateKbps"]);
     }
 
     [Fact]
@@ -80,6 +90,16 @@ public sealed class WebRtcCommandRelayServiceTests
                 ["mediaReportedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
                 ["mediaStreamId"] = "stream-main",
                 ["mediaSource"] = "hdmi-usb-capture",
+                ["mediaStreamKind"] = "audio-video",
+                ["mediaVideoCodec"] = "h264",
+                ["mediaVideoWidth"] = "1920",
+                ["mediaVideoHeight"] = "1080",
+                ["mediaVideoFrameRate"] = "30",
+                ["mediaVideoBitrateKbps"] = "4000",
+                ["mediaAudioCodec"] = "opus",
+                ["mediaAudioChannels"] = "2",
+                ["mediaAudioSampleRateHz"] = "48000",
+                ["mediaAudioBitrateKbps"] = "128",
             },
             cancellationToken);
 
@@ -92,6 +112,16 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Equal("Streaming", metrics["lastPeerMediaState"]?.ToString());
         Assert.Equal("stream-main", metrics["lastPeerMediaStreamId"]?.ToString());
         Assert.Equal("hdmi-usb-capture", metrics["lastPeerMediaSource"]?.ToString());
+        Assert.Equal("audio-video", metrics["lastPeerMediaStreamKind"]?.ToString());
+        Assert.Equal("h264", metrics["lastPeerMediaVideoCodec"]?.ToString());
+        Assert.Equal("1920", metrics["lastPeerMediaVideoWidth"]?.ToString());
+        Assert.Equal("1080", metrics["lastPeerMediaVideoHeight"]?.ToString());
+        Assert.Equal("30", metrics["lastPeerMediaVideoFrameRate"]?.ToString());
+        Assert.Equal("4000", metrics["lastPeerMediaVideoBitrateKbps"]?.ToString());
+        Assert.Equal("opus", metrics["lastPeerMediaAudioCodec"]?.ToString());
+        Assert.Equal("2", metrics["lastPeerMediaAudioChannels"]?.ToString());
+        Assert.Equal("48000", metrics["lastPeerMediaAudioSampleRateHz"]?.ToString());
+        Assert.Equal("128", metrics["lastPeerMediaAudioBitrateKbps"]?.ToString());
         Assert.NotNull(metrics["lastPeerSeenAtUtc"]);
         Assert.NotNull(metrics["lastPeerMediaReportedAtUtc"]);
     }

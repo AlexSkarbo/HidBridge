@@ -88,6 +88,43 @@ public sealed class EdgeProxyMediaReadinessProbeTests
         Assert.Equal("http://127.0.0.1:28092/health", handler.LastRequestUri);
     }
 
+    [Fact]
+    public async Task GetReadinessAsync_ParsesTypedVideoAndAudioDescriptors()
+    {
+        var handler = new RecordingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"ready":true,"state":"Streaming","streamId":"edge-main","source":"edge-capture","streamKind":"audio-video","video":{"codec":"h264","width":1920,"height":1080,"frameRate":30,"bitrateKbps":4500},"audio":{"codec":"opus","channels":2,"sampleRateHz":48000,"bitrateKbps":128}}""",
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        var probe = CreateProbe(
+            handler,
+            new EdgeProxyOptions
+            {
+                CommandExecutor = "controlws",
+                ControlWsUrl = "ws://127.0.0.1:28092/ws/control",
+                MediaHealthUrl = string.Empty,
+                RequireMediaReady = true,
+            });
+
+        var snapshot = await probe.GetReadinessAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(snapshot.IsReady);
+        Assert.Equal("Streaming", snapshot.State);
+        Assert.Equal("audio-video", snapshot.StreamKind);
+        Assert.Equal("h264", snapshot.Video?.Codec);
+        Assert.Equal(1920, snapshot.Video?.Width);
+        Assert.Equal(1080, snapshot.Video?.Height);
+        Assert.Equal(30d, snapshot.Video?.FrameRate);
+        Assert.Equal(4500, snapshot.Video?.BitrateKbps);
+        Assert.Equal("opus", snapshot.Audio?.Codec);
+        Assert.Equal(2, snapshot.Audio?.Channels);
+        Assert.Equal(48000, snapshot.Audio?.SampleRateHz);
+        Assert.Equal(128, snapshot.Audio?.BitrateKbps);
+    }
+
     private static EdgeProxyMediaReadinessProbe CreateProbe(HttpMessageHandler handler, EdgeProxyOptions options)
     {
         var client = new HttpClient(handler)

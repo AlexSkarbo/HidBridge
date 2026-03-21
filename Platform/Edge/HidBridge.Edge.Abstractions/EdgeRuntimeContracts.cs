@@ -69,7 +69,29 @@ public sealed record EdgeMediaReadinessSnapshot(
     string? FailureReason = null,
     string? StreamId = null,
     string? Source = null,
+    string? StreamKind = null,
+    EdgeVideoReadinessSnapshot? Video = null,
+    EdgeAudioReadinessSnapshot? Audio = null,
     IReadOnlyDictionary<string, object?>? Metrics = null);
+
+/// <summary>
+/// Describes typed video readiness properties produced by capture/runtime probes.
+/// </summary>
+public sealed record EdgeVideoReadinessSnapshot(
+    string? Codec = null,
+    int? Width = null,
+    int? Height = null,
+    double? FrameRate = null,
+    int? BitrateKbps = null);
+
+/// <summary>
+/// Describes typed audio readiness properties produced by capture/runtime probes.
+/// </summary>
+public sealed record EdgeAudioReadinessSnapshot(
+    string? Codec = null,
+    int? Channels = null,
+    int? SampleRateHz = null,
+    int? BitrateKbps = null);
 
 /// <summary>
 /// Provides media-capture readiness diagnostics for edge runtime orchestration.

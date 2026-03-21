@@ -536,6 +536,9 @@ public static class TransportEndpoints
                 var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
                 var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
                 var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
+                var mediaStreamKind = TryReadMetricString(health.Metrics, "lastPeerMediaStreamKind");
+                var mediaVideo = BuildMediaVideoDescriptor(health.Metrics);
+                var mediaAudio = BuildMediaAudioDescriptor(health.Metrics);
                 var latestMediaSnapshot = await mediaRegistry.GetLatestAsync(snapshot.SessionId, snapshot.EndpointId, ct);
                 if (latestMediaSnapshot is not null)
                 {
@@ -545,6 +548,9 @@ public static class TransportEndpoints
                     mediaReportedAtUtc = latestMediaSnapshot.ReportedAtUtc;
                     mediaStreamId = latestMediaSnapshot.StreamId;
                     mediaSource = latestMediaSnapshot.Source;
+                    mediaStreamKind = latestMediaSnapshot.StreamKind;
+                    mediaVideo = latestMediaSnapshot.Video;
+                    mediaAudio = latestMediaSnapshot.Audio;
                 }
                 return Results.Ok(new SessionTransportHealthBody(
                     SessionId: snapshot.SessionId,
@@ -569,7 +575,10 @@ public static class TransportEndpoints
                     MediaFailureReason: mediaFailureReason,
                     MediaReportedAtUtc: mediaReportedAtUtc,
                     MediaStreamId: mediaStreamId,
-                    MediaSource: mediaSource));
+                    MediaSource: mediaSource,
+                    MediaStreamKind: mediaStreamKind,
+                    MediaVideo: mediaVideo,
+                    MediaAudio: mediaAudio));
             }
             catch (KeyNotFoundException ex)
             {
@@ -629,6 +638,31 @@ public static class TransportEndpoints
     }
 
     /// <summary>
+    /// Reads one metric value as floating-point number from transport-health metrics.
+    /// </summary>
+    private static double? TryReadMetricDouble(IReadOnlyDictionary<string, object?> metrics, string key)
+    {
+        if (!metrics.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            double direct => direct,
+            float single => single,
+            decimal decimalValue => Convert.ToDouble(decimalValue, CultureInfo.InvariantCulture),
+            int i32 => i32,
+            long i64 => i64,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetDouble(out var parsedDouble) => parsedDouble,
+            JsonElement { ValueKind: JsonValueKind.String } element when double.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedJsonStringDouble) => parsedJsonStringDouble,
+            string text when double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedStringDouble) => parsedStringDouble,
+            _ when double.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedFallbackDouble) => parsedFallbackDouble,
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Reads one metric value as UTC timestamp from transport-health metrics.
     /// </summary>
     private static DateTimeOffset? TryReadMetricDateTimeOffset(IReadOnlyDictionary<string, object?> metrics, string key)
@@ -670,6 +704,35 @@ public static class TransportEndpoints
             _ when int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt) => parsedInt != 0,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Builds typed video descriptor from transport-health metrics when present.
+    /// </summary>
+    private static MediaVideoDescriptorBody? BuildMediaVideoDescriptor(IReadOnlyDictionary<string, object?> metrics)
+    {
+        var codec = TryReadMetricString(metrics, "lastPeerMediaVideoCodec");
+        var width = TryReadMetricInt32(metrics, "lastPeerMediaVideoWidth");
+        var height = TryReadMetricInt32(metrics, "lastPeerMediaVideoHeight");
+        var frameRate = TryReadMetricDouble(metrics, "lastPeerMediaVideoFrameRate");
+        var bitrateKbps = TryReadMetricInt32(metrics, "lastPeerMediaVideoBitrateKbps");
+        return codec is null && width is null && height is null && frameRate is null && bitrateKbps is null
+            ? null
+            : new MediaVideoDescriptorBody(codec, width, height, frameRate, bitrateKbps);
+    }
+
+    /// <summary>
+    /// Builds typed audio descriptor from transport-health metrics when present.
+    /// </summary>
+    private static MediaAudioDescriptorBody? BuildMediaAudioDescriptor(IReadOnlyDictionary<string, object?> metrics)
+    {
+        var codec = TryReadMetricString(metrics, "lastPeerMediaAudioCodec");
+        var channels = TryReadMetricInt32(metrics, "lastPeerMediaAudioChannels");
+        var sampleRateHz = TryReadMetricInt32(metrics, "lastPeerMediaAudioSampleRateHz");
+        var bitrateKbps = TryReadMetricInt32(metrics, "lastPeerMediaAudioBitrateKbps");
+        return codec is null && channels is null && sampleRateHz is null && bitrateKbps is null
+            ? null
+            : new MediaAudioDescriptorBody(codec, channels, sampleRateHz, bitrateKbps);
     }
 
 }

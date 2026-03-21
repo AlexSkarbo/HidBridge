@@ -181,8 +181,11 @@
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReady"]</div><div class="hid-detail-value">@GetTransportMediaReady(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaState"]</div><div class="hid-detail-value">@GetTransportMediaState(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaSource"]</div><div class="hid-detail-value">@GetTransportMediaSource(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaKind"]</div><div class="hid-detail-value">@GetTransportMediaKind(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaStreamId"]</div><div class="hid-detail-value">@GetTransportMediaStreamId(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReportedAt"]</div><div class="hid-detail-value">@GetTransportMediaReportedAt(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaVideo"]</div><div class="hid-detail-value">@GetTransportMediaVideo(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaAudio"]</div><div class="hid-detail-value">@GetTransportMediaAudio(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth?.LastCommandAck)</div></div>
                         </div>
 
@@ -1731,6 +1734,26 @@
     }
 
     /// <summary>
+    /// Resolves media stream kind with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaKind(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(readiness?.MediaStreamKind))
+        {
+            return readiness.MediaStreamKind!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(health?.MediaStreamKind))
+        {
+            return health.MediaStreamKind!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerMediaStreamKind");
+    }
+
+    /// <summary>
     /// Resolves media stream id with readiness-first preference and health fallback.
     /// </summary>
     private static string GetTransportMediaStreamId(
@@ -1791,6 +1814,149 @@
 
         return GetTransportMetricValue(health, "lastPeerMediaFailureReason");
     }
+
+    /// <summary>
+    /// Resolves media video descriptor with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaVideo(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        var descriptor = readiness?.MediaVideo
+            ?? health?.MediaVideo
+            ?? BuildMediaVideoFromMetrics(health);
+        return descriptor is null
+            ? "—"
+            : FormatMediaVideoDescriptor(descriptor);
+    }
+
+    /// <summary>
+    /// Resolves media audio descriptor with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaAudio(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        var descriptor = readiness?.MediaAudio
+            ?? health?.MediaAudio
+            ?? BuildMediaAudioFromMetrics(health);
+        return descriptor is null
+            ? "—"
+            : FormatMediaAudioDescriptor(descriptor);
+    }
+
+    /// <summary>
+    /// Formats one compact media video descriptor string.
+    /// </summary>
+    private static string FormatMediaVideoDescriptor(MediaVideoDescriptorViewModel descriptor)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(descriptor.Codec))
+        {
+            parts.Add(descriptor.Codec!);
+        }
+
+        if (descriptor.Width.HasValue || descriptor.Height.HasValue)
+        {
+            var width = descriptor.Width?.ToString(CultureInfo.InvariantCulture) ?? "?";
+            var height = descriptor.Height?.ToString(CultureInfo.InvariantCulture) ?? "?";
+            parts.Add($"{width}x{height}");
+        }
+
+        if (descriptor.FrameRate.HasValue)
+        {
+            parts.Add($"{descriptor.FrameRate.Value.ToString("0.##", CultureInfo.InvariantCulture)} fps");
+        }
+
+        if (descriptor.BitrateKbps.HasValue)
+        {
+            parts.Add($"{descriptor.BitrateKbps.Value.ToString(CultureInfo.InvariantCulture)} kbps");
+        }
+
+        return parts.Count == 0 ? "—" : string.Join(" · ", parts);
+    }
+
+    /// <summary>
+    /// Formats one compact media audio descriptor string.
+    /// </summary>
+    private static string FormatMediaAudioDescriptor(MediaAudioDescriptorViewModel descriptor)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(descriptor.Codec))
+        {
+            parts.Add(descriptor.Codec!);
+        }
+
+        if (descriptor.Channels.HasValue)
+        {
+            parts.Add($"{descriptor.Channels.Value.ToString(CultureInfo.InvariantCulture)} ch");
+        }
+
+        if (descriptor.SampleRateHz.HasValue)
+        {
+            parts.Add($"{descriptor.SampleRateHz.Value.ToString(CultureInfo.InvariantCulture)} Hz");
+        }
+
+        if (descriptor.BitrateKbps.HasValue)
+        {
+            parts.Add($"{descriptor.BitrateKbps.Value.ToString(CultureInfo.InvariantCulture)} kbps");
+        }
+
+        return parts.Count == 0 ? "—" : string.Join(" · ", parts);
+    }
+
+    /// <summary>
+    /// Builds video descriptor from transport metric fallback keys when typed models are absent.
+    /// </summary>
+    private static MediaVideoDescriptorViewModel? BuildMediaVideoFromMetrics(SessionTransportHealthViewModel? health)
+    {
+        var codec = GetTransportMetricValue(health, "lastPeerMediaVideoCodec");
+        var width = ParseIntMetric(GetTransportMetricValue(health, "lastPeerMediaVideoWidth"));
+        var height = ParseIntMetric(GetTransportMetricValue(health, "lastPeerMediaVideoHeight"));
+        var frameRate = ParseDoubleMetric(GetTransportMetricValue(health, "lastPeerMediaVideoFrameRate"));
+        var bitrateKbps = ParseIntMetric(GetTransportMetricValue(health, "lastPeerMediaVideoBitrateKbps"));
+
+        if (string.Equals(codec, "—", StringComparison.Ordinal))
+        {
+            codec = null;
+        }
+
+        return codec is null && width is null && height is null && frameRate is null && bitrateKbps is null
+            ? null
+            : new MediaVideoDescriptorViewModel(codec, width, height, frameRate, bitrateKbps);
+    }
+
+    /// <summary>
+    /// Builds audio descriptor from transport metric fallback keys when typed models are absent.
+    /// </summary>
+    private static MediaAudioDescriptorViewModel? BuildMediaAudioFromMetrics(SessionTransportHealthViewModel? health)
+    {
+        var codec = GetTransportMetricValue(health, "lastPeerMediaAudioCodec");
+        var channels = ParseIntMetric(GetTransportMetricValue(health, "lastPeerMediaAudioChannels"));
+        var sampleRateHz = ParseIntMetric(GetTransportMetricValue(health, "lastPeerMediaAudioSampleRateHz"));
+        var bitrateKbps = ParseIntMetric(GetTransportMetricValue(health, "lastPeerMediaAudioBitrateKbps"));
+
+        if (string.Equals(codec, "—", StringComparison.Ordinal))
+        {
+            codec = null;
+        }
+
+        return codec is null && channels is null && sampleRateHz is null && bitrateKbps is null
+            ? null
+            : new MediaAudioDescriptorViewModel(codec, channels, sampleRateHz, bitrateKbps);
+    }
+
+    /// <summary>
+    /// Parses one integer metric value from string fallback.
+    /// </summary>
+    private static int? ParseIntMetric(string raw)
+        => int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+
+    /// <summary>
+    /// Parses one floating-point metric value from string fallback.
+    /// </summary>
+    private static double? ParseDoubleMetric(string raw)
+        => double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
 
     /// <summary>
     /// Builds compact relay stability diagnostics from typed peer-health fields.

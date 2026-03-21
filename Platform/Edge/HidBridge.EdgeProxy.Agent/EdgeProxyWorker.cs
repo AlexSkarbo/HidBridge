@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -585,6 +586,62 @@ public sealed class EdgeProxyWorker : BackgroundService
             metadata["mediaSource"] = snapshot.Source;
         }
 
+        if (!string.IsNullOrWhiteSpace(snapshot.StreamKind))
+        {
+            metadata["mediaStreamKind"] = snapshot.StreamKind;
+        }
+
+        if (snapshot.Video is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(snapshot.Video.Codec))
+            {
+                metadata["mediaVideoCodec"] = snapshot.Video.Codec;
+            }
+
+            if (snapshot.Video.Width.HasValue)
+            {
+                metadata["mediaVideoWidth"] = snapshot.Video.Width.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (snapshot.Video.Height.HasValue)
+            {
+                metadata["mediaVideoHeight"] = snapshot.Video.Height.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (snapshot.Video.FrameRate.HasValue)
+            {
+                metadata["mediaVideoFrameRate"] = snapshot.Video.FrameRate.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (snapshot.Video.BitrateKbps.HasValue)
+            {
+                metadata["mediaVideoBitrateKbps"] = snapshot.Video.BitrateKbps.Value.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        if (snapshot.Audio is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(snapshot.Audio.Codec))
+            {
+                metadata["mediaAudioCodec"] = snapshot.Audio.Codec;
+            }
+
+            if (snapshot.Audio.Channels.HasValue)
+            {
+                metadata["mediaAudioChannels"] = snapshot.Audio.Channels.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (snapshot.Audio.SampleRateHz.HasValue)
+            {
+                metadata["mediaAudioSampleRateHz"] = snapshot.Audio.SampleRateHz.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (snapshot.Audio.BitrateKbps.HasValue)
+            {
+                metadata["mediaAudioBitrateKbps"] = snapshot.Audio.BitrateKbps.Value.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
         return metadata;
     }
 
@@ -613,6 +670,9 @@ public sealed class EdgeProxyWorker : BackgroundService
                 reportedAtUtc = snapshot.ReportedAtUtc,
                 failureReason = snapshot.FailureReason,
                 source = effectiveSource,
+                streamKind = snapshot.StreamKind,
+                video = snapshot.Video,
+                audio = snapshot.Audio,
                 metrics = snapshot.Metrics,
             },
             cancellationToken);

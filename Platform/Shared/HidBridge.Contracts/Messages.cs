@@ -561,7 +561,10 @@ public sealed record SessionTransportHealthBody(
     string? MediaFailureReason = null,
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
-    string? MediaSource = null);
+    string? MediaSource = null,
+    string? MediaStreamKind = null,
+    MediaVideoDescriptorBody? MediaVideo = null,
+    MediaAudioDescriptorBody? MediaAudio = null);
 
 /// <summary>
 /// Carries one transport-readiness projection for WebRTC relay command routing.
@@ -587,8 +590,30 @@ public sealed record SessionTransportReadinessBody(
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
     string? MediaSource = null,
+    string? MediaStreamKind = null,
+    MediaVideoDescriptorBody? MediaVideo = null,
+    MediaAudioDescriptorBody? MediaAudio = null,
     IReadOnlyDictionary<string, object?>? Metrics = null,
     DateTimeOffset? EvaluatedAtUtc = null);
+
+/// <summary>
+/// Describes typed video stream properties published by edge runtimes.
+/// </summary>
+public sealed record MediaVideoDescriptorBody(
+    string? Codec = null,
+    int? Width = null,
+    int? Height = null,
+    double? FrameRate = null,
+    int? BitrateKbps = null);
+
+/// <summary>
+/// Describes typed audio stream properties published by edge runtimes.
+/// </summary>
+public sealed record MediaAudioDescriptorBody(
+    string? Codec = null,
+    int? Channels = null,
+    int? SampleRateHz = null,
+    int? BitrateKbps = null);
 
 /// <summary>
 /// Carries one media stream registration payload published by an edge agent.
@@ -602,6 +627,9 @@ public sealed record SessionMediaStreamRegistrationBody(
     DateTimeOffset ReportedAtUtc,
     string? FailureReason = null,
     string? Source = null,
+    string? StreamKind = null,
+    MediaVideoDescriptorBody? Video = null,
+    MediaAudioDescriptorBody? Audio = null,
     IReadOnlyDictionary<string, object?>? Metrics = null);
 
 /// <summary>
@@ -618,6 +646,9 @@ public sealed record SessionMediaStreamSnapshotBody(
     DateTimeOffset UpdatedAtUtc,
     string? FailureReason = null,
     string? Source = null,
+    string? StreamKind = null,
+    MediaVideoDescriptorBody? Video = null,
+    MediaAudioDescriptorBody? Audio = null,
     IReadOnlyDictionary<string, object?>? Metrics = null);
 
 /// <summary>

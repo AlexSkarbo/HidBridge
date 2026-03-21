@@ -27,7 +27,10 @@ public sealed class SessionMediaRegistryServiceTests
                 Ready: true,
                 State: "Ready",
                 ReportedAtUtc: nowUtc,
-                Source: "hdmi-usb-capture"),
+                Source: "hdmi-usb-capture",
+                StreamKind: "audio-video",
+                Video: new MediaVideoDescriptorBody("h264", 1920, 1080, 30d, 4000),
+                Audio: new MediaAudioDescriptorBody("opus", 2, 48000, 128)),
             TestContext.Current.CancellationToken);
 
         Assert.Equal("session-1", snapshot.SessionId);
@@ -39,6 +42,11 @@ public sealed class SessionMediaRegistryServiceTests
         Assert.NotNull(latest);
         Assert.Equal("stream-main", latest!.StreamId);
         Assert.Equal("hdmi-usb-capture", latest.Source);
+        Assert.Equal("audio-video", latest.StreamKind);
+        Assert.Equal("h264", latest.Video?.Codec);
+        Assert.Equal(1920, latest.Video?.Width);
+        Assert.Equal("opus", latest.Audio?.Codec);
+        Assert.Equal(2, latest.Audio?.Channels);
     }
 
     /// <summary>

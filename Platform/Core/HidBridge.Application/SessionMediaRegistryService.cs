@@ -27,6 +27,9 @@ public sealed class SessionMediaRegistryService
         var normalizedSource = string.IsNullOrWhiteSpace(registration.Source)
             ? null
             : registration.Source.Trim();
+        var normalizedStreamKind = string.IsNullOrWhiteSpace(registration.StreamKind)
+            ? null
+            : registration.StreamKind.Trim();
         var snapshot = new SessionMediaStreamSnapshotBody(
             SessionId: sessionId,
             PeerId: registration.PeerId.Trim(),
@@ -38,6 +41,9 @@ public sealed class SessionMediaRegistryService
             UpdatedAtUtc: nowUtc,
             FailureReason: registration.FailureReason,
             Source: normalizedSource,
+            StreamKind: normalizedStreamKind,
+            Video: registration.Video,
+            Audio: registration.Audio,
             Metrics: registration.Metrics);
 
         var state = _sessions.GetOrAdd(sessionId, static _ => new ConcurrentDictionary<string, SessionMediaStreamSnapshotBody>(StringComparer.OrdinalIgnoreCase));

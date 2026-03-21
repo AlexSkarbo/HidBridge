@@ -253,7 +253,10 @@ public sealed class WebRtcRelayReadinessServiceTests
                 Ready: true,
                 State: "Streaming",
                 ReportedAtUtc: DateTimeOffset.UtcNow,
-                Source: "hdmi-usb-capture"),
+                Source: "hdmi-usb-capture",
+                StreamKind: "audio-video",
+                Video: new MediaVideoDescriptorBody("h264", 1920, 1080, 30d, 4000),
+                Audio: new MediaAudioDescriptorBody("opus", 2, 48000, 128)),
             TestContext.Current.CancellationToken);
         var service = new WebRtcRelayReadinessService(
             sessionStore,
@@ -273,6 +276,11 @@ public sealed class WebRtcRelayReadinessServiceTests
         Assert.True(readiness.MediaReady);
         Assert.Equal("stream-registry", readiness.MediaStreamId);
         Assert.Equal("hdmi-usb-capture", readiness.MediaSource);
+        Assert.Equal("audio-video", readiness.MediaStreamKind);
+        Assert.Equal("h264", readiness.MediaVideo?.Codec);
+        Assert.Equal(1920, readiness.MediaVideo?.Width);
+        Assert.Equal("opus", readiness.MediaAudio?.Codec);
+        Assert.Equal(2, readiness.MediaAudio?.Channels);
     }
 
     /// <summary>
