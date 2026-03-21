@@ -12,15 +12,10 @@ namespace HidBridge.Transport.Uart;
 /// </summary>
 public sealed class HidBridgeUartClient : IAsyncDisposable
 {
-    private const byte Magic = 0xF1;
-    private const byte Version = 0x01;
     private const byte FlagResponse = 0x01;
     private const byte FlagError = 0x02;
     private const byte FlagResponseLegacy = 0x80;
     private const byte FlagErrorLegacy = 0x40;
-    private const int HeaderLen = 6;
-    private const int CrcLen = 2;
-    private const int HmacLen = 16;
 
     private readonly HidBridgeUartClientOptions _options;
     private readonly SerialPort _port;
@@ -511,34 +506,41 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         bool forceBootstrapKey = false,
         bool allowBootstrapFallback = true)
     {
-        for (var attempt = 0; attempt <= retries; attempt++)
-        {
-            var seq = unchecked((byte)Interlocked.Increment(ref _seq));
-            var requestKey = SelectRequestHmacKey(cmd, forceBootstrapKey);
-            var alternateResponseKey = SelectAlternateResponseHmacKey(requestKey);
-            var frame = BuildFrame(seq, cmd, payload, requestKey);
-            var slip = Slip.Encode(frame);
-
-            await _ioLock.WaitAsync(cancellationToken);
-            try
+        var response = await UartCommandRetryExecutor.ExecuteAsync(
+            retries,
+            async _ =>
             {
-                await _port.BaseStream.WriteAsync(slip.AsMemory(0, slip.Length), cancellationToken);
-                await _port.BaseStream.FlushAsync(cancellationToken);
-                var response = ReadMatchingResponse(seq, cmd, timeoutMs, cancellationToken, requestKey, alternateResponseKey);
-                if (response is not null)
+                var seq = unchecked((byte)Interlocked.Increment(ref _seq));
+                var requestKey = SelectRequestHmacKey(cmd, forceBootstrapKey);
+                var alternateResponseKey = SelectAlternateResponseHmacKey(requestKey);
+                var frame = UartFrameCodec.BuildFrame(seq, cmd, flags: 0, payload, requestKey);
+                var slip = Slip.Encode(frame);
+
+                await _ioLock.WaitAsync(cancellationToken);
+                try
                 {
-                    if (response.UsedAlternateHmacKey && ReferenceEquals(alternateResponseKey, _bootstrapHmacKey))
+                    await _port.BaseStream.WriteAsync(slip.AsMemory(0, slip.Length), cancellationToken);
+                    await _port.BaseStream.FlushAsync(cancellationToken);
+                    var attemptResponse = ReadMatchingResponse(seq, cmd, timeoutMs, cancellationToken, requestKey, alternateResponseKey);
+                    if (attemptResponse is not null
+                        && attemptResponse.UsedAlternateHmacKey
+                        && ReferenceEquals(alternateResponseKey, _bootstrapHmacKey))
                     {
                         UseBootstrapHmacKey();
                     }
 
-                    return response;
+                    return attemptResponse;
                 }
-            }
-            finally
-            {
-                _ioLock.Release();
-            }
+                finally
+                {
+                    _ioLock.Release();
+                }
+            },
+            cancellationToken);
+
+        if (response is not null)
+        {
+            return response;
         }
 
         if (!forceBootstrapKey
@@ -676,53 +678,14 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
     {
         response = null!;
         usedAlternateHmacKey = false;
-        if (frame.Length < HeaderLen + CrcLen + HmacLen) return false;
-        if (frame[0] != Magic || frame[1] != Version) return false;
-
-        var payloadLen = frame[5];
-        if (frame.Length != HeaderLen + payloadLen + CrcLen + HmacLen) return false;
-
-        var crc = Crc16Ccitt(frame[..(HeaderLen + payloadLen)]);
-        var actualCrc = (ushort)(frame[6 + payloadLen] | (frame[7 + payloadLen] << 8));
-        if (crc != actualCrc) return false;
-
-        if (!TryValidateHmac(frame, payloadLen, expectedHmacKey))
+        if (!UartFrameCodec.TryParseFrame(frame, expectedHmacKey, alternateHmacKey, out var parsedFrame))
         {
-            if (alternateHmacKey is null || !TryValidateHmac(frame, payloadLen, alternateHmacKey))
-            {
-                return false;
-            }
-
-            usedAlternateHmacKey = true;
+            return false;
         }
 
-        response = new UartResponse(frame[3], frame[4], frame[2], frame.Slice(6, payloadLen).ToArray());
+        usedAlternateHmacKey = parsedFrame.UsedAlternateHmacKey;
+        response = new UartResponse(parsedFrame.Seq, parsedFrame.Cmd, parsedFrame.Flags, parsedFrame.Payload);
         return true;
-    }
-
-    private byte[] BuildFrame(byte seq, byte cmd, ReadOnlySpan<byte> payload, byte[] hmacKey)
-    {
-        var payloadLen = payload.Length;
-        var frame = new byte[HeaderLen + payloadLen + CrcLen + HmacLen];
-        frame[0] = Magic;
-        frame[1] = Version;
-        frame[2] = 0;
-        frame[3] = seq;
-        frame[4] = cmd;
-        frame[5] = (byte)payloadLen;
-        if (payloadLen > 0)
-        {
-            payload.CopyTo(frame.AsSpan(6));
-        }
-
-        var crc = Crc16Ccitt(frame.AsSpan(0, HeaderLen + payloadLen));
-        frame[6 + payloadLen] = (byte)(crc & 0xFF);
-        frame[7 + payloadLen] = (byte)(crc >> 8);
-
-        using var hmac = new HMACSHA256(hmacKey);
-        var hash = hmac.ComputeHash(frame.AsSpan(0, HeaderLen + payloadLen + CrcLen).ToArray());
-        hash.AsSpan(0, HmacLen).CopyTo(frame.AsSpan(8 + payloadLen));
-        return frame;
     }
 
     private byte[] SelectRequestHmacKey(byte cmd, bool forceBootstrapKey)
@@ -744,27 +707,6 @@ public sealed class HidBridgeUartClient : IAsyncDisposable
         }
 
         return _bootstrapHmacKey;
-    }
-
-    private static bool TryValidateHmac(ReadOnlySpan<byte> frame, int payloadLen, byte[] key)
-    {
-        using var hmac = new HMACSHA256(key);
-        var hash = hmac.ComputeHash(frame[..(HeaderLen + payloadLen + CrcLen)].ToArray());
-        return hash.AsSpan(0, HmacLen).SequenceEqual(frame.Slice(8 + payloadLen, HmacLen));
-    }
-
-    private static ushort Crc16Ccitt(ReadOnlySpan<byte> data)
-    {
-        ushort crc = 0xFFFF;
-        foreach (var value in data)
-        {
-            crc ^= (ushort)(value << 8);
-            for (var i = 0; i < 8; i++)
-            {
-                crc = (ushort)((crc & 0x8000) != 0 ? (crc << 1) ^ 0x1021 : (crc << 1));
-            }
-        }
-        return crc;
     }
 
     /// <summary>

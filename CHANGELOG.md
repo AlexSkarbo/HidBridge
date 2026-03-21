@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-03-21 (pr-1 deterministic uart protocol tests + retry seam)
+
+Summary:
+
+- Extracted UART frame codec into dedicated reusable seam (`UartFrameCodec`) with deterministic CRC/HMAC parsing path.
+- Extracted deterministic retry orchestration seam (`UartCommandRetryExecutor`) and wired `HidBridgeUartClient` through it without changing runtime contract.
+- Added deterministic unit coverage for frame roundtrip, invalid CRC, invalid HMAC, alternate HMAC key fallback, retry exhaustion, and retry short-circuit on success.
+- Expanded UART action normalization coverage for keyboard/mouse aliases.
+
+Detailed notes:
+
+- `Platform/Shared/HidBridge.Transport.Uart/UartFrameCodec.cs` (new)
+- `Platform/Shared/HidBridge.Transport.Uart/UartCommandRetryExecutor.cs` (new)
+- `Platform/Shared/HidBridge.Transport.Uart/HidBridgeUartClient.cs`
+- `Platform/Shared/HidBridge.Transport.Uart/HidBridge.Transport.Uart.csproj`
+- `Platform/Tests/HidBridge.Platform.Tests/UartFrameCodecTests.cs` (new)
+- `Platform/Tests/HidBridge.Platform.Tests/UartRetryTimeoutTests.cs` (new)
+- `Platform/Tests/HidBridge.Platform.Tests/HidBridgeUartCommandDispatcherTests.cs`
+
+## 2026-03-21 (pr-2 media playback-url propagation across edge/api/ui)
+
+Summary:
+
+- Added typed media playback URL field across edge contracts, API transport snapshots/readiness, and Web read models.
+- Extended edge media probe to parse playback URL from health payloads (`playbackUrl`/`playbackUri`/`whepUrl`/`streamUrl`) with options fallback.
+- Surfaced media playback link in Session Details transport diagnostics panel.
+- Added regression assertions for playback URL parsing, registry persistence, relay metrics projection, and readiness projection.
+
+Detailed notes:
+
+- `Platform/Shared/HidBridge.Contracts/Messages.cs`
+- `Platform/Edge/HidBridge.Edge.Abstractions/EdgeRuntimeContracts.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyOptions.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyMediaReadinessProbe.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyWorker.cs`
+- `Platform/Core/HidBridge.Application/SessionMediaRegistryService.cs`
+- `Platform/Core/HidBridge.Application/WebRtcCommandRelayService.cs`
+- `Platform/Core/HidBridge.Application/WebRtcRelayReadinessService.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Endpoints/TransportEndpoints.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Models/OperatorUiReadModels.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionDetails.razor`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Localization/OperatorText.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/EdgeProxyMediaReadinessProbeTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/SessionMediaRegistryServiceTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcCommandRelayServiceTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcRelayReadinessServiceTests.cs`
+
 ## 2026-03-21 (pr-b relay stale-peer guard + smoke retry stabilization)
 
 Summary:
