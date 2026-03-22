@@ -37,175 +37,55 @@ $ErrorActionPreference = "Stop"
 
 $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $platformRoot = Split-Path -Parent $scriptsRoot
-. (Join-Path $scriptsRoot "Common/ScriptCommon.ps1")
+$runnerProject = Join-Path $platformRoot "Tools/HidBridge.Acceptance.Runner/HidBridge.Acceptance.Runner.csproj"
 
-$stackScript = Join-Path $scriptsRoot "run_webrtc_stack.ps1"
-$smokeScript = Join-Path $scriptsRoot "run_webrtc_edge_agent_smoke.ps1"
-$logRoot = New-OperationalLogRoot -PlatformRoot $platformRoot -Category "webrtc-edge-agent-acceptance"
-$results = New-OperationalResultList
-$stackSummaryPath = Join-Path $logRoot "webrtc-stack.summary.json"
-$smokeSummaryPath = Join-Path $logRoot "webrtc-edge-agent-smoke.result.json"
-
-if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) -and -not $AllowLegacyControlWs) {
-    throw "CommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
-}
-if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
-    Assert-LegacyExp022Enabled -Context "run_webrtc_edge_agent_acceptance.ps1 controlws mode"
+if (-not (Test-Path -Path $runnerProject -PathType Leaf)) {
+    throw "Acceptance runner project not found: $runnerProject"
 }
 
-# Converts control health endpoint to websocket endpoint for controlws executor.
-function Convert-ControlHealthToWebSocketUrl {
-    param([string]$HealthUrl)
+$runnerArgs = @(
+    "--platform-root", $platformRoot,
+    "--api-base-url", $ApiBaseUrl,
+    "--command-executor", $CommandExecutor,
+    "--control-health-url", $ControlHealthUrl,
+    "--keycloak-base-url", $KeycloakBaseUrl,
+    "--realm-name", $RealmName,
+    "--token-client-id", $TokenClientId,
+    "--token-client-secret", $TokenClientSecret,
+    "--token-scope", $TokenScope,
+    "--token-username", $TokenUsername,
+    "--token-password", $TokenPassword,
+    "--request-timeout-sec", [string]$RequestTimeoutSec,
+    "--control-health-attempts", [string]$ControlHealthAttempts,
+    "--keycloak-health-attempts", [string]$KeycloakHealthAttempts,
+    "--keycloak-health-delay-ms", [string]$KeycloakHealthDelayMs,
+    "--token-request-attempts", [string]$TokenRequestAttempts,
+    "--token-request-delay-ms", [string]$TokenRequestDelayMs,
+    "--transport-health-attempts", [string]$TransportHealthAttempts,
+    "--transport-health-delay-ms", [string]$TransportHealthDelayMs,
+    "--uart-port", $UartPort,
+    "--uart-baud", [string]$UartBaud,
+    "--uart-hmac-key", $UartHmacKey,
+    "--principal-id", $PrincipalId,
+    "--peer-ready-timeout-sec", [string]$PeerReadyTimeoutSec,
+    "--output-json-path", $OutputJsonPath
+)
 
-    $uri = [Uri]$HealthUrl
-    $builder = [System.UriBuilder]::new($uri)
-    $builder.Scheme = if ([string]::Equals($uri.Scheme, "https", [StringComparison]::OrdinalIgnoreCase)) { "wss" } else { "ws" }
-    if ($builder.Path.EndsWith("/health", [StringComparison]::OrdinalIgnoreCase)) {
-        $builder.Path = $builder.Path.Substring(0, $builder.Path.Length - "/health".Length) + "/ws/control"
-    }
-    else {
-        $builder.Path = "/ws/control"
-    }
-
-    return $builder.Uri.AbsoluteUri
+if ($AllowLegacyControlWs) { $runnerArgs += "--allow-legacy-controlws" }
+if ($SkipTransportHealthCheck) { $runnerArgs += "--skip-transport-health-check" }
+if ($SkipRuntimeBootstrap) { $runnerArgs += "--skip-runtime-bootstrap" }
+if ($StopExisting) { $runnerArgs += "--stop-existing" }
+if ($StopStackAfter) { $runnerArgs += "--stop-stack-after" }
+if (-not [string]::IsNullOrWhiteSpace($ControlWsUrl)) {
+    $runnerArgs += "--control-ws-url"
+    $runnerArgs += $ControlWsUrl
 }
 
-# Reads JSON from disk and returns $null when file is missing or invalid.
-function Read-JsonOrNull {
-    param([string]$Path)
+$arguments = @("run", "--project", $runnerProject, "-c", "Debug", "--") + $runnerArgs
+& dotnet @arguments
 
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -Path $Path -PathType Leaf)) {
-        return $null
-    }
-
-    try {
-        return (Get-Content -Raw -Path $Path | ConvertFrom-Json)
-    }
-    catch {
-        return $null
-    }
-}
-
-# Stops one process by id and keeps acceptance flow alive on cleanup failures.
-function Stop-OptionalProcess {
-    param([object]$PidValue)
-
-    $targetPid = 0
-    if ($null -eq $PidValue -or -not [int]::TryParse([string]$PidValue, [ref]$targetPid) -or $targetPid -le 0) {
-        return
-    }
-
-    try {
-        Stop-Process -Id $targetPid -Force -ErrorAction Stop
-        Write-Host "Stopped PID $targetPid"
-    }
-    catch {
-        Write-Warning "Failed to stop PID ${targetPid}: $($_.Exception.Message)"
-    }
-}
-
-try {
-    $stackParameters = @{
-        ApiBaseUrl = $ApiBaseUrl
-        CommandExecutor = $CommandExecutor
-        UartPort = $UartPort
-        UartBaud = [Math]::Max(300, $UartBaud)
-        UartHmacKey = $UartHmacKey
-        PrincipalId = $PrincipalId
-        SkipIdentityReset = $true
-        SkipCiLocal = $true
-        OutputJsonPath = $stackSummaryPath
-    }
-    if ($SkipRuntimeBootstrap) { $stackParameters.SkipRuntimeBootstrap = $true }
-    if ($StopExisting) { $stackParameters.StopExisting = $true }
-    if ($AllowLegacyControlWs) { $stackParameters.AllowLegacyControlWs = $true }
-
-    if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
-        $effectiveControlWsUrl = if ([string]::IsNullOrWhiteSpace($ControlWsUrl)) { Convert-ControlHealthToWebSocketUrl -HealthUrl $ControlHealthUrl } else { $ControlWsUrl }
-        $stackParameters.ControlWsUrl = $effectiveControlWsUrl
-    }
-
-    Invoke-LoggedScript -Results $results -Name "WebRTC Stack" -LogRoot $logRoot -ScriptPath $stackScript -Parameters $stackParameters -StopOnFailure:$true
-
-    $targetPeerReadyTimeoutSec = [Math]::Max(5, $PeerReadyTimeoutSec)
-    $effectiveTransportHealthDelayMs = [Math]::Max(100, $TransportHealthDelayMs)
-    $minTransportAttemptsByTimeout = [int][Math]::Ceiling(($targetPeerReadyTimeoutSec * 1000.0) / $effectiveTransportHealthDelayMs)
-
-    $smokeParameters = @{
-        ApiBaseUrl = $ApiBaseUrl
-        KeycloakBaseUrl = $KeycloakBaseUrl
-        RealmName = $RealmName
-        TokenClientId = $TokenClientId
-        TokenClientSecret = $TokenClientSecret
-        TokenScope = $TokenScope
-        TokenUsername = $TokenUsername
-        TokenPassword = $TokenPassword
-        ControlHealthUrl = $ControlHealthUrl
-        RequestTimeoutSec = [Math]::Max(1, $RequestTimeoutSec)
-        ControlHealthAttempts = [Math]::Max(1, $ControlHealthAttempts)
-        KeycloakHealthAttempts = [Math]::Max(1, $KeycloakHealthAttempts)
-        KeycloakHealthDelayMs = [Math]::Max(100, $KeycloakHealthDelayMs)
-        TokenRequestAttempts = [Math]::Max(1, $TokenRequestAttempts)
-        TokenRequestDelayMs = [Math]::Max(100, $TokenRequestDelayMs)
-        TransportHealthAttempts = [Math]::Max([Math]::Max(1, $TransportHealthAttempts), $minTransportAttemptsByTimeout)
-        TransportHealthDelayMs = $effectiveTransportHealthDelayMs
-        PrincipalId = $PrincipalId
-        OutputJsonPath = $smokeSummaryPath
-    }
-    if ($SkipTransportHealthCheck) {
-        $smokeParameters.SkipTransportHealthCheck = $true
-    }
-
-    Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Smoke" -LogRoot $logRoot -ScriptPath $smokeScript -Parameters $smokeParameters -StopOnFailure:$true
-}
-catch {
-    $abortPath = Join-Path $logRoot "webrtc-edge-agent-acceptance.abort.log"
-    Add-Content -Path $abortPath -Value $_.Exception.ToString()
-    Add-OperationalResult -Results $results -Name "WebRTC Edge Agent Acceptance orchestration" -Status "FAIL" -Seconds 0 -ExitCode 1 -LogPath $abortPath
-    Write-Host ""
-    Write-Host "WebRTC edge-agent acceptance aborted: $($_.Exception.Message)" -ForegroundColor Red
-}
-finally {
-    if ($StopStackAfter) {
-        $stackSummary = Read-JsonOrNull -Path $stackSummaryPath
-        if ($null -ne $stackSummary) {
-            Stop-OptionalProcess -PidValue $stackSummary.adapterPid
-            Stop-OptionalProcess -PidValue $stackSummary.exp022Pid
-        }
-    }
-}
-
-$failed = @($results | Where-Object { $_.Status -eq "FAIL" })
-$smokeSummary = Read-JsonOrNull -Path $smokeSummaryPath
-$stackSummary = Read-JsonOrNull -Path $stackSummaryPath
-$finalSummary = [pscustomobject]@{
-    apiBaseUrl = $ApiBaseUrl
-    commandExecutor = $CommandExecutor
-    stackSummaryPath = $stackSummaryPath
-    smokeSummaryPath = $smokeSummaryPath
-    stack = $stackSummary
-    smoke = $smokeSummary
-    pass = ($failed.Count -eq 0)
-}
-
-if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
-    $resolvedOutput = if ([System.IO.Path]::IsPathRooted($OutputJsonPath)) { $OutputJsonPath } else { Join-Path $platformRoot $OutputJsonPath }
-    $resolvedOutputDir = Split-Path -Parent $resolvedOutput
-    if (-not [string]::IsNullOrWhiteSpace($resolvedOutputDir) -and -not (Test-Path -Path $resolvedOutputDir)) {
-        New-Item -ItemType Directory -Force -Path $resolvedOutputDir | Out-Null
-    }
-
-    $finalSummary | ConvertTo-Json -Depth 20 | Set-Content -Path $resolvedOutput -Encoding utf8
-}
-
-Write-OperationalSummary -Results $results -LogRoot $logRoot -Header "WebRTC Edge Agent Acceptance Summary"
-if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
-    Write-Host ""
-    Write-Host "Acceptance summary JSON: $OutputJsonPath"
-}
-
-if ($failed.Count -gt 0) {
+if ($null -eq $LASTEXITCODE) {
     exit 1
 }
 
-exit 0
+exit $LASTEXITCODE

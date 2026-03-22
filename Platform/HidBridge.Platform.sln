@@ -53,6 +53,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidBridge.Edge.Abstractions
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidBridge.Edge.HidBridgeProtocol", "Edge\HidBridge.Edge.HidBridgeProtocol\HidBridge.Edge.HidBridgeProtocol.csproj", "{04A739CD-92BD-4087-BE10-E08BD043E0D6}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HidBridge.Acceptance.Runner", "Tools\HidBridge.Acceptance.Runner\HidBridge.Acceptance.Runner.csproj", "{B5777A79-1843-465D-97BA-994D20122018}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -279,6 +283,18 @@ Global
 		{04A739CD-92BD-4087-BE10-E08BD043E0D6}.Release|x64.Build.0 = Release|Any CPU
 		{04A739CD-92BD-4087-BE10-E08BD043E0D6}.Release|x86.ActiveCfg = Release|Any CPU
 		{04A739CD-92BD-4087-BE10-E08BD043E0D6}.Release|x86.Build.0 = Release|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Debug|x64.Build.0 = Debug|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Debug|x86.Build.0 = Debug|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Release|x64.ActiveCfg = Release|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Release|x64.Build.0 = Release|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Release|x86.ActiveCfg = Release|Any CPU
+		{B5777A79-1843-465D-97BA-994D20122018}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -302,5 +318,6 @@ Global
 		{BA81CB59-0590-470F-8306-47F11D525BA5} = {4781A426-7CEC-ABE6-97DC-1340C8DA5A5F}
 		{5A3B9C52-A805-47A5-997D-D091D0984476} = {4781A426-7CEC-ABE6-97DC-1340C8DA5A5F}
 		{04A739CD-92BD-4087-BE10-E08BD043E0D6} = {4781A426-7CEC-ABE6-97DC-1340C8DA5A5F}
+		{B5777A79-1843-465D-97BA-994D20122018} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

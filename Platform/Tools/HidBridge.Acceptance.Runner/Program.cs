@@ -1,0 +1,654 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+
+var options = AcceptanceRunnerOptions.Parse(args);
+var platformRoot = ResolvePlatformRoot(options.PlatformRoot);
+var logsRoot = Path.Combine(platformRoot, ".logs", "webrtc-edge-agent-acceptance", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+Directory.CreateDirectory(logsRoot);
+
+var stackSummaryPath = Path.Combine(logsRoot, "webrtc-stack.summary.json");
+var smokeSummaryPath = Path.Combine(logsRoot, "webrtc-edge-agent-smoke.result.json");
+
+var result = new AcceptanceSummary
+{
+    ApiBaseUrl = options.ApiBaseUrl,
+    CommandExecutor = options.CommandExecutor,
+    StackSummaryPath = string.Empty,
+    SmokeSummaryPath = smokeSummaryPath,
+};
+
+Console.WriteLine("=== WebRTC Edge Agent Acceptance (.NET runner) ===");
+Console.WriteLine($"Platform root: {platformRoot}");
+Console.WriteLine($"Logs root:     {logsRoot}");
+var sessionRuntime = ResolveSessionRuntime(options, platformRoot);
+result.Stack = JsonSerializer.SerializeToElement(new
+{
+    sessionId = sessionRuntime.SessionId,
+    peerId = sessionRuntime.PeerId,
+    endpointId = sessionRuntime.EndpointId,
+    runtimeBootstrapSkipped = true,
+    source = "dotnet-acceptance-runner",
+});
+
+Console.WriteLine("\n=== WebRTC Edge Agent Smoke ===");
+var smokeSummary = await RunSmokeAsync(options, sessionRuntime, smokeSummaryPath, CancellationToken.None);
+await WriteJsonAsync(smokeSummaryPath, smokeSummary);
+result.Smoke = TryReadJson(smokeSummaryPath);
+result.Pass = string.Equals(smokeSummary.CommandStatus, "Applied", StringComparison.OrdinalIgnoreCase);
+var smokeExitCode = result.Pass ? 0 : 1;
+
+await WriteSummaryAsync(options.OutputJsonPath, result, platformRoot);
+
+Console.WriteLine("\n=== Acceptance Summary ===");
+Console.WriteLine($"Result: {(result.Pass ? "PASS" : "FAIL")}");
+Console.WriteLine($"Session:       {sessionRuntime.SessionId}");
+Console.WriteLine($"Peer:          {sessionRuntime.PeerId}");
+Console.WriteLine($"Smoke summary: {smokeSummaryPath}");
+if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
+{
+    Console.WriteLine($"Output JSON: {ResolveOutputPath(options.OutputJsonPath, platformRoot)}");
+}
+
+return smokeExitCode;
+
+static async Task<SmokeSummary> RunSmokeAsync(
+    AcceptanceRunnerOptions options,
+    SessionRuntime sessionRuntime,
+    string smokeSummaryPath,
+    CancellationToken cancellationToken)
+{
+    using var keycloakClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSec)),
+    };
+    using var apiClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSec)),
+    };
+
+    var token = await AcquireAccessTokenAsync(options, keycloakClient, cancellationToken);
+    apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-UserId", options.PrincipalId);
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-PrincipalId", options.PrincipalId);
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-TenantId", "local-tenant");
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-OrganizationId", "local-org");
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-Role", "operator.admin,operator.moderator,operator.viewer");
+
+    await MarkPeerOnlineAsync(options, apiClient, sessionRuntime, cancellationToken);
+    sessionRuntime = await EnsureControlLeaseAsync(options, apiClient, sessionRuntime, cancellationToken);
+    var readiness = options.SkipTransportHealthCheck
+        ? null
+        : await WaitRelayTransportReadyAsync(options, apiClient, sessionRuntime.SessionId, cancellationToken);
+
+    var commandAttempts = new List<SmokeCommandAttempt>();
+    var effectiveText = $"hello webrtc {DateTimeOffset.UtcNow:HH:mm:ss}";
+    var maxAttempts = Math.Max(1, options.CommandAttempts);
+    var retryDelay = Math.Max(100, options.CommandRetryDelayMs);
+    CommandAck? finalAck = null;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        var commandId = $"cmd-webrtc-smoke-{DateTimeOffset.UtcNow:HHmmssfff}";
+        finalAck = await DispatchCommandAsync(options, apiClient, sessionRuntime, commandId, effectiveText, cancellationToken);
+        commandAttempts.Add(new SmokeCommandAttempt(attempt, commandId, finalAck.Status, DateTimeOffset.UtcNow));
+        if (string.Equals(finalAck.Status, "Applied", StringComparison.OrdinalIgnoreCase))
+        {
+            break;
+        }
+
+        if (attempt >= maxAttempts || !IsRetryable(finalAck))
+        {
+            break;
+        }
+
+        if (!options.SkipTransportHealthCheck)
+        {
+            try
+            {
+                readiness = await WaitRelayTransportReadyAsync(options, apiClient, sessionRuntime.SessionId, cancellationToken);
+            }
+            catch
+            {
+                // Keep command retry behavior deterministic even when readiness re-check fails.
+            }
+        }
+
+        await Task.Delay(retryDelay, cancellationToken);
+    }
+
+    if (finalAck is null)
+    {
+        throw new InvalidOperationException("Smoke command did not produce command result.");
+    }
+
+    return new SmokeSummary
+    {
+        ApiBaseUrl = options.ApiBaseUrl,
+        SessionId = sessionRuntime.SessionId,
+        PeerId = sessionRuntime.PeerId,
+        PrincipalId = options.PrincipalId,
+        CommandId = finalAck.CommandId,
+        CommandAction = options.CommandAction,
+        CommandStatus = finalAck.Status,
+        CommandResponse = finalAck.Raw,
+        CommandAttemptsConfigured = maxAttempts,
+        CommandAttempts = commandAttempts,
+        TransportReadiness = readiness,
+        OutputPath = smokeSummaryPath,
+    };
+}
+
+static SessionRuntime ResolveSessionRuntime(AcceptanceRunnerOptions options, string platformRoot)
+{
+    var sessionId = options.SessionId;
+    var peerId = options.PeerId;
+    var endpointId = options.EndpointId;
+    var envPath = ResolveOutputPath(options.SessionEnvPath, platformRoot);
+    if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
+    {
+        var kv = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in File.ReadAllLines(envPath))
+        {
+            var separator = line.IndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            kv[line[..separator]] = line[(separator + 1)..];
+        }
+
+        if (kv.TryGetValue("SESSION_ID", out var envSession) && !string.IsNullOrWhiteSpace(envSession))
+        {
+            sessionId = envSession;
+        }
+
+        if (kv.TryGetValue("PEER_ID", out var envPeer) && !string.IsNullOrWhiteSpace(envPeer))
+        {
+            peerId = envPeer;
+        }
+
+        if (kv.TryGetValue("ENDPOINT_ID", out var envEndpoint) && !string.IsNullOrWhiteSpace(envEndpoint))
+        {
+            endpointId = envEndpoint;
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(sessionId))
+    {
+        sessionId = $"room-webrtc-peer-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
+    }
+
+    if (string.IsNullOrWhiteSpace(peerId))
+    {
+        peerId = "peer-local-uart-edge";
+    }
+
+    if (string.IsNullOrWhiteSpace(endpointId))
+    {
+        endpointId = "endpoint_local_demo";
+    }
+
+    return new SessionRuntime(
+        SessionId: sessionId ?? string.Empty,
+        PeerId: peerId ?? string.Empty,
+        EndpointId: endpointId);
+}
+
+static async Task<string> AcquireAccessTokenAsync(AcceptanceRunnerOptions options, HttpClient client, CancellationToken cancellationToken)
+{
+    var keycloak = options.KeycloakBaseUrl.TrimEnd('/');
+    var tokenEndpoint = $"{keycloak}/realms/{options.RealmName}/protocol/openid-connect/token";
+    var attempts = Math.Max(1, options.TokenRequestAttempts);
+    var delayMs = Math.Max(100, options.TokenRequestDelayMs);
+
+    Exception? last = null;
+    for (var attempt = 1; attempt <= attempts; attempt++)
+    {
+        try
+        {
+            using var body = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("grant_type", "password"),
+                new KeyValuePair<string, string>("client_id", options.TokenClientId),
+                new KeyValuePair<string, string>("client_secret", options.TokenClientSecret),
+                new KeyValuePair<string, string>("username", options.TokenUsername),
+                new KeyValuePair<string, string>("password", options.TokenPassword),
+                new KeyValuePair<string, string>("scope", options.TokenScope),
+            }.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)));
+
+            using var response = await client.PostAsync(tokenEndpoint, body, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            var token = doc.RootElement.GetProperty("access_token").GetString();
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                return token;
+            }
+        }
+        catch (Exception ex)
+        {
+            last = ex;
+            if (attempt < attempts)
+            {
+                await Task.Delay(delayMs, cancellationToken);
+            }
+        }
+    }
+
+    throw new InvalidOperationException($"Keycloak token request failed after {attempts} attempt(s).", last);
+}
+
+static async Task MarkPeerOnlineAsync(
+    AcceptanceRunnerOptions options,
+    HttpClient client,
+    SessionRuntime runtime,
+    CancellationToken cancellationToken)
+{
+    var uri = $"{options.ApiBaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(runtime.SessionId)}/transport/webrtc/peers/{Uri.EscapeDataString(runtime.PeerId)}/online";
+    var body = new
+    {
+        endpointId = runtime.EndpointId,
+        metadata = new Dictionary<string, string>
+        {
+            ["adapter"] = "webrtc-edge-agent-smoke-dotnet",
+            ["state"] = "Connected",
+            ["principalId"] = options.PrincipalId,
+        },
+    };
+    using var response = await client.PostAsJsonAsync(uri, body, cancellationToken);
+    if (response.StatusCode == HttpStatusCode.NotFound)
+    {
+        return;
+    }
+
+    response.EnsureSuccessStatusCode();
+}
+
+static async Task<SessionRuntime> EnsureControlLeaseAsync(
+    AcceptanceRunnerOptions options,
+    HttpClient client,
+    SessionRuntime runtime,
+    CancellationToken cancellationToken)
+{
+    if (options.SkipControlLeaseRequest)
+    {
+        return runtime;
+    }
+
+    var uri = $"{options.ApiBaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(runtime.SessionId)}/control/ensure";
+    var body = new
+    {
+        participantId = $"owner:{options.PrincipalId}",
+        requestedBy = options.PrincipalId,
+        endpointId = runtime.EndpointId,
+        profile = "UltraLowLatency",
+        leaseSeconds = Math.Max(30, options.LeaseSeconds),
+        reason = "webrtc edge-agent smoke (dotnet)",
+        autoCreateSessionIfMissing = true,
+        preferLiveRelaySession = true,
+        tenantId = "local-tenant",
+        organizationId = "local-org",
+    };
+
+    using var response = await client.PostAsJsonAsync(uri, body, cancellationToken);
+    if (response.StatusCode == HttpStatusCode.NotFound)
+    {
+        return runtime;
+    }
+
+    response.EnsureSuccessStatusCode();
+    using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+    if (!doc.RootElement.TryGetProperty("effectiveSessionId", out var effective))
+    {
+        return runtime;
+    }
+
+    var effectiveSessionId = effective.GetString();
+    return string.IsNullOrWhiteSpace(effectiveSessionId)
+        ? runtime
+        : runtime with { SessionId = effectiveSessionId };
+}
+
+static async Task<object?> WaitRelayTransportReadyAsync(
+    AcceptanceRunnerOptions options,
+    HttpClient client,
+    string sessionId,
+    CancellationToken cancellationToken)
+{
+    var attempts = Math.Max(1, options.TransportHealthAttempts);
+    if (options.PeerReadyTimeoutSec > 0)
+    {
+        var byTimeout = (int)Math.Ceiling((Math.Max(5, options.PeerReadyTimeoutSec) * 1000.0) / Math.Max(100, options.TransportHealthDelayMs));
+        attempts = Math.Max(attempts, byTimeout);
+    }
+
+    var delay = Math.Max(100, options.TransportHealthDelayMs);
+    var readinessUri = $"{options.ApiBaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/transport/readiness?provider=webrtc-datachannel";
+    object? last = null;
+    for (var i = 0; i < attempts; i++)
+    {
+        try
+        {
+            using var response = await client.GetAsync(readinessUri, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            var root = doc.RootElement;
+            var ready = root.TryGetProperty("ready", out var readyElement) && readyElement.ValueKind == JsonValueKind.True;
+            last = JsonSerializer.Deserialize<object>(root.GetRawText());
+            if (ready)
+            {
+                return last;
+            }
+        }
+        catch
+        {
+            // keep polling
+        }
+
+        await Task.Delay(delay, cancellationToken);
+    }
+
+    return last;
+}
+
+static async Task<CommandAck> DispatchCommandAsync(
+    AcceptanceRunnerOptions options,
+    HttpClient client,
+    SessionRuntime runtime,
+    string commandId,
+    string commandText,
+    CancellationToken cancellationToken)
+{
+    var uri = $"{options.ApiBaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(runtime.SessionId)}/commands";
+    var payload = new
+    {
+        commandId,
+        sessionId = runtime.SessionId,
+        channel = "Hid",
+        action = options.CommandAction,
+        args = new
+        {
+            text = commandText,
+            transportProvider = "webrtc-datachannel",
+            recipientPeerId = runtime.PeerId,
+            participantId = $"owner:{options.PrincipalId}",
+            principalId = options.PrincipalId,
+        },
+        timeoutMs = Math.Max(1000, options.TimeoutMs),
+        idempotencyKey = $"idem-{commandId}",
+        tenantId = "local-tenant",
+        organizationId = "local-org",
+    };
+
+    using var response = await client.PostAsJsonAsync(uri, payload, cancellationToken);
+    response.EnsureSuccessStatusCode();
+    var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+    using var doc = JsonDocument.Parse(raw);
+    var status = doc.RootElement.TryGetProperty("status", out var statusElement)
+        ? statusElement.GetString() ?? "Unknown"
+        : "Unknown";
+    return new CommandAck(commandId, status, JsonSerializer.Deserialize<object>(raw));
+}
+
+static bool IsRetryable(CommandAck ack)
+{
+    if (string.Equals(ack.Status, "Timeout", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    if (!string.Equals(ack.Status, "Rejected", StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    if (ack.Raw is not JsonElement element || !element.TryGetProperty("error", out var error))
+    {
+        return false;
+    }
+
+    if (!error.TryGetProperty("code", out var codeElement))
+    {
+        return false;
+    }
+
+    var code = codeElement.GetString();
+    return !string.IsNullOrWhiteSpace(code) &&
+           code.StartsWith("E_TRANSPORT_", StringComparison.OrdinalIgnoreCase);
+}
+
+static string ResolvePlatformRoot(string? overridePath)
+{
+    if (!string.IsNullOrWhiteSpace(overridePath))
+    {
+        return Path.GetFullPath(overridePath);
+    }
+
+    var current = Directory.GetCurrentDirectory();
+    if (File.Exists(Path.Combine(current, "run.ps1")))
+    {
+        return current;
+    }
+
+    var parent = Directory.GetParent(current)?.FullName;
+    if (parent is not null && File.Exists(Path.Combine(parent, "run.ps1")))
+    {
+        return parent;
+    }
+
+    return current;
+}
+
+static JsonElement? TryReadJson(string path)
+{
+    if (!File.Exists(path))
+    {
+        return null;
+    }
+
+    try
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        return doc.RootElement.Clone();
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static async Task WriteSummaryAsync(string outputPath, AcceptanceSummary summary, string platformRoot)
+{
+    var resolved = ResolveOutputPath(outputPath, platformRoot);
+    var dir = Path.GetDirectoryName(resolved);
+    if (!string.IsNullOrWhiteSpace(dir))
+    {
+        Directory.CreateDirectory(dir);
+    }
+
+    var json = JsonSerializer.Serialize(summary, new JsonSerializerOptions
+    {
+        WriteIndented = true,
+    });
+    await File.WriteAllTextAsync(resolved, json);
+}
+
+static async Task WriteJsonAsync(string path, object payload)
+{
+    var dir = Path.GetDirectoryName(path);
+    if (!string.IsNullOrWhiteSpace(dir))
+    {
+        Directory.CreateDirectory(dir);
+    }
+
+    var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+    await File.WriteAllTextAsync(path, json);
+}
+
+static string ResolveOutputPath(string outputPath, string platformRoot)
+{
+    if (Path.IsPathRooted(outputPath))
+    {
+        return outputPath;
+    }
+
+    return Path.GetFullPath(Path.Combine(platformRoot, outputPath));
+}
+
+internal sealed class AcceptanceRunnerOptions
+{
+    public string ApiBaseUrl { get; private set; } = "http://127.0.0.1:18093";
+    public string CommandExecutor { get; private set; } = "uart";
+    public bool AllowLegacyControlWs { get; private set; }
+    public string ControlHealthUrl { get; private set; } = "http://127.0.0.1:28092/health";
+    public string ControlWsUrl { get; private set; } = string.Empty;
+    public string KeycloakBaseUrl { get; private set; } = "http://127.0.0.1:18096";
+    public string RealmName { get; private set; } = "hidbridge-dev";
+    public string TokenClientId { get; private set; } = "controlplane-smoke";
+    public string TokenClientSecret { get; private set; } = string.Empty;
+    public string TokenScope { get; private set; } = "openid profile email";
+    public string TokenUsername { get; private set; } = "operator.smoke.admin";
+    public string TokenPassword { get; private set; } = "ChangeMe123!";
+    public int RequestTimeoutSec { get; private set; } = 15;
+    public int ControlHealthAttempts { get; private set; } = 20;
+    public int KeycloakHealthAttempts { get; private set; } = 60;
+    public int KeycloakHealthDelayMs { get; private set; } = 500;
+    public int TokenRequestAttempts { get; private set; } = 5;
+    public int TokenRequestDelayMs { get; private set; } = 500;
+    public bool SkipTransportHealthCheck { get; private set; }
+    public int TransportHealthAttempts { get; private set; } = 20;
+    public int TransportHealthDelayMs { get; private set; } = 500;
+    public string UartPort { get; private set; } = "COM6";
+    public int UartBaud { get; private set; } = 3_000_000;
+    public string UartHmacKey { get; private set; } = "your-master-secret";
+    public string PrincipalId { get; private set; } = "smoke-runner";
+    public int PeerReadyTimeoutSec { get; private set; } = 45;
+    public string SessionEnvPath { get; private set; } = "Platform/.logs/webrtc-peer-adapter.session.env";
+    public string SessionId { get; private set; } = string.Empty;
+    public string PeerId { get; private set; } = string.Empty;
+    public string EndpointId { get; private set; } = string.Empty;
+    public string CommandAction { get; private set; } = "keyboard.text";
+    public int TimeoutMs { get; private set; } = 8000;
+    public int CommandAttempts { get; private set; } = 3;
+    public int CommandRetryDelayMs { get; private set; } = 750;
+    public bool SkipControlLeaseRequest { get; private set; }
+    public int LeaseSeconds { get; private set; } = 120;
+    public bool SkipRuntimeBootstrap { get; private set; }
+    public bool StopExisting { get; private set; }
+    public bool StopStackAfter { get; private set; }
+    public string OutputJsonPath { get; private set; } = "Platform/.logs/webrtc-edge-agent-acceptance.result.json";
+    public string PlatformRoot { get; private set; } = string.Empty;
+
+    public static AcceptanceRunnerOptions Parse(string[] args)
+    {
+        var options = new AcceptanceRunnerOptions();
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (!arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var key = arg[2..].ToLowerInvariant();
+            switch (key)
+            {
+                case "allow-legacy-controlws": options.AllowLegacyControlWs = true; break;
+                case "skip-transport-health-check": options.SkipTransportHealthCheck = true; break;
+                case "skip-runtime-bootstrap": options.SkipRuntimeBootstrap = true; break;
+                case "stop-existing": options.StopExisting = true; break;
+                case "stop-stack-after": options.StopStackAfter = true; break;
+                case "skip-control-lease-request": options.SkipControlLeaseRequest = true; break;
+                case "api-base-url": options.ApiBaseUrl = RequireValue(args, ref i, arg); break;
+                case "command-executor": options.CommandExecutor = RequireValue(args, ref i, arg); break;
+                case "command-action": options.CommandAction = RequireValue(args, ref i, arg); break;
+                case "timeout-ms": options.TimeoutMs = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "command-attempts": options.CommandAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "command-retry-delay-ms": options.CommandRetryDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "lease-seconds": options.LeaseSeconds = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "control-health-url": options.ControlHealthUrl = RequireValue(args, ref i, arg); break;
+                case "control-ws-url": options.ControlWsUrl = RequireValue(args, ref i, arg); break;
+                case "keycloak-base-url": options.KeycloakBaseUrl = RequireValue(args, ref i, arg); break;
+                case "realm-name": options.RealmName = RequireValue(args, ref i, arg); break;
+                case "token-client-id": options.TokenClientId = RequireValue(args, ref i, arg); break;
+                case "token-client-secret": options.TokenClientSecret = RequireValue(args, ref i, arg); break;
+                case "token-scope": options.TokenScope = RequireValue(args, ref i, arg); break;
+                case "token-username": options.TokenUsername = RequireValue(args, ref i, arg); break;
+                case "token-password": options.TokenPassword = RequireValue(args, ref i, arg); break;
+                case "request-timeout-sec": options.RequestTimeoutSec = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "control-health-attempts": options.ControlHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "keycloak-health-attempts": options.KeycloakHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "keycloak-health-delay-ms": options.KeycloakHealthDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "token-request-attempts": options.TokenRequestAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "token-request-delay-ms": options.TokenRequestDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "transport-health-attempts": options.TransportHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "transport-health-delay-ms": options.TransportHealthDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "uart-port": options.UartPort = RequireValue(args, ref i, arg); break;
+                case "uart-baud": options.UartBaud = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "uart-hmac-key": options.UartHmacKey = RequireValue(args, ref i, arg); break;
+                case "principal-id": options.PrincipalId = RequireValue(args, ref i, arg); break;
+                case "peer-ready-timeout-sec": options.PeerReadyTimeoutSec = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "session-env-path": options.SessionEnvPath = RequireValue(args, ref i, arg); break;
+                case "session-id": options.SessionId = RequireValue(args, ref i, arg); break;
+                case "peer-id": options.PeerId = RequireValue(args, ref i, arg); break;
+                case "endpoint-id": options.EndpointId = RequireValue(args, ref i, arg); break;
+                case "output-json-path": options.OutputJsonPath = RequireValue(args, ref i, arg); break;
+                case "platform-root": options.PlatformRoot = RequireValue(args, ref i, arg); break;
+                default:
+                    throw new ArgumentException($"Unknown argument: {arg}");
+            }
+        }
+
+        return options;
+    }
+
+    private static string RequireValue(string[] args, ref int index, string argument)
+    {
+        if (index + 1 >= args.Length)
+        {
+            throw new ArgumentException($"Missing value for {argument}");
+        }
+
+        index++;
+        return args[index];
+    }
+}
+
+internal sealed class AcceptanceSummary
+{
+    public string ApiBaseUrl { get; set; } = string.Empty;
+    public string CommandExecutor { get; set; } = string.Empty;
+    public string StackSummaryPath { get; set; } = string.Empty;
+    public string SmokeSummaryPath { get; set; } = string.Empty;
+    public JsonElement? Stack { get; set; }
+    public JsonElement? Smoke { get; set; }
+    public bool Pass { get; set; }
+}
+
+internal sealed record SessionRuntime(string SessionId, string PeerId, string EndpointId);
+
+internal sealed record CommandAck(string CommandId, string Status, object? Raw);
+
+internal sealed record SmokeCommandAttempt(
+    int Attempt,
+    string CommandId,
+    string Status,
+    DateTimeOffset ReportedAtUtc);
+
+internal sealed class SmokeSummary
+{
+    public string ApiBaseUrl { get; set; } = string.Empty;
+    public string SessionId { get; set; } = string.Empty;
+    public string PeerId { get; set; } = string.Empty;
+    public string PrincipalId { get; set; } = string.Empty;
+    public string CommandId { get; set; } = string.Empty;
+    public string CommandAction { get; set; } = string.Empty;
+    public string CommandStatus { get; set; } = string.Empty;
+    public object? CommandResponse { get; set; }
+    public int CommandAttemptsConfigured { get; set; }
+    public IReadOnlyList<SmokeCommandAttempt> CommandAttempts { get; set; } = [];
+    public object? TransportReadiness { get; set; }
+    public string? OutputPath { get; set; }
+}

@@ -466,6 +466,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - deprecated/no-op parameters in this wrapper: `-AutoCreateSessionIfMissing`, `-AllowMissingControlRequestEndpoint`, `-EndpointId`, `-Profile`.
 - one-command acceptance for CI/local automation (boots stack + runs smoke):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
+  - orchestration now runs through `.NET` runner project `Platform/Tools/HidBridge.Acceptance.Runner` (PowerShell entrypoint is a thin wrapper only).
   - in controlws mode add `-AllowLegacyControlWs -ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
   - when runtime is already running in Docker profile (`platform-runtime`), add `-SkipRuntimeBootstrap` to avoid local API/Web restart conflicts on `18093/18110`.
@@ -822,7 +823,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `run_api_bearer_smoke.ps1`
   - mandatory WebRTC edge-agent acceptance lane (CI gate):
     - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -WebRtcCommandExecutor uart`
-    - acceptance now uses dedicated orchestration (`run_webrtc_edge_agent_acceptance.ps1`): starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
+    - acceptance now uses dedicated `.NET` orchestration runner (`Platform/Tools/HidBridge.Acceptance.Runner`) via thin wrapper `run_webrtc_edge_agent_acceptance.ps1`: starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
     - optional timeout tuning for acceptance lane: `-PeerReadyTimeoutSec 45` (mapped to `-WebRtcPeerReadyTimeoutSec` for `ci-local`/`full`).
     - emergency/local override only: `-SkipWebRtcEdgeAgentAcceptance`
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`

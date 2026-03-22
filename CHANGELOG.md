@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-03-22 (pr-next-acceptance runner in solution + .net acceptance orchestration)
+
+Summary:
+
+- Added `Platform/Tools/HidBridge.Acceptance.Runner` into both platform solution files so acceptance tooling is a first-class project in IDE/CLI workflows.
+- Moved `webrtc-edge-agent-acceptance` orchestration from script-composed stack/smoke flow to dedicated `.NET` runner logic.
+- Kept PowerShell task entrypoint as a thin wrapper that forwards arguments to the `.NET` runner and preserves `run.ps1` task compatibility.
+- Updated platform docs to describe `.NET` acceptance orchestration path and current wrapper behavior.
+
+Detailed notes:
+
+- `Platform/HidBridge.Platform.sln`
+- `Platform/HidBridge.Platform.slnx`
+- `Platform/Tools/HidBridge.Acceptance.Runner/HidBridge.Acceptance.Runner.csproj`
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+- `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`
+- `Platform/README.md`
+
 ## 2026-03-21 (pr-b media runtime scaffold: ffmpeg+dcd preview engine, default path unchanged)
 
 Summary:

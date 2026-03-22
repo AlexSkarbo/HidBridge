@@ -20,4 +20,7 @@
     <Project Path="Shared/HidBridge.Abstractions/HidBridge.Abstractions.csproj" />
     <Project Path="Shared/HidBridge.Contracts/HidBridge.Contracts.csproj" />
   </Folder>
+  <Folder Name="/Tools/">
+    <Project Path="Tools/HidBridge.Acceptance.Runner/HidBridge.Acceptance.Runner.csproj" />
+  </Folder>
 </Solution>
