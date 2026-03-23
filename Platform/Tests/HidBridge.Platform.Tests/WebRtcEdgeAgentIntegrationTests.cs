@@ -266,6 +266,7 @@ public sealed class WebRtcEdgeAgentIntegrationTests
             registry,
             endpointStore,
             relay,
+            new InMemoryWebRtcSignalingStore(),
             new WebRtcTransportRuntimeOptions
             {
                 RequireDataChannelCapability = true,
@@ -663,6 +664,46 @@ public sealed class WebRtcEdgeAgentIntegrationTests
             bool Ready,
             string State,
             string? Source);
+    }
+
+    /// <summary>
+    /// Minimal in-memory signaling store used by transport integration tests.
+    /// </summary>
+    private sealed class InMemoryWebRtcSignalingStore : IWebRtcSignalingStore
+    {
+        public Task<WebRtcSignalMessageBody> AppendAsync(
+            string sessionId,
+            WebRtcSignalKind kind,
+            string senderPeerId,
+            string? recipientPeerId,
+            string payload,
+            string? mid,
+            int? mLineIndex,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new WebRtcSignalMessageBody(
+                SessionId: sessionId,
+                Sequence: 1,
+                Kind: kind,
+                SenderPeerId: senderPeerId,
+                RecipientPeerId: recipientPeerId,
+                Payload: payload,
+                Mid: mid,
+                MLineIndex: mLineIndex,
+                CreatedAtUtc: DateTimeOffset.UtcNow));
+        }
+
+        public Task<IReadOnlyList<WebRtcSignalMessageBody>> ListAsync(
+            string sessionId,
+            string? recipientPeerId,
+            int? afterSequence,
+            int limit,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<WebRtcSignalMessageBody>>([]);
+        }
     }
 
     /// <summary>

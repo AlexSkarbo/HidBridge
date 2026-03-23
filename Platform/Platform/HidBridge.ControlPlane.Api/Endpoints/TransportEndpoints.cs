@@ -24,7 +24,7 @@ public static class TransportEndpoints
             string sessionId,
             HttpContext httpContext,
             ISessionStore sessionStore,
-            WebRtcSignalingService signaling,
+            IWebRtcSignalingStore signaling,
             WebRtcSignalPublishBody request,
             CancellationToken ct) =>
         {
@@ -72,7 +72,7 @@ public static class TransportEndpoints
             string sessionId,
             HttpContext httpContext,
             ISessionStore sessionStore,
-            WebRtcSignalingService signaling,
+            IWebRtcSignalingStore signaling,
             string? recipientPeerId,
             int? afterSequence,
             int? limit,
@@ -536,6 +536,7 @@ public static class TransportEndpoints
                 var mediaReportedAtUtc = TryReadMetricDateTimeOffset(health.Metrics, "lastPeerMediaReportedAtUtc");
                 var mediaStreamId = TryReadMetricString(health.Metrics, "lastPeerMediaStreamId");
                 var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
+                var mediaPlaybackUrl = TryReadMetricString(health.Metrics, "lastPeerMediaPlaybackUrl");
                 var mediaStreamKind = TryReadMetricString(health.Metrics, "lastPeerMediaStreamKind");
                 var mediaVideo = BuildMediaVideoDescriptor(health.Metrics);
                 var mediaAudio = BuildMediaAudioDescriptor(health.Metrics);
@@ -548,6 +549,7 @@ public static class TransportEndpoints
                     mediaReportedAtUtc = latestMediaSnapshot.ReportedAtUtc;
                     mediaStreamId = latestMediaSnapshot.StreamId;
                     mediaSource = latestMediaSnapshot.Source;
+                    mediaPlaybackUrl = latestMediaSnapshot.PlaybackUrl;
                     mediaStreamKind = latestMediaSnapshot.StreamKind;
                     mediaVideo = latestMediaSnapshot.Video;
                     mediaAudio = latestMediaSnapshot.Audio;
@@ -576,6 +578,7 @@ public static class TransportEndpoints
                     MediaReportedAtUtc: mediaReportedAtUtc,
                     MediaStreamId: mediaStreamId,
                     MediaSource: mediaSource,
+                    MediaPlaybackUrl: mediaPlaybackUrl,
                     MediaStreamKind: mediaStreamKind,
                     MediaVideo: mediaVideo,
                     MediaAudio: mediaAudio));

@@ -667,9 +667,10 @@ public sealed class EdgeProxyWorker : BackgroundService
             metadata["mediaSource"] = snapshot.Source;
         }
 
-        if (!string.IsNullOrWhiteSpace(snapshot.PlaybackUrl))
+        var effectivePlaybackUrl = ResolveEffectiveMediaPlaybackUrl(snapshot);
+        if (!string.IsNullOrWhiteSpace(effectivePlaybackUrl))
         {
-            metadata["mediaPlaybackUrl"] = snapshot.PlaybackUrl;
+            metadata["mediaPlaybackUrl"] = effectivePlaybackUrl;
         }
 
         if (!string.IsNullOrWhiteSpace(snapshot.StreamKind))
@@ -800,6 +801,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         var effectiveSource = string.IsNullOrWhiteSpace(snapshot.Source)
             ? _options.MediaSource
             : snapshot.Source;
+        var effectivePlaybackUrl = ResolveEffectiveMediaPlaybackUrl(snapshot);
         var mergedMetrics = MergeMediaMetrics(snapshot.Metrics, runtimeSnapshot);
 
         await SendAsync(
@@ -815,7 +817,7 @@ public sealed class EdgeProxyWorker : BackgroundService
                 reportedAtUtc = snapshot.ReportedAtUtc,
                 failureReason = snapshot.FailureReason,
                 source = effectiveSource,
-                playbackUrl = snapshot.PlaybackUrl,
+                playbackUrl = effectivePlaybackUrl,
                 streamKind = snapshot.StreamKind,
                 video = snapshot.Video,
                 audio = snapshot.Audio,
@@ -855,6 +857,29 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
 
         return merged;
+    }
+
+    /// <summary>
+    /// Resolves playback URL with runtime fallback order: probe -> configured WHEP -> configured generic playback.
+    /// </summary>
+    private string? ResolveEffectiveMediaPlaybackUrl(EdgeMediaReadinessSnapshot snapshot)
+    {
+        if (!string.IsNullOrWhiteSpace(snapshot.PlaybackUrl))
+        {
+            return snapshot.PlaybackUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.MediaWhepUrl))
+        {
+            return _options.MediaWhepUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.MediaPlaybackUrl))
+        {
+            return _options.MediaPlaybackUrl;
+        }
+
+        return null;
     }
 
     /// <summary>

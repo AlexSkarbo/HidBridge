@@ -65,6 +65,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
             failureReason: parsed.FailureReason,
             streamId: parsed.StreamId,
             source: parsed.Source,
+            playbackUrl: parsed.PlaybackUrl,
             streamKind: parsed.StreamKind,
             video: parsed.Video,
             audio: parsed.Audio,
@@ -96,6 +97,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
         string? failureReason,
         string? streamId = null,
         string? source = null,
+        string? playbackUrl = null,
         string? streamKind = null,
         EdgeVideoReadinessSnapshot? video = null,
         EdgeAudioReadinessSnapshot? audio = null,
@@ -108,6 +110,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
             FailureReason: failureReason,
             StreamId: string.IsNullOrWhiteSpace(streamId) ? _options.MediaStreamId : streamId,
             Source: string.IsNullOrWhiteSpace(source) ? _options.MediaSource : source,
+            PlaybackUrl: ResolvePlaybackUrl(playbackUrl),
             StreamKind: string.IsNullOrWhiteSpace(streamKind) ? null : streamKind,
             Video: video,
             Audio: audio,
@@ -127,6 +130,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
                 FailureReason: null,
                 StreamId: null,
                 Source: null,
+                PlaybackUrl: null,
                 StreamKind: null,
                 Video: null,
                 Audio: null);
@@ -144,6 +148,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
                     FailureReason: null,
                     StreamId: null,
                     Source: null,
+                    PlaybackUrl: null,
                     StreamKind: null,
                     Video: null,
                     Audio: null);
@@ -181,6 +186,11 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
                 FailureReason: failureReason,
                 StreamId: TryReadString(root, "streamId") ?? TryReadString(root, "stream_id"),
                 Source: TryReadString(root, "source") ?? TryReadString(root, "captureSource"),
+                PlaybackUrl: TryReadString(root, "playbackUrl")
+                    ?? TryReadString(root, "playbackUri")
+                    ?? TryReadString(root, "whepUrl")
+                    ?? TryReadString(root, "streamUrl")
+                    ?? TryReadNestedString(root, "stream", "url"),
                 StreamKind: TryReadString(root, "streamKind") ?? TryReadString(root, "stream_kind") ?? TryReadString(root, "kind"),
                 Video: ParseVideo(root),
                 Audio: ParseAudio(root));
@@ -194,10 +204,24 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
                 FailureReason: null,
                 StreamId: null,
                 Source: null,
+                PlaybackUrl: null,
                 StreamKind: null,
                 Video: null,
                 Audio: null);
         }
+    }
+
+    /// <summary>
+    /// Resolves explicit playback URL from payload or options fallback.
+    /// </summary>
+    private string? ResolvePlaybackUrl(string? playbackUrl)
+    {
+        var candidate = string.IsNullOrWhiteSpace(playbackUrl)
+            ? _options.MediaPlaybackUrl
+            : playbackUrl;
+        return string.IsNullOrWhiteSpace(candidate)
+            ? null
+            : candidate.Trim();
     }
 
     /// <summary>
@@ -446,6 +470,7 @@ public sealed class EdgeProxyMediaReadinessProbe : IEdgeMediaReadinessProbe
         string? FailureReason,
         string? StreamId,
         string? Source,
+        string? PlaybackUrl,
         string? StreamKind,
         EdgeVideoReadinessSnapshot? Video,
         EdgeAudioReadinessSnapshot? Audio);

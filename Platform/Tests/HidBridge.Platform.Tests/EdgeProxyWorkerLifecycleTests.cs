@@ -361,7 +361,11 @@ public sealed class EdgeProxyWorkerLifecycleTests
         };
         var factory = new StaticHttpClientFactory(client);
         var hidAdapter = new StubHidBridgeHidAdapter(_ => EdgeCommandExecutionResult.Applied(9.0));
-        var worker = CreateWorker(factory, hidAdapter, options => options.MediaEngine = "ffmpeg-dcd");
+        var worker = CreateWorker(factory, hidAdapter, options =>
+        {
+            options.MediaEngine = "ffmpeg-dcd";
+            options.MediaWhepUrl = "http://127.0.0.1:8889/whep/edge-main";
+        });
 
         try
         {
@@ -385,6 +389,7 @@ public sealed class EdgeProxyWorkerLifecycleTests
                 TestContext.Current.CancellationToken);
             Assert.Contains("\"mediaRuntimeEngine\":\"FfmpegDataChannelDotNet\"", mediaPayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaRuntimeState\":\"NoExecutableConfigured\"", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"playbackUrl\":\"http://127.0.0.1:8889/whep/edge-main\"", mediaPayload, StringComparison.Ordinal);
         }
         finally
         {

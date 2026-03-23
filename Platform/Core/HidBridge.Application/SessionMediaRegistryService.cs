@@ -27,6 +27,9 @@ public sealed class SessionMediaRegistryService
         var normalizedSource = string.IsNullOrWhiteSpace(registration.Source)
             ? null
             : registration.Source.Trim();
+        var normalizedPlaybackUrl = string.IsNullOrWhiteSpace(registration.PlaybackUrl)
+            ? null
+            : registration.PlaybackUrl.Trim();
         var normalizedStreamKind = string.IsNullOrWhiteSpace(registration.StreamKind)
             ? null
             : registration.StreamKind.Trim();
@@ -41,6 +44,7 @@ public sealed class SessionMediaRegistryService
             UpdatedAtUtc: nowUtc,
             FailureReason: registration.FailureReason,
             Source: normalizedSource,
+            PlaybackUrl: normalizedPlaybackUrl,
             StreamKind: normalizedStreamKind,
             Video: registration.Video,
             Audio: registration.Audio,

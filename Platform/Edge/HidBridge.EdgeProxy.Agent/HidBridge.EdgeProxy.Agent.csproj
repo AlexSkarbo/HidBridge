@@ -17,4 +17,9 @@
     <ProjectReference Include="..\HidBridge.Edge.Abstractions\HidBridge.Edge.Abstractions.csproj" />
     <ProjectReference Include="..\HidBridge.Edge.HidBridgeProtocol\HidBridge.Edge.HidBridgeProtocol.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>HidBridge.Platform.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

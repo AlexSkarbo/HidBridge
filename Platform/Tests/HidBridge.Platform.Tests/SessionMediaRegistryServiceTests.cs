@@ -28,6 +28,7 @@ public sealed class SessionMediaRegistryServiceTests
                 State: "Ready",
                 ReportedAtUtc: nowUtc,
                 Source: "hdmi-usb-capture",
+                PlaybackUrl: "http://127.0.0.1:8080/live.m3u8",
                 StreamKind: "audio-video",
                 Video: new MediaVideoDescriptorBody("h264", 1920, 1080, 30d, 4000),
                 Audio: new MediaAudioDescriptorBody("opus", 2, 48000, 128)),
@@ -42,6 +43,7 @@ public sealed class SessionMediaRegistryServiceTests
         Assert.NotNull(latest);
         Assert.Equal("stream-main", latest!.StreamId);
         Assert.Equal("hdmi-usb-capture", latest.Source);
+        Assert.Equal("http://127.0.0.1:8080/live.m3u8", latest.PlaybackUrl);
         Assert.Equal("audio-video", latest.StreamKind);
         Assert.Equal("h264", latest.Video?.Codec);
         Assert.Equal(1920, latest.Video?.Width);

@@ -172,6 +172,32 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
+    public void IsValid_RejectsInvalidMediaWhipUrl()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaWhipUrl = "not-a-url";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("MediaWhipUrl", error);
+    }
+
+    [Fact]
+    public void IsValid_RejectsInvalidMediaWhepUrl()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaWhepUrl = "not-a-url";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("MediaWhepUrl", error);
+    }
+
+    [Fact]
     public void Normalize_DefaultOperatorRole_UsesEdgeRole()
     {
         var options = CreateBaselineOptions();

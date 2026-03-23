@@ -152,6 +152,35 @@ public interface IRealtimeTransportFactory
 }
 
 /// <summary>
+/// Stores transient WebRTC signaling messages used by browser/agent/control-plane exchange.
+/// </summary>
+public interface IWebRtcSignalingStore
+{
+    /// <summary>
+    /// Appends one signaling message and returns the persisted snapshot.
+    /// </summary>
+    Task<WebRtcSignalMessageBody> AppendAsync(
+        string sessionId,
+        WebRtcSignalKind kind,
+        string senderPeerId,
+        string? recipientPeerId,
+        string payload,
+        string? mid,
+        int? mLineIndex,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists signaling messages for one session filtered by recipient and sequence checkpoint.
+    /// </summary>
+    Task<IReadOnlyList<WebRtcSignalMessageBody>> ListAsync(
+        string sessionId,
+        string? recipientPeerId,
+        int? afterSequence,
+        int limit,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Defines the runtime contract implemented by every agent or agentless connector.
 /// </summary>
 public interface IConnector

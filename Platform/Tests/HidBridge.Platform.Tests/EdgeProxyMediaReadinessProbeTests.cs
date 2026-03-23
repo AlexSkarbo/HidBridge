@@ -95,7 +95,7 @@ public sealed class EdgeProxyMediaReadinessProbeTests
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"ready":true,"state":"Streaming","streamId":"edge-main","source":"edge-capture","streamKind":"audio-video","video":{"codec":"h264","width":1920,"height":1080,"frameRate":30,"bitrateKbps":4500},"audio":{"codec":"opus","channels":2,"sampleRateHz":48000,"bitrateKbps":128}}""",
+                    """{"ready":true,"state":"Streaming","streamId":"edge-main","source":"edge-capture","playbackUrl":"http://127.0.0.1:8080/live.m3u8","streamKind":"audio-video","video":{"codec":"h264","width":1920,"height":1080,"frameRate":30,"bitrateKbps":4500},"audio":{"codec":"opus","channels":2,"sampleRateHz":48000,"bitrateKbps":128}}""",
                     Encoding.UTF8,
                     "application/json"),
             });
@@ -113,6 +113,7 @@ public sealed class EdgeProxyMediaReadinessProbeTests
 
         Assert.True(snapshot.IsReady);
         Assert.Equal("Streaming", snapshot.State);
+        Assert.Equal("http://127.0.0.1:8080/live.m3u8", snapshot.PlaybackUrl);
         Assert.Equal("audio-video", snapshot.StreamKind);
         Assert.Equal("h264", snapshot.Video?.Codec);
         Assert.Equal(1920, snapshot.Video?.Width);

@@ -69,6 +69,7 @@ public sealed record EdgeMediaReadinessSnapshot(
     string? FailureReason = null,
     string? StreamId = null,
     string? Source = null,
+    string? PlaybackUrl = null,
     string? StreamKind = null,
     EdgeVideoReadinessSnapshot? Video = null,
     EdgeAudioReadinessSnapshot? Audio = null,

@@ -46,7 +46,7 @@ public sealed class EdgeProxyOptions
 
     /// <summary>
     /// Optional ffmpeg arguments template used by <c>MediaEngine=ffmpeg-dcd</c>.
-    /// Supports placeholders: <c>{sessionId}</c>, <c>{peerId}</c>, <c>{endpointId}</c>, <c>{streamId}</c>, <c>{source}</c>, <c>{baseUrl}</c>.
+    /// Supports placeholders: <c>{sessionId}</c>, <c>{peerId}</c>, <c>{endpointId}</c>, <c>{streamId}</c>, <c>{source}</c>, <c>{baseUrl}</c>, <c>{whipUrl}</c>, <c>{whepUrl}</c>, <c>{whipBearerToken}</c>.
     /// </summary>
     public string FfmpegArgumentsTemplate { get; set; } = string.Empty;
 
@@ -134,6 +134,21 @@ public sealed class EdgeProxyOptions
     public string MediaPlaybackUrl { get; set; } = string.Empty;
 
     /// <summary>
+    /// Optional WHIP publish endpoint used by preview <c>MediaEngine=ffmpeg-dcd</c>.
+    /// </summary>
+    public string MediaWhipUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional WHEP playback endpoint used by preview <c>MediaEngine=ffmpeg-dcd</c>.
+    /// </summary>
+    public string MediaWhepUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional bearer token injected into ffmpeg WHIP publish requests by argument templates.
+    /// </summary>
+    public string MediaWhipBearerToken { get; set; } = string.Empty;
+
+    /// <summary>
     /// Requires media probe to report ready before readiness policy can pass.
     /// </summary>
     public bool RequireMediaReady { get; set; } = true;
@@ -219,6 +234,9 @@ public sealed class EdgeProxyOptions
         TokenClientSecret = TokenClientSecret?.Trim() ?? string.Empty;
         TokenRefreshToken = TokenRefreshToken?.Trim() ?? string.Empty;
         MediaPlaybackUrl = MediaPlaybackUrl?.Trim() ?? string.Empty;
+        MediaWhipUrl = MediaWhipUrl?.Trim() ?? string.Empty;
+        MediaWhepUrl = MediaWhepUrl?.Trim() ?? string.Empty;
+        MediaWhipBearerToken = MediaWhipBearerToken?.Trim() ?? string.Empty;
         OperatorRolesCsv = string.Join(
             ",",
             (OperatorRolesCsv ?? string.Empty)
@@ -313,6 +331,20 @@ public sealed class EdgeProxyOptions
             !Uri.TryCreate(MediaHealthUrl, UriKind.Absolute, out _))
         {
             error = "MediaHealthUrl must be an absolute URL.";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(MediaWhipUrl) &&
+            !Uri.TryCreate(MediaWhipUrl, UriKind.Absolute, out _))
+        {
+            error = "MediaWhipUrl must be an absolute URL.";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(MediaWhepUrl) &&
+            !Uri.TryCreate(MediaWhepUrl, UriKind.Absolute, out _))
+        {
+            error = "MediaWhepUrl must be an absolute URL.";
             return false;
         }
 

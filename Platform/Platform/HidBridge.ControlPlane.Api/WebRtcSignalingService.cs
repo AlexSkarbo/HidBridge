@@ -1,3 +1,4 @@
+using HidBridge.Abstractions;
 using HidBridge.Contracts;
 using System.Collections.Concurrent;
 
@@ -6,7 +7,7 @@ namespace HidBridge.ControlPlane.Api;
 /// <summary>
 /// Stores transient WebRTC signaling messages per session for browser/agent exchange.
 /// </summary>
-public sealed class WebRtcSignalingService
+public sealed class WebRtcSignalingService : IWebRtcSignalingStore
 {
     private readonly ConcurrentDictionary<string, SessionSignalState> _signals = new(StringComparer.OrdinalIgnoreCase);
 

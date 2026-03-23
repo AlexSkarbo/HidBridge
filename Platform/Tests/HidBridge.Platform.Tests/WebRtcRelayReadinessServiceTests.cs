@@ -200,6 +200,7 @@ public sealed class WebRtcRelayReadinessServiceTests
                     ["lastPeerMediaReady"] = true,
                     ["lastPeerMediaState"] = "Streaming",
                     ["lastPeerMediaStreamId"] = "stream-main",
+                    ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:8080/live.m3u8",
                 }));
         var service = new WebRtcRelayReadinessService(
             sessionStore,
@@ -218,6 +219,7 @@ public sealed class WebRtcRelayReadinessServiceTests
         Assert.Equal("ready", readiness.ReasonCode);
         Assert.True(readiness.MediaReady);
         Assert.Equal("stream-main", readiness.MediaStreamId);
+        Assert.Equal("http://127.0.0.1:8080/live.m3u8", readiness.MediaPlaybackUrl);
     }
 
     /// <summary>
@@ -254,6 +256,7 @@ public sealed class WebRtcRelayReadinessServiceTests
                 State: "Streaming",
                 ReportedAtUtc: DateTimeOffset.UtcNow,
                 Source: "hdmi-usb-capture",
+                PlaybackUrl: "http://127.0.0.1:8080/live.m3u8",
                 StreamKind: "audio-video",
                 Video: new MediaVideoDescriptorBody("h264", 1920, 1080, 30d, 4000),
                 Audio: new MediaAudioDescriptorBody("opus", 2, 48000, 128)),
@@ -276,6 +279,7 @@ public sealed class WebRtcRelayReadinessServiceTests
         Assert.True(readiness.MediaReady);
         Assert.Equal("stream-registry", readiness.MediaStreamId);
         Assert.Equal("hdmi-usb-capture", readiness.MediaSource);
+        Assert.Equal("http://127.0.0.1:8080/live.m3u8", readiness.MediaPlaybackUrl);
         Assert.Equal("audio-video", readiness.MediaStreamKind);
         Assert.Equal("h264", readiness.MediaVideo?.Codec);
         Assert.Equal(1920, readiness.MediaVideo?.Width);

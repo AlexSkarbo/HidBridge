@@ -33,6 +33,7 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Null(metrics["lastPeerMediaReportedAtUtc"]);
         Assert.Null(metrics["lastPeerMediaStreamId"]);
         Assert.Null(metrics["lastPeerMediaSource"]);
+        Assert.Null(metrics["lastPeerMediaPlaybackUrl"]);
         Assert.Null(metrics["lastPeerMediaStreamKind"]);
         Assert.Null(metrics["lastPeerMediaVideoCodec"]);
         Assert.Null(metrics["lastPeerMediaVideoWidth"]);
@@ -90,6 +91,7 @@ public sealed class WebRtcCommandRelayServiceTests
                 ["mediaReportedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
                 ["mediaStreamId"] = "stream-main",
                 ["mediaSource"] = "hdmi-usb-capture",
+                ["mediaPlaybackUrl"] = "http://127.0.0.1:8080/live.m3u8",
                 ["mediaStreamKind"] = "audio-video",
                 ["mediaVideoCodec"] = "h264",
                 ["mediaVideoWidth"] = "1920",
@@ -112,6 +114,7 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Equal("Streaming", metrics["lastPeerMediaState"]?.ToString());
         Assert.Equal("stream-main", metrics["lastPeerMediaStreamId"]?.ToString());
         Assert.Equal("hdmi-usb-capture", metrics["lastPeerMediaSource"]?.ToString());
+        Assert.Equal("http://127.0.0.1:8080/live.m3u8", metrics["lastPeerMediaPlaybackUrl"]?.ToString());
         Assert.Equal("audio-video", metrics["lastPeerMediaStreamKind"]?.ToString());
         Assert.Equal("h264", metrics["lastPeerMediaVideoCodec"]?.ToString());
         Assert.Equal("1920", metrics["lastPeerMediaVideoWidth"]?.ToString());
