@@ -392,6 +392,44 @@ public sealed record CommandAckBody(
     IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
+/// Represents one command entry inside batch dispatch request.
+/// </summary>
+public sealed record SessionCommandBatchItemBody(
+    string CommandId,
+    CommandChannel Channel,
+    string Action,
+    IReadOnlyDictionary<string, object?> Args,
+    int TimeoutMs,
+    string IdempotencyKey);
+
+/// <summary>
+/// Represents one batch command dispatch request scoped to one session route.
+/// </summary>
+public sealed record SessionCommandBatchDispatchBody(
+    IReadOnlyList<SessionCommandBatchItemBody> Commands,
+    string? TenantId = null,
+    string? OrganizationId = null,
+    IReadOnlyList<string>? OperatorRoles = null);
+
+/// <summary>
+/// Represents one command result entry returned from batch dispatch endpoint.
+/// </summary>
+public sealed record SessionCommandBatchResultBody(
+    string CommandId,
+    CommandStatus Status,
+    ErrorInfo? Error = null,
+    IReadOnlyDictionary<string, double>? Metrics = null);
+
+/// <summary>
+/// Represents aggregate result of one batch dispatch attempt.
+/// </summary>
+public sealed record SessionCommandBatchAckBody(
+    IReadOnlyList<SessionCommandBatchResultBody> Results,
+    int AppliedCount,
+    int RejectedCount,
+    int TimeoutCount);
+
+/// <summary>
 /// Carries normalized HID command arguments for edge transport execution.
 /// </summary>
 public sealed record TransportHidCommandArgsBody(

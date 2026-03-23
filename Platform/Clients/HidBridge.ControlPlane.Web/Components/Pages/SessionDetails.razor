@@ -3,10 +3,12 @@
 @implements IAsyncDisposable
 @using System.Text.Json
 @using System.Globalization
+@using Microsoft.JSInterop
 @inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
 @inject OperatorIdentityContext Identity
 @inject OperatorText T
 @inject NavigationManager Navigation
+@inject IJSRuntime Js
 
 <PageTitle>@T["SessionRoomTitle"]</PageTitle>
 
@@ -181,6 +183,19 @@
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReady"]</div><div class="hid-detail-value">@GetTransportMediaReady(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaState"]</div><div class="hid-detail-value">@GetTransportMediaState(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaSource"]</div><div class="hid-detail-value">@GetTransportMediaSource(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card">
+                                <div class="hid-detail-label">@T["TransportMediaPlayback"]</div>
+                                @if (TryGetTransportMediaPlaybackHref(_transportReadiness, _transportHealth) is { } playbackHref)
+                                {
+                                    <div class="hid-detail-value">
+                                        <a href="@playbackHref" target="_blank" rel="noopener noreferrer">@playbackHref</a>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="hid-detail-value">@GetTransportMediaPlayback(_transportReadiness, _transportHealth)</div>
+                                }
+                            </div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaKind"]</div><div class="hid-detail-value">@GetTransportMediaKind(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaStreamId"]</div><div class="hid-detail-value">@GetTransportMediaStreamId(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReportedAt"]</div><div class="hid-detail-value">@GetTransportMediaReportedAt(_transportReadiness, _transportHealth)</div></div>
@@ -326,6 +341,27 @@
                     </div>
 
                     <p class="hid-meta-note">@T["CommandDeckHint"]</p>
+                    <div class="hid-candidate-actions" style="margin-bottom: 0.75rem;">
+                        <button class="hid-button-primary hid-button-sm"
+                                disabled="@(_busy || !_isLiveControlAvailable)"
+                                @onclick="ToggleLiveControlAsync">
+                            @(_liveControlEnabled ? "Live Control: ON" : "Live Control: OFF")
+                        </button>
+                        <button class="hid-button-secondary hid-button-sm"
+                                disabled="@(_busy || !_liveControlEnabled)"
+                                @onclick="TogglePointerLockAsync">
+                            @(_pointerLockEnabled ? "Pointer Lock: ON" : "Pointer Lock: OFF")
+                        </button>
+                        <button class="hid-button-danger hid-button-sm"
+                                disabled="@(_busy || !_isLiveControlAvailable)"
+                                @onclick="PanicResetAsync">
+                            Panic Reset
+                        </button>
+                    </div>
+                    @if (!_isLiveControlAvailable)
+                    {
+                        <p class="hid-meta-note">Live control is available only for the active controller.</p>
+                    }
 
                     <div class="hid-form-grid">
                         <label class="hid-field">
@@ -784,6 +820,10 @@
     private int _demoKeyboardModifiers;
     private readonly Dictionary<string, CommandScenarioSnapshot> _commandScenarioSnapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<CommandAuditTrailEntry> _commandAuditTrail = [];
+    private DotNetObjectReference<SessionDetails>? _liveInputDotNetRef;
+    private IJSObjectReference? _liveInputModule;
+    private bool _liveControlEnabled;
+    private bool _pointerLockEnabled;
     private const int CommandAuditTrailCapacity = 6;
     private const string CommandScenarioTextId = "text";
     private const string CommandScenarioShortcutId = "shortcut";
@@ -811,6 +851,10 @@
         || Identity.IsAdmin
         || string.Equals(CurrentOperatorPrincipalId, _dashboard?.RequestedBy, StringComparison.OrdinalIgnoreCase)
         || string.Equals(CurrentOperatorPrincipalId, _dashboard?.ActiveControllerPrincipalId, StringComparison.OrdinalIgnoreCase);
+
+    private bool _isLiveControlAvailable
+        => !string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId)
+           && string.Equals(CurrentOperatorPrincipalId, _dashboard?.ActiveControllerPrincipalId, StringComparison.OrdinalIgnoreCase);
 
     private string NextRecommendedAction
     {
@@ -895,6 +939,30 @@
         EnsureShareRequestDefaults();
         EnsureRecoveryStatePollingStarted();
         await RefreshAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _liveInputModule = await Js.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./Components/Pages/SessionDetails.razor.js");
+            _liveInputDotNetRef = DotNetObjectReference.Create(this);
+            await _liveInputModule.InvokeVoidAsync("initializeLiveInput", _liveInputDotNetRef);
+        }
+        catch
+        {
+            // Live input is optional; command deck remains functional without JS module.
+            _liveInputModule = null;
+            _liveInputDotNetRef?.Dispose();
+            _liveInputDotNetRef = null;
+        }
     }
 
     private void EnsureRecoveryStatePollingStarted()
@@ -1248,6 +1316,102 @@
         }
     }
 
+    private async Task ToggleLiveControlAsync()
+    {
+        if (_liveInputModule is null || !_isLiveControlAvailable)
+        {
+            return;
+        }
+
+        _liveControlEnabled = !_liveControlEnabled;
+        await _liveInputModule.InvokeVoidAsync("setLiveControlEnabled", _liveControlEnabled);
+        _actionMessage = _liveControlEnabled
+            ? "Live control is enabled."
+            : "Live control is disabled.";
+    }
+
+    private async Task TogglePointerLockAsync()
+    {
+        if (_liveInputModule is null || !_liveControlEnabled)
+        {
+            return;
+        }
+
+        if (_pointerLockEnabled)
+        {
+            await _liveInputModule.InvokeVoidAsync("exitPointerLock");
+            _pointerLockEnabled = false;
+        }
+        else
+        {
+            await _liveInputModule.InvokeVoidAsync("requestPointerLock");
+            _pointerLockEnabled = true;
+        }
+    }
+
+    private async Task PanicResetAsync()
+    {
+        _pointerLockEnabled = false;
+        if (_liveInputModule is not null)
+        {
+            await _liveInputModule.InvokeVoidAsync("setLiveControlEnabled", false);
+            await _liveInputModule.InvokeVoidAsync("exitPointerLock");
+        }
+
+        _liveControlEnabled = false;
+        await DispatchBatchInternalAsync(
+            "Panic Reset",
+            [
+                BuildBatchItem("keyboard.reset", []),
+                BuildBatchItem("mouse.button", [new KeyValuePair<string, object?>("button", "left"), new KeyValuePair<string, object?>("down", false)]),
+                BuildBatchItem("mouse.button", [new KeyValuePair<string, object?>("button", "right"), new KeyValuePair<string, object?>("down", false)]),
+                BuildBatchItem("mouse.button", [new KeyValuePair<string, object?>("button", "middle"), new KeyValuePair<string, object?>("down", false)]),
+            ]);
+    }
+
+    [JSInvokable]
+    public async Task OnLiveInputBatch(IReadOnlyList<LiveInputEvent>? events)
+    {
+        if (!_liveControlEnabled || !_isLiveControlAvailable || events is null || events.Count == 0)
+        {
+            return;
+        }
+
+        var batchItems = new List<SessionCommandBatchItemViewModel>(events.Count);
+        foreach (var evt in events)
+        {
+            if (string.IsNullOrWhiteSpace(evt.Action))
+            {
+                continue;
+            }
+
+            var args = new List<KeyValuePair<string, object?>>();
+            if (evt.Args is not null)
+            {
+                foreach (var pair in evt.Args)
+                {
+                    args.Add(new KeyValuePair<string, object?>(pair.Key, pair.Value));
+                }
+            }
+
+            batchItems.Add(BuildBatchItem(evt.Action, args));
+        }
+
+        if (batchItems.Count == 0)
+        {
+            return;
+        }
+
+        await DispatchBatchInternalAsync("Live Control", batchItems);
+    }
+
+    [JSInvokable]
+    public async Task OnPointerLockChanged(bool locked)
+    {
+        _pointerLockEnabled = locked;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task EndSessionAsync()
     {
         try
@@ -1355,6 +1519,108 @@
             OrganizationId = Identity.OrganizationId,
             OperatorRoles = Identity.OperatorRoles,
         };
+    }
+
+    private SessionCommandBatchItemViewModel BuildBatchItem(
+        string action,
+        IReadOnlyList<KeyValuePair<string, object?>> args)
+    {
+        var participantId = ResolveCurrentParticipantId();
+        var commandArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["principalId"] = CurrentOperatorPrincipalId,
+        };
+
+        if (!string.IsNullOrWhiteSpace(participantId))
+        {
+            commandArgs["participantId"] = participantId;
+        }
+
+        foreach (var arg in args)
+        {
+            commandArgs[arg.Key] = arg.Value;
+        }
+
+        return new SessionCommandBatchItemViewModel
+        {
+            CommandId = $"cmd-{Guid.NewGuid():N}",
+            Channel = "Hid",
+            Action = action,
+            Args = commandArgs,
+            TimeoutMs = 3000,
+            IdempotencyKey = $"idem-{Guid.NewGuid():N}",
+        };
+    }
+
+    private async Task DispatchBatchInternalAsync(
+        string scenarioName,
+        IReadOnlyList<SessionCommandBatchItemViewModel> items)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _busy = true;
+            _actionMessage = null;
+            _error = null;
+            _denial = null;
+            _backendUnavailableMessage = null;
+
+            var body = new SessionCommandBatchDispatchRequestViewModel
+            {
+                Commands = items,
+                TenantId = Identity.TenantId,
+                OrganizationId = Identity.OrganizationId,
+                OperatorRoles = Identity.OperatorRoles,
+            };
+
+            var ack = await ApiClient.DispatchCommandBatchAsync(SessionId, body);
+            var rejectedOrTimeout = ack?.Results.FirstOrDefault(result =>
+                !IsAcceptedCommandAck(result.Status));
+            if (rejectedOrTimeout is not null)
+            {
+                _actionMessage = $"{scenarioName}: {rejectedOrTimeout.Status}";
+                var detail = rejectedOrTimeout.Error is null
+                    ? rejectedOrTimeout.Status
+                    : $"{rejectedOrTimeout.Error.Code}: {rejectedOrTimeout.Error.Message}";
+                RegisterCommandScenarioResult("live-batch", scenarioName, rejectedOrTimeout.Status, false, detail);
+            }
+            else
+            {
+                _actionMessage = $"{scenarioName}: Applied ({ack?.AppliedCount ?? 0}).";
+                RegisterCommandScenarioResult("live-batch", scenarioName, "Applied", true, $"applied={ack?.AppliedCount ?? 0}");
+            }
+
+            await RefreshAsync();
+        }
+        catch (ControlPlaneApiUnavailableException exception)
+        {
+            _denial = null;
+            _error = null;
+            _backendUnavailableMessage = exception.Message;
+            RegisterCommandScenarioResult("live-batch", scenarioName, "Unavailable", false, exception.Message);
+        }
+        catch (ControlPlaneApiException exception)
+        {
+            _denial = exception.AuthorizationDenied;
+            _error = ResolveApiErrorMessage(exception);
+            _backendUnavailableMessage = null;
+            RegisterCommandScenarioResult("live-batch", scenarioName, "Rejected", false, ResolveApiErrorMessage(exception));
+        }
+        catch (Exception exception)
+        {
+            _denial = null;
+            _error = exception.Message;
+            _backendUnavailableMessage = null;
+            RegisterCommandScenarioResult("live-batch", scenarioName, "Rejected", false, exception.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private static string NormalizeMouseButton(string? value)
@@ -1734,6 +2000,50 @@
     }
 
     /// <summary>
+    /// Resolves media playback URL with readiness-first preference and health fallback.
+    /// </summary>
+    private static string GetTransportMediaPlayback(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        if (!string.IsNullOrWhiteSpace(readiness?.MediaPlaybackUrl))
+        {
+            return readiness.MediaPlaybackUrl!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(health?.MediaPlaybackUrl))
+        {
+            return health.MediaPlaybackUrl!;
+        }
+
+        return GetTransportMetricValue(health, "lastPeerMediaPlaybackUrl");
+    }
+
+    /// <summary>
+    /// Returns safe absolute playback href suitable for target=_blank links.
+    /// </summary>
+    private static string? TryGetTransportMediaPlaybackHref(
+        SessionTransportReadinessViewModel? readiness,
+        SessionTransportHealthViewModel? health)
+    {
+        var playback = GetTransportMediaPlayback(readiness, health);
+        if (string.IsNullOrWhiteSpace(playback) || string.Equals(playback, "—", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(playback, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        return string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            ? uri.ToString()
+            : null;
+    }
+
+    /// <summary>
     /// Resolves media stream kind with readiness-first preference and health fallback.
     /// </summary>
     private static string GetTransportMediaKind(
@@ -2062,27 +2372,42 @@
 
     public async ValueTask DisposeAsync()
     {
-        if (_recoveryPollingCts is null)
-        {
-            return;
-        }
-
-        _recoveryPollingCts.Cancel();
-
-        if (_recoveryPollingTask is not null)
+        if (_liveInputModule is not null)
         {
             try
             {
-                await _recoveryPollingTask;
+                await _liveInputModule.InvokeVoidAsync("disposeLiveInput");
+                await _liveInputModule.DisposeAsync();
             }
-            catch (OperationCanceledException)
+            catch
             {
-                // Expected during component disposal.
+                // Ignore disposal failures.
             }
+            _liveInputModule = null;
         }
 
-        _recoveryPollingCts.Dispose();
-        _recoveryPollingCts = null;
+        _liveInputDotNetRef?.Dispose();
+        _liveInputDotNetRef = null;
+
+        if (_recoveryPollingCts is not null)
+        {
+            _recoveryPollingCts.Cancel();
+
+            if (_recoveryPollingTask is not null)
+            {
+                try
+                {
+                    await _recoveryPollingTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected during component disposal.
+                }
+            }
+
+            _recoveryPollingCts.Dispose();
+            _recoveryPollingCts = null;
+        }
     }
 
     private sealed record CommandScenarioSnapshot(
@@ -2097,4 +2422,8 @@
         bool Accepted,
         string Detail,
         DateTimeOffset OccurredAtUtc);
+
+    public sealed record LiveInputEvent(
+        string Action,
+        IReadOnlyDictionary<string, object?>? Args);
 }

@@ -127,6 +127,19 @@ public sealed class ControlPlaneApiClient
             cancellationToken);
 
     /// <summary>
+    /// Dispatches one command batch through the specified session room.
+    /// </summary>
+    public async Task<SessionCommandBatchAckViewModel?> DispatchCommandBatchAsync(
+        string sessionId,
+        SessionCommandBatchDispatchRequestViewModel body,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<SessionCommandBatchAckViewModel>(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/commands/batch",
+            body,
+            cancellationToken);
+
+    /// <summary>
     /// Reads one collaboration dashboard for the specified session.
     /// </summary>
     public async Task<SessionDashboardViewModel?> GetSessionDashboardAsync(string sessionId, CancellationToken cancellationToken = default)

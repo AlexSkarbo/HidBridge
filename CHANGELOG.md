@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-23 (pr-a live input batch dispatch parity)
+
+Summary:
+
+- Added server-side batch command dispatch contract and endpoint:
+  - `POST /api/v1/sessions/{sessionId}/commands/batch`
+  - aggregated response with per-command statuses and counters (`applied/rejected/timeout`).
+- Added application use case for ordered batch dispatch (`DispatchCommandBatchUseCase`) and caller-context enrichment support for batch scope fields.
+- Added Web client batch models + API client method and integrated live input pipeline in `SessionDetails`:
+  - JS capture for `keydown/keyup/mousedown/mouseup/mousemove/wheel/blur/visibilitychange/contextmenu/pointerlockchange`
+  - UI controls: `Live Control ON/OFF`, `Pointer Lock ON/OFF`, `Panic Reset`
+- Added regression tests for batch route client wiring and batch use-case aggregation.
+
+Detailed notes:
+
+- `Platform/Shared/HidBridge.Contracts/Messages.cs`
+- `Platform/Core/HidBridge.Application/DispatchCommandBatchUseCase.cs` (new)
+- `Platform/Platform/HidBridge.ControlPlane.Api/ApiCallerContext.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Endpoints/SessionEndpoints.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Program.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Models/OperatorUiReadModels.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Services/ControlPlaneApiClient.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionDetails.razor`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionDetails.razor.js` (new)
+- `Platform/Tests/HidBridge.Platform.Tests/ControlPlaneApiClientTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/DispatchCommandBatchUseCaseTests.cs` (new)
+
 ## 2026-03-23 (pr-3 thin wrappers completed for webrtc-stack scripts)
 
 Summary:

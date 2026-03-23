@@ -185,6 +185,7 @@ builder.Services.AddSingleton(new WebRtcRelayReadinessOptions
 });
 builder.Services.AddSingleton<WebRtcRelayReadinessService>();
 builder.Services.AddSingleton<EnsureSessionControlLeaseUseCase>();
+builder.Services.AddSingleton<DispatchCommandBatchUseCase>();
 builder.Services.AddSingleton<IRealtimeTransport>(sp =>
     new ConnectorBackedRealtimeTransport(
         RealtimeTransportProvider.Uart,

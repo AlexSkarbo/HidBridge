@@ -384,6 +384,17 @@ public sealed record ApiCallerContext(
     }
 
     /// <summary>
+    /// Applies the caller scope to one batch command request.
+    /// </summary>
+    public SessionCommandBatchDispatchBody Apply(SessionCommandBatchDispatchBody request)
+        => request with
+        {
+            TenantId = TenantId ?? request.TenantId,
+            OrganizationId = OrganizationId ?? request.OrganizationId,
+            OperatorRoles = MergeOperatorRoles(request.OperatorRoles),
+        };
+
+    /// <summary>
     /// Verifies that the caller may access the specified session snapshot.
     /// </summary>
     public void EnsureSessionScope(SessionSnapshot snapshot)

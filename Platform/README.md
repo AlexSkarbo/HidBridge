@@ -471,6 +471,9 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
   - when runtime is already running in Docker profile (`platform-runtime`), add `-SkipRuntimeBootstrap` to avoid local API/Web restart conflicts on `18093/18110`.
   - in `CommandExecutor=uart` path stack bootstrap now auto-sets `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true` (control-only acceptance without capture probe).
+- session room live control/media updates:
+  - new batch command endpoint for high-frequency input dispatch: `POST /api/v1/sessions/{sessionId}/commands/batch`
+  - `Session Details` now includes live HID capture controls (`Live Control`, `Pointer Lock`, `Panic Reset`) in addition to demo scenarios.
 - operational SLO + security verification (step 22/23):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
   - this script validates:

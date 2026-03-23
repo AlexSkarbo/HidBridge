@@ -249,6 +249,48 @@ public sealed record CommandAckViewModel(
     IReadOnlyDictionary<string, double>? Metrics = null);
 
 /// <summary>
+/// Represents one command item in batch dispatch payload.
+/// </summary>
+public sealed class SessionCommandBatchItemViewModel
+{
+    public string CommandId { get; set; } = string.Empty;
+    public string Channel { get; set; } = "Hid";
+    public string Action { get; set; } = string.Empty;
+    public IReadOnlyDictionary<string, object?> Args { get; set; } = new Dictionary<string, object?>(StringComparer.Ordinal);
+    public int TimeoutMs { get; set; } = 3000;
+    public string IdempotencyKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents one batch command dispatch request issued from the session room.
+/// </summary>
+public sealed class SessionCommandBatchDispatchRequestViewModel
+{
+    public IReadOnlyList<SessionCommandBatchItemViewModel> Commands { get; set; } = [];
+    public string? TenantId { get; set; }
+    public string? OrganizationId { get; set; }
+    public IReadOnlyList<string> OperatorRoles { get; set; } = [];
+}
+
+/// <summary>
+/// Represents one per-command result returned by batch dispatch endpoint.
+/// </summary>
+public sealed record SessionCommandBatchResultViewModel(
+    string CommandId,
+    string Status,
+    ErrorInfoViewModel? Error = null,
+    IReadOnlyDictionary<string, double>? Metrics = null);
+
+/// <summary>
+/// Represents aggregate acknowledgment for one command batch dispatch.
+/// </summary>
+public sealed record SessionCommandBatchAckViewModel(
+    IReadOnlyList<SessionCommandBatchResultViewModel> Results,
+    int AppliedCount,
+    int RejectedCount,
+    int TimeoutCount);
+
+/// <summary>
 /// Represents one persisted command journal entry projected from transport health diagnostics.
 /// </summary>
 public sealed record CommandJournalEntryViewModel(
@@ -296,6 +338,7 @@ public sealed record SessionTransportHealthViewModel(
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
     string? MediaSource = null,
+    string? MediaPlaybackUrl = null,
     string? MediaStreamKind = null,
     MediaVideoDescriptorViewModel? MediaVideo = null,
     MediaAudioDescriptorViewModel? MediaAudio = null);
@@ -324,6 +367,7 @@ public sealed record SessionTransportReadinessViewModel(
     DateTimeOffset? MediaReportedAtUtc = null,
     string? MediaStreamId = null,
     string? MediaSource = null,
+    string? MediaPlaybackUrl = null,
     string? MediaStreamKind = null,
     MediaVideoDescriptorViewModel? MediaVideo = null,
     MediaAudioDescriptorViewModel? MediaAudio = null,
@@ -344,6 +388,7 @@ public sealed record SessionMediaStreamSnapshotViewModel(
     DateTimeOffset UpdatedAtUtc,
     string? FailureReason = null,
     string? Source = null,
+    string? PlaybackUrl = null,
     string? StreamKind = null,
     MediaVideoDescriptorViewModel? Video = null,
     MediaAudioDescriptorViewModel? Audio = null,

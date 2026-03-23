@@ -1,4 +1,5 @@
 using HidBridge.Abstractions;
+using HidBridge.Application;
 using HidBridge.Contracts;
 
 namespace HidBridge.ControlPlane.Api.Endpoints;
@@ -293,6 +294,31 @@ public static class SessionEndpoints
         .Produces<CommandAckBody>(StatusCodes.Status200OK)
         .WithSummary("Dispatch a command to the agent bound to the session.")
         .WithDescription("Executes a command through the session's bound agent. The route sessionId wins over any SessionId value in the request body.");
+
+        sessionGroup.MapPost("/{sessionId}/commands/batch", async (
+            string sessionId,
+            HttpContext httpContext,
+            DispatchCommandBatchUseCase useCase,
+            SessionCommandBatchDispatchBody request,
+            CancellationToken ct) =>
+        {
+            var caller = ApiCallerContext.FromHttpContext(httpContext);
+            try
+            {
+                caller.EnsureViewerAccess();
+                var normalized = caller.Apply(request);
+                var ack = await useCase.ExecuteAsync(sessionId, normalized, ct);
+                return Results.Ok(ack);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ApiAuthorizationResults.Forbidden(caller, ex, sessionId: sessionId);
+            }
+        })
+        .Accepts<SessionCommandBatchDispatchBody>("application/json")
+        .Produces<SessionCommandBatchAckBody>(StatusCodes.Status200OK)
+        .WithSummary("Dispatch a command batch to the agent bound to the session.")
+        .WithDescription("Executes one ordered command batch through the session's bound agent. The route sessionId wins over request body session data.");
 
         endpoints.MapGet("/api/v1/commands", async (HttpContext httpContext, string? sessionId, ISessionStore sessionStore, ICommandJournalStore journalStore, CancellationToken ct) =>
         {

@@ -302,6 +302,54 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies the batch command-dispatch route and payload.
+    /// </summary>
+    [Fact]
+    public async Task DispatchCommandBatchAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new SessionCommandBatchDispatchRequestViewModel
+        {
+            Commands =
+            [
+                new SessionCommandBatchItemViewModel
+                {
+                    CommandId = "cmd-1",
+                    Channel = "Hid",
+                    Action = "keyboard.text",
+                    Args = new Dictionary<string, object?> { ["text"] = "hello" },
+                    TimeoutMs = 3000,
+                    IdempotencyKey = "idem-1",
+                },
+                new SessionCommandBatchItemViewModel
+                {
+                    CommandId = "cmd-2",
+                    Channel = "Hid",
+                    Action = "mouse.move",
+                    Args = new Dictionary<string, object?> { ["dx"] = 10, ["dy"] = 5 },
+                    TimeoutMs = 3000,
+                    IdempotencyKey = "idem-2",
+                },
+            ],
+            TenantId = "local-tenant",
+            OrganizationId = "local-org",
+            OperatorRoles = ["operator.moderator"],
+        };
+        var handler = new RecordingHandler(new SessionCommandBatchAckViewModel([], 2, 0, 0));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.DispatchCommandBatchAsync("session-1", request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/sessions/session-1/commands/batch", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(payload);
+        Assert.True(payload!.ContainsKey("commands"));
+    }
+
+    /// <summary>
     /// Verifies the request-control action route and payload.
     /// </summary>
     [Fact]
