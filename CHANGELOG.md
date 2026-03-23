@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-03-23 (pr-3 thin wrappers completed for webrtc-stack scripts)
+
+Summary:
+
+- Reworked `run_webrtc_stack.ps1` into a thin bootstrap wrapper focused only on runtime bootstrap + edge-agent/legacy process start + summary output.
+- Removed script-side policy/fallback/readiness/keycloak-discovery orchestration from `webrtc-stack`; policy decisions remain API-owned (`/control/ensure`, `/transport/readiness`) and are exercised by smoke/acceptance.
+- Kept `webrtc-stack-terminal-b` as thin compatibility proxy over canonical smoke flow.
+- Updated platform runbook to document explicit runtime reuse via `-SkipRuntimeBootstrap` and clarify acceptance wrapper behavior.
+
+Detailed notes:
+
+- `Platform/Scripts/run_webrtc_stack.ps1`
+- `Platform/Scripts/run_webrtc_stack_terminal_b.ps1`
+- `Platform/README.md`
+
 ## 2026-03-22 (pr-next-acceptance runner in solution + .net acceptance orchestration)
 
 Summary:

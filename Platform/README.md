@@ -454,7 +454,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
 - compatibility launcher (starts API/Web + exp-022 + edge proxy agent via control websocket):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','controlws','-AllowLegacyControlWs','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
   - stack launcher is now a thin runtime bootstrapper (start/stop only): no script-side control/lease/readiness policy.
-  - if API/Web are already healthy (for example Docker `platform-runtime` profile), `webrtc-stack` now auto-reuses them and skips local runtime bootstrap.
+  - to reuse already-running Docker runtime, pass `-SkipRuntimeBootstrap`.
   - session/lease/readiness checks are executed by server-side API policy and smoke/acceptance tasks.
   - deprecated and ignored for `webrtc-stack`: `-PeerReadyTimeoutSec`, `-AdapterDurationSec`, `-TokenScope`.
 - one-command smoke for the running stack (expects `Applied`):
@@ -464,7 +464,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - readiness polling knobs: `-TransportHealthAttempts`, `-TransportHealthDelayMs`.
 - `webrtc-stack-terminal-b` is now a thin compatibility wrapper over `webrtc-edge-agent-smoke` (no session auto-create/fallback policy in script layer).
   - deprecated/no-op parameters in this wrapper: `-AutoCreateSessionIfMissing`, `-AllowMissingControlRequestEndpoint`, `-EndpointId`, `-Profile`.
-- one-command acceptance for CI/local automation (boots stack + runs smoke):
+- one-command acceptance for CI/local automation (thin wrapper to `.NET` runner; stack/runtime can be reused):
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
   - orchestration now runs through `.NET` runner project `Platform/Tools/HidBridge.Acceptance.Runner` (PowerShell entrypoint is a thin wrapper only).
   - in controlws mode add `-AllowLegacyControlWs -ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
