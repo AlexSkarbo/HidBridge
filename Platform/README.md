@@ -824,6 +824,8 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `doctor -StartApiProbe -RequireApi`
   - `run_checks.ps1 -Provider Sql`
   - `run_api_bearer_smoke.ps1`
+  - `run_all_tests.ps1` includes hosted lease-orchestration integration coverage:
+    - `HostedWebRtcFullStackIntegrationTests` (happy path + deterministic lease-conflict propagation)
   - mandatory WebRTC edge-agent acceptance lane (CI gate):
     - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -WebRtcCommandExecutor uart`
     - acceptance now uses dedicated `.NET` orchestration runner (`Platform/Tools/HidBridge.Acceptance.Runner`) via thin wrapper `run_webrtc_edge_agent_acceptance.ps1`: starts stack, waits for online relay peer, executes smoke command expecting `Applied`.

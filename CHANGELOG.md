@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-03-23 (pr-2 integration gate finalization: hosted full-stack lease coverage)
+
+Summary:
+
+- Added hosted full-stack integration coverage for lease orchestration + transport readiness projection:
+  - happy path (`ensure lease` + peer online + media registry -> readiness `ready`)
+  - deterministic lease conflict propagation (`E_CONTROL_LEASE_HELD_BY_OTHER`).
+- Kept `ci-local`/`full` gating model unchanged (mandatory acceptance + ops verify) while extending default test suite depth through hosted scenarios.
+- Updated platform runbook to explicitly mention hosted lease-orchestration coverage in the regular test lane.
+
+Detailed notes:
+
+- `Platform/Tests/HidBridge.Platform.Tests/HostedWebRtcFullStackIntegrationTests.cs` (new)
+- `Platform/README.md`
+
 ## 2026-03-23 (pr-a live input batch dispatch parity)
 
 Summary:
