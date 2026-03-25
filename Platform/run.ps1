@@ -9,6 +9,8 @@ param(
     [switch]$IncludeWebRtcEdgeAgentSmoke,
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
+    [switch]$IncludeWebRtcMediaE2EGate,
+    [switch]$SkipWebRtcMediaE2EGate,
     [string]$WebRtcCommandExecutor,
     [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl,
@@ -21,6 +23,10 @@ param(
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = -1,
     [int]$TransportHealthDelayMs = -1,
+    [switch]$RequireMediaReady,
+    [switch]$RequireMediaPlaybackUrl,
+    [int]$MediaHealthAttempts = -1,
+    [int]$MediaHealthDelayMs = -1,
     [int]$SloWindowMinutes = -1,
     [switch]$AllowAuthDisabled,
     [switch]$FailOnSloWarning,
@@ -201,6 +207,20 @@ if ($SkipWebRtcEdgeAgentAcceptance) {
     }
 }
 
+if ($IncludeWebRtcMediaE2EGate) {
+    $tasksWithWebRtcMediaGate = @("ci-local", "full")
+    if ($tasksWithWebRtcMediaGate -contains $Task) {
+        $effectiveForwardArgs.Add("-IncludeWebRtcMediaE2EGate") | Out-Null
+    }
+}
+
+if ($SkipWebRtcMediaE2EGate) {
+    $tasksWithWebRtcMediaGateSkip = @("ci-local", "full")
+    if ($tasksWithWebRtcMediaGateSkip -contains $Task) {
+        $effectiveForwardArgs.Add("-SkipWebRtcMediaE2EGate") | Out-Null
+    }
+}
+
 if ($PSBoundParameters.ContainsKey("WebRtcCommandExecutor") -and -not [string]::IsNullOrWhiteSpace($WebRtcCommandExecutor)) {
     $tasksWithWebRtcCommandExecutor = @("demo-flow", "ci-local", "full")
     if ($tasksWithWebRtcCommandExecutor -contains $Task) {
@@ -269,6 +289,38 @@ if ($PSBoundParameters.ContainsKey("TransportHealthDelayMs") -and $TransportHeal
     if ($tasksWithTransportHealthDelay -contains $Task) {
         $effectiveForwardArgs.Add("-TransportHealthDelayMs") | Out-Null
         $effectiveForwardArgs.Add([string]$TransportHealthDelayMs) | Out-Null
+    }
+}
+
+if ($RequireMediaReady) {
+    $tasksWithMediaReadyGate = @("webrtc-edge-agent-acceptance")
+    if ($tasksWithMediaReadyGate -contains $Task) {
+        $effectiveForwardArgs.Add("-RequireMediaReady") | Out-Null
+    }
+}
+
+if ($RequireMediaPlaybackUrl) {
+    $tasksWithMediaPlaybackGate = @("webrtc-edge-agent-acceptance")
+    if ($tasksWithMediaPlaybackGate -contains $Task) {
+        $effectiveForwardArgs.Add("-RequireMediaPlaybackUrl") | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("MediaHealthAttempts") -and $MediaHealthAttempts -gt 0) {
+    $tasksWithMediaHealthAttempts = @("webrtc-edge-agent-acceptance", "ci-local", "full")
+    if ($tasksWithMediaHealthAttempts -contains $Task) {
+        $parameterName = if ($Task -eq "webrtc-edge-agent-acceptance") { "-MediaHealthAttempts" } else { "-WebRtcMediaHealthAttempts" }
+        $effectiveForwardArgs.Add($parameterName) | Out-Null
+        $effectiveForwardArgs.Add([string]$MediaHealthAttempts) | Out-Null
+    }
+}
+
+if ($PSBoundParameters.ContainsKey("MediaHealthDelayMs") -and $MediaHealthDelayMs -gt 0) {
+    $tasksWithMediaHealthDelay = @("webrtc-edge-agent-acceptance", "ci-local", "full")
+    if ($tasksWithMediaHealthDelay -contains $Task) {
+        $parameterName = if ($Task -eq "webrtc-edge-agent-acceptance") { "-MediaHealthDelayMs" } else { "-WebRtcMediaHealthDelayMs" }
+        $effectiveForwardArgs.Add($parameterName) | Out-Null
+        $effectiveForwardArgs.Add([string]$MediaHealthDelayMs) | Out-Null
     }
 }
 

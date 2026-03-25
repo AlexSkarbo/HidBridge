@@ -36,7 +36,9 @@ Console.WriteLine("\n=== WebRTC Edge Agent Smoke ===");
 var smokeSummary = await RunSmokeAsync(options, sessionRuntime, smokeSummaryPath, CancellationToken.None);
 await WriteJsonAsync(smokeSummaryPath, smokeSummary);
 result.Smoke = TryReadJson(smokeSummaryPath);
-result.Pass = string.Equals(smokeSummary.CommandStatus, "Applied", StringComparison.OrdinalIgnoreCase);
+var commandPass = string.Equals(smokeSummary.CommandStatus, "Applied", StringComparison.OrdinalIgnoreCase);
+var mediaPass = smokeSummary.MediaGatePass ?? true;
+result.Pass = commandPass && mediaPass;
 var smokeExitCode = result.Pass ? 0 : 1;
 
 await WriteSummaryAsync(options.OutputJsonPath, result, platformRoot);
@@ -45,6 +47,14 @@ Console.WriteLine("\n=== Acceptance Summary ===");
 Console.WriteLine($"Result: {(result.Pass ? "PASS" : "FAIL")}");
 Console.WriteLine($"Session:       {sessionRuntime.SessionId}");
 Console.WriteLine($"Peer:          {sessionRuntime.PeerId}");
+if (smokeSummary.MediaGateRequired)
+{
+    Console.WriteLine($"Media gate:    {(smokeSummary.MediaGatePass == true ? "PASS" : "FAIL")}");
+    if (!string.IsNullOrWhiteSpace(smokeSummary.MediaGateFailureReason))
+    {
+        Console.WriteLine($"Media reason:  {smokeSummary.MediaGateFailureReason}");
+    }
+}
 Console.WriteLine($"Smoke summary: {smokeSummaryPath}");
 if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
 {
@@ -122,6 +132,12 @@ static async Task<SmokeSummary> RunSmokeAsync(
         throw new InvalidOperationException("Smoke command did not produce command result.");
     }
 
+    MediaGateResult? mediaGate = null;
+    if (options.RequireMediaReady || options.RequireMediaPlaybackUrl)
+    {
+        mediaGate = await WaitMediaGateAsync(options, apiClient, sessionRuntime, cancellationToken);
+    }
+
     return new SmokeSummary
     {
         ApiBaseUrl = options.ApiBaseUrl,
@@ -135,6 +151,13 @@ static async Task<SmokeSummary> RunSmokeAsync(
         CommandAttemptsConfigured = maxAttempts,
         CommandAttempts = commandAttempts,
         TransportReadiness = readiness,
+        MediaGateRequired = options.RequireMediaReady || options.RequireMediaPlaybackUrl,
+        MediaGatePass = mediaGate?.Pass,
+        MediaReadyObserved = mediaGate?.ObservedMediaReady,
+        MediaPlaybackUrlObserved = mediaGate?.ObservedPlaybackUrl,
+        MediaGateFailureReason = mediaGate?.FailureReason,
+        MediaReadiness = mediaGate?.ReadinessSnapshot,
+        MediaStreams = mediaGate?.StreamsSnapshot,
         OutputPath = smokeSummaryPath,
     };
 }
@@ -202,6 +225,7 @@ static async Task<string> AcquireAccessTokenAsync(AcceptanceRunnerOptions option
     var tokenEndpoint = $"{keycloak}/realms/{options.RealmName}/protocol/openid-connect/token";
     var attempts = Math.Max(1, options.TokenRequestAttempts);
     var delayMs = Math.Max(100, options.TokenRequestDelayMs);
+    Console.WriteLine($"Acquiring access token from {tokenEndpoint} (client_id={options.TokenClientId}, username={options.TokenUsername}).");
 
     Exception? last = null;
     for (var attempt = 1; attempt <= attempts; attempt++)
@@ -351,6 +375,141 @@ static async Task<object?> WaitRelayTransportReadyAsync(
     }
 
     return last;
+}
+
+static async Task<MediaGateResult> WaitMediaGateAsync(
+    AcceptanceRunnerOptions options,
+    HttpClient client,
+    SessionRuntime runtime,
+    CancellationToken cancellationToken)
+{
+    var attempts = Math.Max(1, options.MediaHealthAttempts);
+    var delayMs = Math.Max(100, options.MediaHealthDelayMs);
+    var readinessUri = $"{options.ApiBaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(runtime.SessionId)}/transport/readiness?provider=webrtc-datachannel";
+    var streamsUri = $"{options.ApiBaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(runtime.SessionId)}/transport/media/streams?peerId={Uri.EscapeDataString(runtime.PeerId)}&endpointId={Uri.EscapeDataString(runtime.EndpointId)}";
+
+    object? lastReadiness = null;
+    object? lastStreams = null;
+    bool observedMediaReady = false;
+    string? observedPlaybackUrl = null;
+
+    for (var i = 0; i < attempts; i++)
+    {
+        try
+        {
+            using var readinessResponse = await client.GetAsync(readinessUri, cancellationToken);
+            if (readinessResponse.IsSuccessStatusCode)
+            {
+                using var readinessDoc = JsonDocument.Parse(await readinessResponse.Content.ReadAsStringAsync(cancellationToken));
+                var readinessRoot = readinessDoc.RootElement.Clone();
+                lastReadiness = JsonSerializer.Deserialize<object>(readinessRoot.GetRawText());
+
+                if (TryReadBoolean(readinessRoot, "mediaReady") is true)
+                {
+                    observedMediaReady = true;
+                }
+
+                observedPlaybackUrl ??= TryReadString(readinessRoot, "mediaPlaybackUrl");
+            }
+        }
+        catch
+        {
+            // keep polling
+        }
+
+        try
+        {
+            using var streamsResponse = await client.GetAsync(streamsUri, cancellationToken);
+            if (streamsResponse.IsSuccessStatusCode)
+            {
+                using var streamsDoc = JsonDocument.Parse(await streamsResponse.Content.ReadAsStringAsync(cancellationToken));
+                var streamsRoot = streamsDoc.RootElement.Clone();
+                lastStreams = JsonSerializer.Deserialize<object>(streamsRoot.GetRawText());
+                if (streamsRoot.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in streamsRoot.EnumerateArray())
+                    {
+                        if (TryReadBoolean(item, "ready") is true)
+                        {
+                            observedMediaReady = true;
+                        }
+
+                        observedPlaybackUrl ??= TryReadString(item, "playbackUrl");
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // keep polling
+        }
+
+        var mediaReadySatisfied = !options.RequireMediaReady || observedMediaReady;
+        var playbackSatisfied = !options.RequireMediaPlaybackUrl || !string.IsNullOrWhiteSpace(observedPlaybackUrl);
+        if (mediaReadySatisfied && playbackSatisfied)
+        {
+            return new MediaGateResult(
+                Pass: true,
+                ObservedMediaReady: observedMediaReady,
+                ObservedPlaybackUrl: observedPlaybackUrl,
+                ReadinessSnapshot: lastReadiness,
+                StreamsSnapshot: lastStreams,
+                FailureReason: null);
+        }
+
+        await Task.Delay(delayMs, cancellationToken);
+    }
+
+    var reasons = new List<string>();
+    if (options.RequireMediaReady && !observedMediaReady)
+    {
+        reasons.Add("mediaReady flag did not become true");
+    }
+
+    if (options.RequireMediaPlaybackUrl && string.IsNullOrWhiteSpace(observedPlaybackUrl))
+    {
+        reasons.Add("mediaPlaybackUrl/playbackUrl is missing");
+    }
+
+    return new MediaGateResult(
+        Pass: false,
+        ObservedMediaReady: observedMediaReady,
+        ObservedPlaybackUrl: observedPlaybackUrl,
+        ReadinessSnapshot: lastReadiness,
+        StreamsSnapshot: lastStreams,
+        FailureReason: reasons.Count == 0
+            ? "Media gate did not satisfy required conditions."
+            : string.Join("; ", reasons));
+}
+
+static bool? TryReadBoolean(JsonElement element, string propertyName)
+{
+    if (!element.TryGetProperty(propertyName, out var value))
+    {
+        return null;
+    }
+
+    return value.ValueKind switch
+    {
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+        _ => null,
+    };
+}
+
+static string? TryReadString(JsonElement element, string propertyName)
+{
+    if (!element.TryGetProperty(propertyName, out var value))
+    {
+        return null;
+    }
+
+    return value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString(),
+        _ => null,
+    };
 }
 
 static async Task<CommandAck> DispatchCommandAsync(
@@ -533,6 +692,10 @@ internal sealed class AcceptanceRunnerOptions
     public int TimeoutMs { get; private set; } = 8000;
     public int CommandAttempts { get; private set; } = 3;
     public int CommandRetryDelayMs { get; private set; } = 750;
+    public bool RequireMediaReady { get; private set; }
+    public bool RequireMediaPlaybackUrl { get; private set; }
+    public int MediaHealthAttempts { get; private set; } = 20;
+    public int MediaHealthDelayMs { get; private set; } = 500;
     public bool SkipControlLeaseRequest { get; private set; }
     public int LeaseSeconds { get; private set; } = 120;
     public bool SkipRuntimeBootstrap { get; private set; }
@@ -567,6 +730,10 @@ internal sealed class AcceptanceRunnerOptions
                 case "timeout-ms": options.TimeoutMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "command-attempts": options.CommandAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "command-retry-delay-ms": options.CommandRetryDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "require-media-ready": options.RequireMediaReady = true; break;
+                case "require-media-playback-url": options.RequireMediaPlaybackUrl = true; break;
+                case "media-health-attempts": options.MediaHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "media-health-delay-ms": options.MediaHealthDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "lease-seconds": options.LeaseSeconds = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "control-health-url": options.ControlHealthUrl = RequireValue(args, ref i, arg); break;
                 case "control-ws-url": options.ControlWsUrl = RequireValue(args, ref i, arg); break;
@@ -650,5 +817,20 @@ internal sealed class SmokeSummary
     public int CommandAttemptsConfigured { get; set; }
     public IReadOnlyList<SmokeCommandAttempt> CommandAttempts { get; set; } = [];
     public object? TransportReadiness { get; set; }
+    public bool MediaGateRequired { get; set; }
+    public bool? MediaGatePass { get; set; }
+    public bool? MediaReadyObserved { get; set; }
+    public string? MediaPlaybackUrlObserved { get; set; }
+    public string? MediaGateFailureReason { get; set; }
+    public object? MediaReadiness { get; set; }
+    public object? MediaStreams { get; set; }
     public string? OutputPath { get; set; }
 }
+
+internal sealed record MediaGateResult(
+    bool Pass,
+    bool ObservedMediaReady,
+    string? ObservedPlaybackUrl,
+    object? ReadinessSnapshot,
+    object? StreamsSnapshot,
+    string? FailureReason);

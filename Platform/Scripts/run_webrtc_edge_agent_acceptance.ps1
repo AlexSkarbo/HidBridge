@@ -21,6 +21,10 @@ param(
     [switch]$SkipTransportHealthCheck,
     [int]$TransportHealthAttempts = 20,
     [int]$TransportHealthDelayMs = 500,
+    [switch]$RequireMediaReady,
+    [switch]$RequireMediaPlaybackUrl,
+    [int]$MediaHealthAttempts = 20,
+    [int]$MediaHealthDelayMs = 500,
     [string]$UartPort = "COM6",
     [int]$UartBaud = 3000000,
     [string]$UartHmacKey = "your-master-secret",
@@ -63,6 +67,8 @@ $runnerArgs = @(
     "--token-request-delay-ms", [string]$TokenRequestDelayMs,
     "--transport-health-attempts", [string]$TransportHealthAttempts,
     "--transport-health-delay-ms", [string]$TransportHealthDelayMs,
+    "--media-health-attempts", [string]$MediaHealthAttempts,
+    "--media-health-delay-ms", [string]$MediaHealthDelayMs,
     "--uart-port", $UartPort,
     "--uart-baud", [string]$UartBaud,
     "--uart-hmac-key", $UartHmacKey,
@@ -73,6 +79,8 @@ $runnerArgs = @(
 
 if ($AllowLegacyControlWs) { $runnerArgs += "--allow-legacy-controlws" }
 if ($SkipTransportHealthCheck) { $runnerArgs += "--skip-transport-health-check" }
+if ($RequireMediaReady) { $runnerArgs += "--require-media-ready" }
+if ($RequireMediaPlaybackUrl) { $runnerArgs += "--require-media-playback-url" }
 if ($SkipRuntimeBootstrap) { $runnerArgs += "--skip-runtime-bootstrap" }
 if ($StopExisting) { $runnerArgs += "--stop-existing" }
 if ($StopStackAfter) { $runnerArgs += "--stop-stack-after" }

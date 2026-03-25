@@ -8,6 +8,10 @@ param(
     [switch]$SkipBearerSmoke,
     [bool]$IncludeWebRtcEdgeAgentAcceptance = $true,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
+    [bool]$IncludeWebRtcMediaE2EGate = $true,
+    [switch]$SkipWebRtcMediaE2EGate,
+    [int]$WebRtcMediaHealthAttempts = 20,
+    [int]$WebRtcMediaHealthDelayMs = 500,
     [bool]$IncludeOpsSloSecurityVerify = $true,
     [switch]$SkipOpsSloSecurityVerify,
     [int]$OpsSloWindowMinutes = 60,
@@ -54,6 +58,10 @@ try {
     }
 
     if ($IncludeWebRtcEdgeAgentAcceptance -and -not $SkipWebRtcEdgeAgentAcceptance) {
+        if (-not $IncludeWebRtcMediaE2EGate -and -not $SkipWebRtcMediaE2EGate) {
+            throw "WebRTC media E2E gate is required for CI gate. Set -SkipWebRtcMediaE2EGate only for emergency/local override."
+        }
+
         if ([string]::Equals($WebRtcCommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase) -and -not $AllowLegacyControlWs) {
             throw "WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly."
         }
@@ -73,6 +81,12 @@ try {
         }
         if ($WebRtcStopStackAfterAcceptance) {
             $webrtcAcceptanceParameters.StopStackAfter = $true
+        }
+        if ($IncludeWebRtcMediaE2EGate -and -not $SkipWebRtcMediaE2EGate) {
+            $webrtcAcceptanceParameters.RequireMediaReady = $true
+            $webrtcAcceptanceParameters.RequireMediaPlaybackUrl = $true
+            $webrtcAcceptanceParameters.MediaHealthAttempts = [Math]::Max(1, $WebRtcMediaHealthAttempts)
+            $webrtcAcceptanceParameters.MediaHealthDelayMs = [Math]::Max(100, $WebRtcMediaHealthDelayMs)
         }
 
         Invoke-LoggedScript -Results $results -Name "WebRTC Edge Agent Acceptance" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_webrtc_edge_agent_acceptance.ps1") -Parameters $webrtcAcceptanceParameters -StopOnFailure:$StopOnFailure

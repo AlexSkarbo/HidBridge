@@ -8,6 +8,10 @@ param(
     [switch]$SkipCiLocal,
     [bool]$IncludeWebRtcEdgeAgentAcceptance = $true,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
+    [bool]$IncludeWebRtcMediaE2EGate = $true,
+    [switch]$SkipWebRtcMediaE2EGate,
+    [int]$WebRtcMediaHealthAttempts = 20,
+    [int]$WebRtcMediaHealthDelayMs = 500,
     [bool]$IncludeOpsSloSecurityVerify = $true,
     [switch]$SkipOpsSloSecurityVerify,
     [int]$OpsSloWindowMinutes = 60,
@@ -47,6 +51,10 @@ try {
             AuthAuthority = $AuthAuthority
             IncludeWebRtcEdgeAgentAcceptance = $IncludeWebRtcEdgeAgentAcceptance
             SkipWebRtcEdgeAgentAcceptance = $SkipWebRtcEdgeAgentAcceptance
+            IncludeWebRtcMediaE2EGate = $IncludeWebRtcMediaE2EGate
+            SkipWebRtcMediaE2EGate = $SkipWebRtcMediaE2EGate
+            WebRtcMediaHealthAttempts = [Math]::Max(1, $WebRtcMediaHealthAttempts)
+            WebRtcMediaHealthDelayMs = [Math]::Max(100, $WebRtcMediaHealthDelayMs)
             IncludeOpsSloSecurityVerify = $IncludeOpsSloSecurityVerify
             SkipOpsSloSecurityVerify = $SkipOpsSloSecurityVerify
             OpsSloWindowMinutes = [Math]::Max(5, $OpsSloWindowMinutes)

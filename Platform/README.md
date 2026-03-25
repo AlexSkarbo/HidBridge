@@ -367,6 +367,20 @@ Edge-agent as external process (outside docker):
   - `HIDBRIDGE_EDGE_PROXY_UARTHMACKEY=your-master-secret`
   - `HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL=http://127.0.0.1:8080/live.m3u8` (optional media preview URL surfaced in Web transport diagnostics)
 
+Transport-engine promotion plan (`relay` -> `dcd`, `none` -> `ffmpeg-dcd`):
+- Shadow mode:
+  - run `dcd`/`ffmpeg-dcd` with `DCDALLOWRELAYFALLBACK=true`
+  - canonical success remains relay ACK + server-side readiness (`/transport/readiness`)
+  - monitor SLOs: ACK timeout rate, reconnect frequency, relay-ready latency P95
+- Canary mode:
+  - enable `dcd` + `ffmpeg-dcd` only for selected endpoints/sessions
+  - keep rollback switch at env level (`TRANSPORTENGINE=relay`, `MEDIAENGINE=none`)
+  - require stable media diagnostics (`mediaReady=true`, non-empty `mediaPlaybackUrl`)
+- Default switch:
+  - allowed only after stable canary window with no critical SLO breaches
+  - CI gates must pass with media E2E enabled (no skip flags)
+  - keep emergency rollback documented and tested in runbooks.
+
 Final runtime flow (no script policy dependency):
 - production path:
   - `Web` -> `API` -> `WebRTC relay queue/signaling` -> `HidBridge.EdgeProxy.Agent` -> `HID/UART protocol` -> target device
@@ -829,6 +843,10 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - mandatory WebRTC edge-agent acceptance lane (CI gate):
     - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -WebRtcCommandExecutor uart`
     - acceptance now uses dedicated `.NET` orchestration runner (`Platform/Tools/HidBridge.Acceptance.Runner`) via thin wrapper `run_webrtc_edge_agent_acceptance.ps1`: starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
+    - mandatory media E2E gate inside acceptance:
+      - requires `mediaReady=true` and non-empty `mediaPlaybackUrl`/`playbackUrl` within bounded retries
+      - tune with `-WebRtcMediaHealthAttempts` / `-WebRtcMediaHealthDelayMs` (or launcher-level `-MediaHealthAttempts` / `-MediaHealthDelayMs`)
+      - emergency/local override only: `-SkipWebRtcMediaE2EGate`
     - optional timeout tuning for acceptance lane: `-PeerReadyTimeoutSec 45` (mapped to `-WebRtcPeerReadyTimeoutSec` for `ci-local`/`full`).
     - emergency/local override only: `-SkipWebRtcEdgeAgentAcceptance`
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`

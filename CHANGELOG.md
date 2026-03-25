@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-25 (pr-next promotion plan + media e2e gate)
+
+Summary:
+
+- Added explicit transport-engine promotion plan (`relay` -> `dcd`, `none` -> `ffmpeg-dcd`) with shadow/canary/default switch criteria and rollback rules.
+- Extended `.NET` acceptance runner with media E2E gate options:
+  - `--require-media-ready`
+  - `--require-media-playback-url`
+  - bounded retries via `--media-health-attempts` / `--media-health-delay-ms`.
+- Acceptance summary now reports media-gate pass/fail and observed media diagnostics.
+- Integrated media gate into CI orchestration (`ci-local`/`full`) as required-by-default lane with emergency skip flag.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+- `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`
+- `Platform/Scripts/run_ci_local.ps1`
+- `Platform/Scripts/run_full.ps1`
+- `Platform/run.ps1`
+- `Platform/README.md`
+
 ## 2026-03-23 (pr-2 integration gate finalization: hosted full-stack lease coverage)
 
 Summary:
