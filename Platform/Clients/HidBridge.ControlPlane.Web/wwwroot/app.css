@@ -866,3 +866,17 @@ html[data-platform="apple"] .hid-logo {
     color: var(--hid-foreground);
     padding: 0.8rem 0.95rem;
 }
+
+.hid-media-player {
+    width: 100%;
+    max-height: 24rem;
+    border-radius: 14px;
+    border: 1px solid var(--hid-outline);
+    background: color-mix(in srgb, var(--hid-surface-strong) 82%, #000 18%);
+}
+
+.hid-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}

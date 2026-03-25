@@ -1,0 +1,248 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject OperatorText T
+
+<div class="hid-card-soft">
+    <div class="hid-panel-toolbar">
+        <div>
+            <h4 class="hid-card-title">@T["MediaPanelTitle"]</h4>
+            <p class="hid-card-subtitle">@T["MediaPanelSubtitle"]</p>
+        </div>
+        <div class="hid-candidate-actions">
+            <button class="hid-button-secondary hid-button-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(PlaybackUrl) || _isRunning)" @onclick="StartPlaybackAsync">
+                @T["MediaStartStream"]
+            </button>
+            <button class="hid-button-secondary hid-button-sm" disabled="@(_busy || !_isRunning)" @onclick="StopPlaybackAsync">
+                @T["MediaStopStream"]
+            </button>
+        </div>
+    </div>
+
+    <div class="hid-inline-meta">
+        <span>@T["TransportMediaStreamId"]: @(string.IsNullOrWhiteSpace(MediaStreamId) ? "—" : MediaStreamId)</span>
+        <span>@T["TransportMediaState"]: @(string.IsNullOrWhiteSpace(MediaState) ? "—" : MediaState)</span>
+        <span>@T["TransportMediaReady"]: @(MediaReady.HasValue ? (MediaReady.Value ? "Yes" : "No") : "—")</span>
+        <span>@T["MediaPlaybackMode"]: @(_mode ?? "—")</span>
+    </div>
+
+    <div class="hid-inline-meta">
+        <label class="hid-field">
+            <input type="checkbox" checked="@_muted" @onchange="OnMutedChanged" />
+            <span>@T["MediaMuted"]</span>
+        </label>
+        <span>@T["MediaPlaybackState"]: @(_isRunning ? T["MediaPlaybackRunning"] : T["MediaPlaybackStopped"])</span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="hid-alert hid-alert--warning">@T["MediaPlaybackError"]: @_error</div>
+    }
+
+    <video @ref="_videoElement" controls autoplay playsinline class="hid-media-player"></video>
+
+    @if (string.IsNullOrWhiteSpace(PlaybackUrl))
+    {
+        <div class="hid-empty-state">@T["MediaPlaybackNotAvailable"]</div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string SessionId { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? PlaybackUrl { get; set; }
+
+    [Parameter]
+    public bool? MediaReady { get; set; }
+
+    [Parameter]
+    public string? MediaState { get; set; }
+
+    [Parameter]
+    public string? MediaStreamId { get; set; }
+
+    private IJSObjectReference? _module;
+    private ElementReference _videoElement;
+    private bool _busy;
+    private bool _isRunning;
+    private bool _muted = true;
+    private string? _mode;
+    private string? _error;
+    private string? _activePlaybackUrl;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/SessionMediaPanel.razor.js");
+        }
+        catch
+        {
+            _module = null;
+            _error = "Media module failed to load.";
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_isRunning || _module is null)
+        {
+            return;
+        }
+
+        var nextUrl = NormalizeUrl(PlaybackUrl);
+        if (string.Equals(_activePlaybackUrl, nextUrl, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await StartPlaybackInternalAsync(nextUrl);
+    }
+
+    private async Task StartPlaybackAsync()
+    {
+        await StartPlaybackInternalAsync(NormalizeUrl(PlaybackUrl));
+    }
+
+    private async Task StartPlaybackInternalAsync(string? url)
+    {
+        if (_module is null)
+        {
+            _error = "Media module is unavailable.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            _error = T["MediaPlaybackNotAvailable"];
+            _isRunning = false;
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await _module.InvokeAsync<MediaPlaybackStartResult>("startPlayback", _videoElement, url, _muted);
+            if (!result.Ok)
+            {
+                _error = string.IsNullOrWhiteSpace(result.Error) ? "Playback start failed." : result.Error;
+                _isRunning = false;
+                _mode = result.Mode;
+                _activePlaybackUrl = null;
+                return;
+            }
+
+            _isRunning = true;
+            _mode = result.Mode;
+            _activePlaybackUrl = url;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _isRunning = false;
+            _mode = null;
+            _activePlaybackUrl = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StopPlaybackAsync()
+    {
+        if (_module is null)
+        {
+            _isRunning = false;
+            _activePlaybackUrl = null;
+            _mode = null;
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await _module.InvokeVoidAsync("stopPlayback", _videoElement);
+            _isRunning = false;
+            _activePlaybackUrl = null;
+            _mode = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnMutedChanged(ChangeEventArgs args)
+    {
+        var next = args.Value switch
+        {
+            bool value => value,
+            string text when bool.TryParse(text, out var value) => value,
+            _ => _muted,
+        };
+
+        _muted = next;
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.InvokeVoidAsync("setMuted", _videoElement, _muted);
+        }
+        catch
+        {
+            // Ignore mute toggle failures; playback remains active.
+        }
+    }
+
+    private static string? NormalizeUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("stopPlayback", _videoElement);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private sealed class MediaPlaybackStartResult
+    {
+        public bool Ok { get; set; }
+        public string? Mode { get; set; }
+        public string? Error { get; set; }
+    }
+}
