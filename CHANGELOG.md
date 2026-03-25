@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-25 (pr-b.2 regression tests: session media panel)
+
+Summary:
+
+- Added component-level regression coverage for session media playback panel runtime behavior.
+- Added bUnit Web test dependency for Blazor component rendering in `HidBridge.Platform.Tests`.
+- Locked key UI expectations to prevent future regressions in playback controls and runtime status rendering.
+
+Detailed notes:
+
+- `Platform/Tests/HidBridge.Platform.Tests/HidBridge.Platform.Tests.csproj` (`bunit.web`)
+- `Platform/Tests/HidBridge.Platform.Tests/SessionMediaPanelTests.cs` (new)
+
 ## 2026-03-25 (pr-b.2 ui playback parity: live media runtime + reconnect states)
 
 Summary:
