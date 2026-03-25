@@ -10,11 +10,20 @@
             <p class="hid-card-subtitle">@T["MediaPanelSubtitle"]</p>
         </div>
         <div class="hid-candidate-actions">
-            <button class="hid-button-secondary hid-button-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(PlaybackUrl) || _isRunning)" @onclick="StartPlaybackAsync">
+            <button class="hid-button-secondary hid-button-sm"
+                    disabled="@(_busy || string.IsNullOrWhiteSpace(PlaybackUrl) || _isRunning)"
+                    @onclick="StartPlaybackAsync">
                 @T["MediaStartStream"]
             </button>
-            <button class="hid-button-secondary hid-button-sm" disabled="@(_busy || !_isRunning)" @onclick="StopPlaybackAsync">
+            <button class="hid-button-secondary hid-button-sm"
+                    disabled="@(_busy || !_isRunning)"
+                    @onclick="StopPlaybackAsync">
                 @T["MediaStopStream"]
+            </button>
+            <button class="hid-button-secondary hid-button-sm"
+                    disabled="@(_busy || string.IsNullOrWhiteSpace(PlaybackUrl))"
+                    @onclick="RestartPlaybackAsync">
+                @T["MediaReconnectNow"]
             </button>
         </div>
     </div>
@@ -22,7 +31,7 @@
     <div class="hid-inline-meta">
         <span>@T["TransportMediaStreamId"]: @(string.IsNullOrWhiteSpace(MediaStreamId) ? "—" : MediaStreamId)</span>
         <span>@T["TransportMediaState"]: @(string.IsNullOrWhiteSpace(MediaState) ? "—" : MediaState)</span>
-        <span>@T["TransportMediaReady"]: @(MediaReady.HasValue ? (MediaReady.Value ? "Yes" : "No") : "—")</span>
+        <span>@T["TransportMediaReady"]: @(MediaReady.HasValue ? (MediaReady.Value ? T["Yes"] : T["No"]) : "—")</span>
         <span>@T["MediaPlaybackMode"]: @(_mode ?? "—")</span>
     </div>
 
@@ -31,7 +40,19 @@
             <input type="checkbox" checked="@_muted" @onchange="OnMutedChanged" />
             <span>@T["MediaMuted"]</span>
         </label>
+        <label class="hid-field">
+            <input type="checkbox" checked="@_autoReconnect" @onchange="OnAutoReconnectChanged" />
+            <span>@T["MediaAutoReconnect"]</span>
+        </label>
         <span>@T["MediaPlaybackState"]: @(_isRunning ? T["MediaPlaybackRunning"] : T["MediaPlaybackStopped"])</span>
+        <span>@T["MediaConnectionState"]: @(_connectionState ?? "—")</span>
+        <span>@T["MediaIceState"]: @(_iceConnectionState ?? "—")</span>
+    </div>
+
+    <div class="hid-inline-meta">
+        <span>@T["MediaTrackCount"]: @_trackCount</span>
+        <span>@T["MediaReconnectAttempts"]: @_reconnectAttempts</span>
+        <span>@T["MediaLastEvent"]: @GetLastEventLabel()</span>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(_error))
@@ -63,14 +84,27 @@
     [Parameter]
     public string? MediaStreamId { get; set; }
 
+    [Parameter]
+    public bool AutoStartWhenReady { get; set; } = true;
+
     private IJSObjectReference? _module;
+    private DotNetObjectReference<SessionMediaPanel>? _dotNetRef;
     private ElementReference _videoElement;
     private bool _busy;
     private bool _isRunning;
     private bool _muted = true;
+    private bool _autoReconnect = true;
     private string? _mode;
     private string? _error;
     private string? _activePlaybackUrl;
+    private string? _connectionState;
+    private string? _iceConnectionState;
+    private string? _lastEvent;
+    private DateTimeOffset? _lastEventAtUtc;
+    private int _trackCount;
+    private int _reconnectAttempts;
+    private const int ReconnectDelayMs = 1200;
+    private const int MaxReconnectAttempts = 20;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -82,6 +116,13 @@
         try
         {
             _module = await Js.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/SessionMediaPanel.razor.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+
+            var currentUrl = NormalizeUrl(PlaybackUrl);
+            if (ShouldAutoStart(currentUrl))
+            {
+                await StartPlaybackInternalAsync(currentUrl);
+            }
         }
         catch
         {
@@ -95,6 +136,13 @@
     {
         if (!_isRunning || _module is null)
         {
+            var autoUrl = NormalizeUrl(PlaybackUrl);
+            if (_module is null || !ShouldAutoStart(autoUrl))
+            {
+                return;
+            }
+
+            await StartPlaybackInternalAsync(autoUrl);
             return;
         }
 
@@ -110,6 +158,24 @@
     private async Task StartPlaybackAsync()
     {
         await StartPlaybackInternalAsync(NormalizeUrl(PlaybackUrl));
+    }
+
+    private async Task RestartPlaybackAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        var nextUrl = NormalizeUrl(PlaybackUrl);
+        if (string.IsNullOrWhiteSpace(nextUrl))
+        {
+            _error = T["MediaPlaybackNotAvailable"];
+            return;
+        }
+
+        await StopPlaybackAsync();
+        await StartPlaybackInternalAsync(nextUrl);
     }
 
     private async Task StartPlaybackInternalAsync(string? url)
@@ -131,19 +197,36 @@
         _error = null;
         try
         {
-            var result = await _module.InvokeAsync<MediaPlaybackStartResult>("startPlayback", _videoElement, url, _muted);
+            var result = await _module.InvokeAsync<MediaPlaybackStartResult>(
+                "startPlayback",
+                _videoElement,
+                url,
+                _muted,
+                _dotNetRef,
+                new MediaPlaybackStartOptions
+                {
+                    AutoReconnect = _autoReconnect,
+                    ReconnectDelayMs = ReconnectDelayMs,
+                    MaxReconnectAttempts = MaxReconnectAttempts,
+                });
             if (!result.Ok)
             {
                 _error = string.IsNullOrWhiteSpace(result.Error) ? "Playback start failed." : result.Error;
                 _isRunning = false;
                 _mode = result.Mode;
                 _activePlaybackUrl = null;
+                _connectionState = result.ConnectionState;
+                _iceConnectionState = result.IceConnectionState;
                 return;
             }
 
             _isRunning = true;
             _mode = result.Mode;
             _activePlaybackUrl = url;
+            _connectionState = result.ConnectionState;
+            _iceConnectionState = result.IceConnectionState;
+            _lastEvent = "started";
+            _lastEventAtUtc = DateTimeOffset.UtcNow;
         }
         catch (Exception ex)
         {
@@ -151,6 +234,8 @@
             _isRunning = false;
             _mode = null;
             _activePlaybackUrl = null;
+            _connectionState = null;
+            _iceConnectionState = null;
         }
         finally
         {
@@ -175,6 +260,8 @@
             _isRunning = false;
             _activePlaybackUrl = null;
             _mode = null;
+            _connectionState = null;
+            _iceConnectionState = null;
         }
         finally
         {
@@ -207,6 +294,123 @@
         }
     }
 
+    private async Task OnAutoReconnectChanged(ChangeEventArgs args)
+    {
+        var next = args.Value switch
+        {
+            bool value => value,
+            string text when bool.TryParse(text, out var value) => value,
+            _ => _autoReconnect,
+        };
+
+        _autoReconnect = next;
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.InvokeVoidAsync(
+                "setPlaybackOptions",
+                _videoElement,
+                new MediaPlaybackStartOptions
+                {
+                    AutoReconnect = _autoReconnect,
+                    ReconnectDelayMs = ReconnectDelayMs,
+                    MaxReconnectAttempts = MaxReconnectAttempts,
+                });
+        }
+        catch
+        {
+            // Ignore option synchronization failures; current playback remains active.
+        }
+    }
+
+    [JSInvokable]
+    public Task OnPlaybackEvent(MediaPlaybackRuntimeEvent runtimeEvent)
+    {
+        if (runtimeEvent is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        _lastEvent = runtimeEvent.Type;
+        _lastEventAtUtc = DateTimeOffset.UtcNow;
+        if (!string.IsNullOrWhiteSpace(runtimeEvent.Mode))
+        {
+            _mode = runtimeEvent.Mode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtimeEvent.ConnectionState))
+        {
+            _connectionState = runtimeEvent.ConnectionState;
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtimeEvent.IceConnectionState))
+        {
+            _iceConnectionState = runtimeEvent.IceConnectionState;
+        }
+
+        if (runtimeEvent.TrackCount.HasValue)
+        {
+            _trackCount = Math.Max(0, runtimeEvent.TrackCount.Value);
+        }
+
+        if (runtimeEvent.Attempt.HasValue)
+        {
+            _reconnectAttempts = Math.Max(_reconnectAttempts, runtimeEvent.Attempt.Value);
+        }
+
+        if (runtimeEvent.IsRunning.HasValue)
+        {
+            _isRunning = runtimeEvent.IsRunning.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtimeEvent.Error))
+        {
+            _error = runtimeEvent.Error;
+        }
+        else if (string.Equals(runtimeEvent.Type, "started", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(runtimeEvent.Type, "reconnect-success", StringComparison.OrdinalIgnoreCase))
+        {
+            _error = null;
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private bool ShouldAutoStart(string? playbackUrl)
+    {
+        if (!AutoStartWhenReady || _busy || _isRunning || string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            return false;
+        }
+
+        if (MediaReady.HasValue)
+        {
+            return MediaReady.Value;
+        }
+
+        return string.Equals(MediaState, "Ready", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(MediaState, "Streaming", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetLastEventLabel()
+    {
+        if (string.IsNullOrWhiteSpace(_lastEvent))
+        {
+            return "—";
+        }
+
+        if (!_lastEventAtUtc.HasValue)
+        {
+            return _lastEvent!;
+        }
+
+        return $"{_lastEvent} ({_lastEventAtUtc.Value.LocalDateTime:HH:mm:ss})";
+    }
+
     private static string? NormalizeUrl(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -237,6 +441,9 @@
             {
             }
         }
+
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
     }
 
     private sealed class MediaPlaybackStartResult
@@ -244,5 +451,26 @@
         public bool Ok { get; set; }
         public string? Mode { get; set; }
         public string? Error { get; set; }
+        public string? ConnectionState { get; set; }
+        public string? IceConnectionState { get; set; }
+    }
+
+    private sealed class MediaPlaybackStartOptions
+    {
+        public bool AutoReconnect { get; set; } = true;
+        public int ReconnectDelayMs { get; set; } = SessionMediaPanel.ReconnectDelayMs;
+        public int MaxReconnectAttempts { get; set; } = SessionMediaPanel.MaxReconnectAttempts;
+    }
+
+    public sealed class MediaPlaybackRuntimeEvent
+    {
+        public string? Type { get; set; }
+        public string? Mode { get; set; }
+        public string? Error { get; set; }
+        public string? ConnectionState { get; set; }
+        public string? IceConnectionState { get; set; }
+        public int? TrackCount { get; set; }
+        public int? Attempt { get; set; }
+        public bool? IsRunning { get; set; }
     }
 }

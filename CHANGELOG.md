@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-03-25 (pr-b.2 ui playback parity: live media runtime + reconnect states)
+
+Summary:
+
+- Completed Session Details media playback panel as a real runtime surface (not static diagnostics):
+  - live connection/ICE state
+  - track count
+  - last playback event
+  - reconnect attempt counter.
+- Added explicit operator controls for media runtime handling:
+  - `Reconnect now`
+  - `Auto reconnect` toggle
+  - existing `Start stream`/`Stop stream` kept.
+- Added JS media runtime event bridge (`JS -> .NET`) so panel state updates from actual `video`/`RTCPeerConnection` lifecycle.
+- Added bounded auto-reconnect loop for playback failures/stalls/disconnects with configurable delay/attempt guardrails.
+
+Detailed notes:
+
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionMediaPanel.razor`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionMediaPanel.razor.js`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Localization/OperatorText.cs`
+
 ## 2026-03-25 (pr-next promotion plan + media e2e gate)
 
 Summary:
