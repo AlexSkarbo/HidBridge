@@ -17,14 +17,18 @@ internal sealed class RuntimeCtlApp
             ["checks"] = new("checks", "Runs platform checks lane (native C#).", CommandKind.Checks, null),
             ["bearer-smoke"] = new("bearer-smoke", "Runs API bearer smoke lane (native C#).", CommandKind.BearerSmoke, null),
             ["smoke-bearer"] = new("smoke-bearer", "Runs API bearer smoke lane (native C#).", CommandKind.BearerSmoke, null),
+            ["export-artifacts"] = new("export-artifacts", "Exports runtime artifacts (native C#).", CommandKind.ExportArtifacts, null),
             ["ci-local"] = new("ci-local", "Runs local CI gate lane (native C# orchestration).", CommandKind.CiLocal, null),
             ["full"] = new("full", "Runs full local gate lane (native C# orchestration).", CommandKind.Full, null),
             ["demo-flow"] = new("demo-flow", "Runs demo bootstrap flow (native C# orchestration).", CommandKind.DemoFlow, null),
             ["demo-gate"] = new("demo-gate", "Runs demo runtime gate (native C# orchestration for WebRTC mode).", CommandKind.DemoGate, null),
             ["webrtc-stack"] = new("webrtc-stack", "Bootstraps WebRTC stack and edge adapter (native C# orchestration).", CommandKind.WebRtcStack, null),
             ["webrtc-edge-agent-smoke"] = new("webrtc-edge-agent-smoke", "Runs WebRTC edge-agent smoke (native C# orchestration).", CommandKind.WebRtcEdgeAgentSmoke, null),
+            ["webrtc-stack-terminal-b"] = new("webrtc-stack-terminal-b", "Compatibility alias for WebRTC edge-agent smoke (native C# orchestration).", CommandKind.WebRtcEdgeAgentSmoke, null),
             ["webrtc-acceptance"] = new("webrtc-acceptance", "Runs WebRTC edge-agent acceptance (native C# orchestration).", CommandKind.WebRtcAcceptance, null),
+            ["webrtc-edge-agent-acceptance"] = new("webrtc-edge-agent-acceptance", "Compatibility alias for WebRTC edge-agent acceptance (native C# orchestration).", CommandKind.WebRtcAcceptance, null),
             ["ops-verify"] = new("ops-verify", "Runs ops SLO/security verification (native C# orchestration).", CommandKind.OpsVerify, null),
+            ["ops-slo-security-verify"] = new("ops-slo-security-verify", "Compatibility alias for ops SLO/security verification (native C# orchestration).", CommandKind.OpsVerify, null),
             ["identity-reset"] = new("identity-reset", "Resets Keycloak realm and smoke principals (native C#).", CommandKind.IdentityReset, null),
             ["platform-runtime"] = new("platform-runtime", "Controls docker runtime profile.", CommandKind.ScriptBridge, "Scripts/run_platform_runtime_profile.ps1"),
         };
@@ -176,6 +180,7 @@ internal sealed class RuntimeCtlApp
             CommandKind.Doctor => await DoctorCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.Checks => await ChecksCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.BearerSmoke => await BearerSmokeCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.ExportArtifacts => await ArtifactExportCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.CiLocal => await CiLocalCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.Full => await FullCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.WebRtcAcceptance => await WebRtcAcceptanceCommand.RunAsync(_platformRoot, _forwardArgs),
@@ -409,6 +414,7 @@ internal sealed class RuntimeCtlApp
         IdentityReset,
         Checks,
         BearerSmoke,
+        ExportArtifacts,
         CiLocal,
         Full,
         WebRtcAcceptance,
@@ -2168,6 +2174,227 @@ internal static class BearerSmokeCommand
     }
 }
 
+internal static class ArtifactExportCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!ArtifactExportOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"export-artifacts options error: {parseError}");
+            return 1;
+        }
+
+        var outputRoot = options.OutputRoot;
+        if (string.IsNullOrWhiteSpace(outputRoot))
+        {
+            outputRoot = Path.Combine(platformRoot, "Artifacts", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        }
+
+        try
+        {
+            var result = await ExportAsync(
+                platformRoot,
+                outputRoot,
+                options.IncludeSmokeData,
+                options.IncludeBackups,
+                options.LogPath);
+
+            Console.WriteLine("=== Artifact Export Summary ===");
+            Console.WriteLine($"OutputRoot: {result.OutputRoot}");
+            Console.WriteLine($"CopiedCount: {result.CopiedPaths.Count}");
+            foreach (var path in result.CopiedPaths)
+            {
+                Console.WriteLine(path);
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Artifact export failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    public static async Task<ArtifactExportResult> ExportAsync(
+        string platformRoot,
+        string outputRoot,
+        bool includeSmokeData,
+        bool includeBackups,
+        string? logPath = null)
+    {
+        Directory.CreateDirectory(outputRoot);
+
+        var copied = new List<string>();
+        var targets = new List<(string Source, string Destination)>
+        {
+            (Path.Combine(platformRoot, ".logs"), Path.Combine(outputRoot, ".logs")),
+        };
+
+        if (includeSmokeData)
+        {
+            targets.Add((Path.Combine(platformRoot, ".smoke-data"), Path.Combine(outputRoot, ".smoke-data")));
+        }
+
+        if (includeBackups)
+        {
+            targets.Add((Path.Combine(platformRoot, "Identity", "Keycloak", "backups"), Path.Combine(outputRoot, "keycloak-backups")));
+        }
+
+        foreach (var target in targets)
+        {
+            if (!Directory.Exists(target.Source))
+            {
+                continue;
+            }
+
+            CopyDirectory(target.Source, target.Destination);
+            copied.Add(target.Destination);
+        }
+
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            var lines = new List<string>
+            {
+                "=== Artifact Export Summary ===",
+                $"OutputRoot: {outputRoot}",
+                $"CopiedCount: {copied.Count}",
+            };
+            lines.AddRange(copied);
+            await File.WriteAllLinesAsync(logPath, lines);
+        }
+
+        return new ArtifactExportResult(outputRoot, copied);
+    }
+
+    private static void CopyDirectory(string sourceDir, string destinationDir)
+    {
+        var source = new DirectoryInfo(sourceDir);
+        if (!source.Exists)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(destinationDir);
+
+        foreach (var file in source.GetFiles())
+        {
+            var destinationFile = Path.Combine(destinationDir, file.Name);
+            file.CopyTo(destinationFile, overwrite: true);
+        }
+
+        foreach (var directory in source.GetDirectories())
+        {
+            CopyDirectory(directory.FullName, Path.Combine(destinationDir, directory.Name));
+        }
+    }
+
+    public sealed record ArtifactExportResult(string OutputRoot, IReadOnlyList<string> CopiedPaths);
+
+    private sealed class ArtifactExportOptions
+    {
+        public string OutputRoot { get; set; } = string.Empty;
+        public bool IncludeSmokeData { get; set; }
+        public bool IncludeBackups { get; set; }
+        public string? LogPath { get; set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out ArtifactExportOptions options, out string? error)
+        {
+            options = new ArtifactExportOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "outputroot": options.OutputRoot = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "includesmokedata": options.IncludeSmokeData = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "includebackups": options.IncludeBackups = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "logpath": options.LogPath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    default:
+                        error = $"Unsupported export-artifacts option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
 internal static class CiLocalCommand
 {
     public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
@@ -2416,24 +2643,15 @@ internal static class CiLocalCommand
         if (options.ExportArtifactsOnFailure && failed.Length > 0)
         {
             artifactExportPath = Path.Combine(platformRoot, "Artifacts", $"ci-local-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}");
-            var exportArgs = new List<string>
-            {
-                "-OutputRoot", artifactExportPath,
-            };
-
-            if (options.IncludeSmokeDataOnFailure)
-            {
-                exportArgs.Add("-IncludeSmokeData");
-            }
-
-            if (options.IncludeBackupsOnFailure)
-            {
-                exportArgs.Add("-IncludeBackups");
-            }
 
             try
             {
-                await RuntimeCtlApp.RunScriptToLogAsync(platformRoot, Path.Combine("Scripts", "run_export_artifacts.ps1"), exportArgs, Path.Combine(logRoot, "export-artifacts.log"));
+                await ArtifactExportCommand.ExportAsync(
+                    platformRoot,
+                    artifactExportPath,
+                    options.IncludeSmokeDataOnFailure,
+                    options.IncludeBackupsOnFailure,
+                    Path.Combine(logRoot, "export-artifacts.log"));
             }
             catch (Exception ex)
             {
@@ -6376,13 +6594,13 @@ internal static class FullCommand
                     "-IncludeBackupsOnFailure", ToBoolLiteral(options.IncludeBackupsOnFailure),
                 };
 
-                await RunStepAsync(
+                await RunRuntimeCtlStepAsync(
                     platformRoot,
                     logRoot,
                     results,
                     options,
                     "CI Local",
-                    Path.Combine("Scripts", "run_ci_local.ps1"),
+                    "ci-local",
                     ciArgs);
             }
         }
@@ -6399,24 +6617,14 @@ internal static class FullCommand
         if (options.ExportArtifactsOnFailure && failed.Length > 0)
         {
             artifactExportPath = Path.Combine(platformRoot, "Artifacts", $"full-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}");
-            var exportArgs = new List<string>
-            {
-                "-OutputRoot", artifactExportPath,
-            };
-
-            if (options.IncludeSmokeDataOnFailure)
-            {
-                exportArgs.Add("-IncludeSmokeData");
-            }
-
-            if (options.IncludeBackupsOnFailure)
-            {
-                exportArgs.Add("-IncludeBackups");
-            }
-
             try
             {
-                await RuntimeCtlApp.RunScriptToLogAsync(platformRoot, Path.Combine("Scripts", "run_export_artifacts.ps1"), exportArgs, Path.Combine(logRoot, "export-artifacts.log"));
+                await ArtifactExportCommand.ExportAsync(
+                    platformRoot,
+                    artifactExportPath,
+                    options.IncludeSmokeDataOnFailure,
+                    options.IncludeBackupsOnFailure,
+                    Path.Combine(logRoot, "export-artifacts.log"));
             }
             catch (Exception ex)
             {
@@ -6455,6 +6663,67 @@ internal static class FullCommand
         if (invocation.ExitCode != 0 && options.StopOnFailure)
         {
             throw new InvalidOperationException($"{stepName} failed with exit code {invocation.ExitCode}");
+        }
+    }
+
+    private static async Task RunRuntimeCtlStepAsync(
+        string platformRoot,
+        string logRoot,
+        List<FullStepResult> results,
+        FullOptions options,
+        string stepName,
+        string command,
+        IReadOnlyList<string> commandArgs)
+    {
+        var logPath = Path.Combine(logRoot, stepName.Replace(' ', '-').Replace("(", string.Empty).Replace(")", string.Empty) + ".log");
+        var runtimeCtlProject = Path.Combine(platformRoot, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj");
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = platformRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("run");
+        startInfo.ArgumentList.Add("--project");
+        startInfo.ArgumentList.Add(runtimeCtlProject);
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add("--platform-root");
+        startInfo.ArgumentList.Add(platformRoot);
+        startInfo.ArgumentList.Add(command);
+        foreach (var arg in commandArgs)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            throw new InvalidOperationException($"Failed to start RuntimeCtl command '{command}'.");
+        }
+        var stdOutTask = process.StandardOutput.ReadToEndAsync();
+        var stdErrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var stdOut = await stdOutTask;
+        var stdErr = await stdErrTask;
+        stopwatch.Stop();
+
+        await File.WriteAllTextAsync(logPath, $"{stdOut}{Environment.NewLine}{stdErr}".Trim());
+
+        var status = process.ExitCode == 0 ? "PASS" : "FAIL";
+        results.Add(new FullStepResult(stepName, status, stopwatch.Elapsed.TotalSeconds, process.ExitCode, logPath));
+
+        Console.WriteLine();
+        Console.WriteLine($"=== {stepName} ===");
+        Console.WriteLine($"{status}  {stepName}");
+        Console.WriteLine($"Log:   {logPath}");
+
+        if (process.ExitCode != 0 && options.StopOnFailure)
+        {
+            throw new InvalidOperationException($"{stepName} failed with exit code {process.ExitCode}");
         }
     }
 

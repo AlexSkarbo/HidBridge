@@ -74,23 +74,10 @@ $arguments.Add($runtimeCtlProject) | Out-Null
 $arguments.Add("--") | Out-Null
 $arguments.Add("--platform-root") | Out-Null
 $arguments.Add($platformRoot) | Out-Null
-
-switch ($task.ToLowerInvariant()) {
-    "doctor" { $arguments.Add("doctor") | Out-Null }
-    "identity-reset" { $arguments.Add("identity-reset") | Out-Null }
-    "ci-local" { $arguments.Add("ci-local") | Out-Null }
-    "full" { $arguments.Add("full") | Out-Null }
-    "webrtc-edge-agent-acceptance" { $arguments.Add("webrtc-acceptance") | Out-Null }
-    "webrtc-edge-agent-smoke" { $arguments.Add("webrtc-edge-agent-smoke") | Out-Null }
-    "ops-slo-security-verify" { $arguments.Add("ops-verify") | Out-Null }
-    "demo-flow" { $arguments.Add("demo-flow") | Out-Null }
-    "demo-gate" { $arguments.Add("demo-gate") | Out-Null }
-    "webrtc-stack" { $arguments.Add("webrtc-stack") | Out-Null }
-    default {
-        $arguments.Add("task") | Out-Null
-        $arguments.Add($task) | Out-Null
-    }
-}
+# Minimal compatibility shim:
+# always pass through run.ps1 task syntax to RuntimeCtl native parser.
+$arguments.Add("task") | Out-Null
+$arguments.Add($task) | Out-Null
 
 foreach ($arg in $forward) {
     if (-not [string]::IsNullOrWhiteSpace($arg)) {

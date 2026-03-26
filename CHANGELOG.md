@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-03-26 (cli-first: run.ps1 minimized + native task alias completion)
+
+Summary:
+
+- Minimized `Platform/run.ps1` to a true compatibility shim: it now always forwards to `RuntimeCtl` via `task <name>` and no longer maintains local task switch/mapping logic.
+- Added direct native RuntimeCtl compatibility aliases for remaining legacy task names:
+  - `webrtc-stack-terminal-b` -> native `WebRtcEdgeAgentSmokeCommand`
+  - `webrtc-edge-agent-acceptance` -> native `WebRtcAcceptanceCommand`
+  - `ops-slo-security-verify` -> native `OpsVerifyCommand`
+- Added native `export-artifacts` command and completed native artifact-export use in both `ci-local` and `full` failure paths.
+
+Detailed notes:
+
+- `Platform/run.ps1`
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+
+## 2026-03-26 (cli-first: native artifact export + full ci-local bridge)
+
+Summary:
+
+- Added native `export-artifacts` command in `HidBridge.RuntimeCtl` (no PowerShell required for artifact packaging).
+- Switched `ci-local` failure artifact export to native C# export path.
+- Switched `full` CI lane step from script call (`run_ci_local.ps1`) to native RuntimeCtl invocation (`ci-local`).
+- Switched `full` failure artifact export to native C# export path.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+
 ## 2026-03-26 (cli-first: ci-local native checks/bearer/ops lanes)
 
 Summary:
