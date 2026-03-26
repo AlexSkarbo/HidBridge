@@ -809,6 +809,11 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 - `Platform/run.ps1` remains a minimal compatibility shim (legacy task syntax -> RuntimeCtl).
 - `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`, `Platform/Scripts/run_ops_slo_security_verify.ps1`, `Platform/Scripts/run_demo_flow.ps1`, and `Platform/Scripts/run_webrtc_stack.ps1` are thin wrappers over RuntimeCtl.
 - top-level `Platform/run_*.ps1` wrappers were removed; use `Platform/run.ps1 -Task <name>` or direct RuntimeCtl commands.
+- CI policy: use direct RuntimeCtl commands only.
+  - set `HIDBRIDGE_CI_STRICT_NATIVE=1` to reject `task <name>` compatibility routing in CI.
+  - canonical CI workflow is `.github/workflows/platform-runtimectl-ci.yml` and publishes:
+    - `Platform/.logs/**`
+    - `Platform/Artifacts/**`
 
 **Stability Baseline Profile (local)**
 - Goal: deterministic daily gate without realm-key churn.

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-26 (ci-first gate: native RuntimeCtl workflow + strict no-PS policy)
+
+Summary:
+
+- Added CI workflow `.github/workflows/platform-runtimectl-ci.yml` that runs native RuntimeCtl lanes only:
+  - `platform-runtime up -Build`
+  - `ci-local -StopOnFailure` (media gate required)
+  - `full -StopOnFailure` (media gate required)
+  - artifact upload (`Platform/.logs/**`, `Platform/Artifacts/**`)
+  - `platform-runtime down -RemoveOrphans` (always)
+- Added strict CI guard in RuntimeCtl:
+  - when `HIDBRIDGE_CI_STRICT_NATIVE=1`, `task <name>` compatibility routing is rejected.
+- Added workflow-level guard that fails if `run.ps1` invocation appears in CI workflow.
+- Updated `Platform/README.md` with CI strict-native policy and canonical workflow reference.
+
+Detailed notes:
+
+- `.github/workflows/platform-runtimectl-ci.yml`
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/README.md`
+
 ## 2026-03-26 (ci/full stability hardening: bearer bootstrap retries + baseline profile docs)
 
 Summary:

@@ -1,0 +1,73 @@
+name: platform-runtimectl-ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Platform/**"
+      - "docker-compose.platform-runtime.yml"
+      - ".github/workflows/platform-runtimectl-ci.yml"
+  pull_request:
+    paths:
+      - "Platform/**"
+      - "docker-compose.platform-runtime.yml"
+      - ".github/workflows/platform-runtimectl-ci.yml"
+
+jobs:
+  runtimectl-gate:
+    # Requires a self-hosted Windows runner with Docker runtime and UART/media test setup.
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 90
+    env:
+      HIDBRIDGE_CI_STRICT_NATIVE: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Guard - no PowerShell compatibility launcher in workflow
+        shell: pwsh
+        run: |
+          $workflowText = Get-Content '.github/workflows/platform-runtimectl-ci.yml' -Raw
+          if ($workflowText -match 'run\.ps1') {
+            throw "CI workflow must not invoke run.ps1; use native RuntimeCtl commands only."
+          }
+
+      - name: Runtime up
+        shell: pwsh
+        run: |
+          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action up -Build
+
+      - name: CI Local (must-pass media gate)
+        shell: pwsh
+        run: |
+          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
+
+      - name: Full (must-pass media gate)
+        shell: pwsh
+        run: |
+          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
+
+      - name: Upload runtime artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-runtime-artifacts
+          if-no-files-found: warn
+          path: |
+            Platform/.logs/**
+            Platform/Artifacts/**
+
+      - name: Runtime down
+        if: always()
+        shell: pwsh
+        run: |
+          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action down -RemoveOrphans

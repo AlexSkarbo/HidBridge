@@ -68,6 +68,7 @@ internal sealed class RuntimeCtlApp
     private readonly CommandSpec? _command;
     private readonly IReadOnlyList<string> _forwardArgs;
     private readonly bool _showHelp;
+    private readonly bool _invokedViaTask;
     private readonly string? _error;
 
     private RuntimeCtlApp(
@@ -75,12 +76,14 @@ internal sealed class RuntimeCtlApp
         CommandSpec? command,
         IReadOnlyList<string> forwardArgs,
         bool showHelp,
+        bool invokedViaTask,
         string? error)
     {
         _platformRoot = platformRoot;
         _command = command;
         _forwardArgs = forwardArgs;
         _showHelp = showHelp;
+        _invokedViaTask = invokedViaTask;
         _error = error;
     }
 
@@ -104,6 +107,7 @@ internal sealed class RuntimeCtlApp
                     command: null,
                     forwardArgs: Array.Empty<string>(),
                     showHelp: true,
+                    invokedViaTask: false,
                     error: "--platform-root requires a non-empty path value.");
             }
 
@@ -119,6 +123,7 @@ internal sealed class RuntimeCtlApp
                 command: null,
                 forwardArgs: Array.Empty<string>(),
                 showHelp: true,
+                invokedViaTask: false,
                 error: "Unable to resolve Platform root. Pass --platform-root <path-to-Platform>.\n");
         }
 
@@ -127,7 +132,7 @@ internal sealed class RuntimeCtlApp
             || string.Equals(remaining[0], "--help", StringComparison.OrdinalIgnoreCase)
             || string.Equals(remaining[0], "help", StringComparison.OrdinalIgnoreCase))
         {
-            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: null);
+            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: false, error: null);
         }
 
         var commandToken = remaining[0];
@@ -137,7 +142,7 @@ internal sealed class RuntimeCtlApp
         {
             if (remaining.Count == 0)
             {
-                return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: "task requires <task-name>.");
+                return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: true, error: "task requires <task-name>.");
             }
 
             var taskName = remaining[0];
@@ -148,18 +153,18 @@ internal sealed class RuntimeCtlApp
             }
             if (CommandAliases.TryGetValue(taskName, out var nativeTask))
             {
-                return new RuntimeCtlApp(platformRoot, nativeTask, NormalizeForwardArgs(remaining), showHelp: false, error: null);
+                return new RuntimeCtlApp(platformRoot, nativeTask, NormalizeForwardArgs(remaining), showHelp: false, invokedViaTask: true, error: null);
             }
 
-            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: $"Unsupported task '{taskName}'.");
+            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: true, error: $"Unsupported task '{taskName}'.");
         }
 
         if (!CommandAliases.TryGetValue(commandToken, out var commandSpec))
         {
-            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: $"Unsupported command '{commandToken}'.");
+            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: false, error: $"Unsupported command '{commandToken}'.");
         }
 
-        return new RuntimeCtlApp(platformRoot, commandSpec, NormalizeForwardArgs(remaining), showHelp: false, error: null);
+        return new RuntimeCtlApp(platformRoot, commandSpec, NormalizeForwardArgs(remaining), showHelp: false, invokedViaTask: false, error: null);
     }
 
     public async Task<int> RunAsync()
@@ -168,6 +173,19 @@ internal sealed class RuntimeCtlApp
         {
             PrintHelp(_error);
             return string.IsNullOrWhiteSpace(_error) ? 0 : 1;
+        }
+
+        // CI strict mode forbids legacy task-style routing so pipelines can enforce
+        // direct native command usage and avoid accidental run.ps1 compatibility paths.
+        var strictCiNative = string.Equals(
+            Environment.GetEnvironmentVariable("HIDBRIDGE_CI_STRICT_NATIVE"),
+            "1",
+            StringComparison.Ordinal);
+        if (strictCiNative && _invokedViaTask)
+        {
+            Console.Error.WriteLine(
+                "CI strict mode is enabled (HIDBRIDGE_CI_STRICT_NATIVE=1). Use direct native command syntax instead of 'task <name>'.");
+            return 2;
         }
 
         return _command.Kind switch
