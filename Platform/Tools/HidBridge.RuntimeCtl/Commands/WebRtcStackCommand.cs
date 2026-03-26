@@ -341,27 +341,31 @@ internal static class WebRtcStackCommand
         _ = Task.Run(async () =>
         {
             await using var writer = new StreamWriter(stdoutPath, append: false, new UTF8Encoding(false));
-            while (!process.StandardOutput.EndOfStream)
+            while (true)
             {
                 var line = await process.StandardOutput.ReadLineAsync();
-                if (line is not null)
+                if (line is null)
                 {
-                    await writer.WriteLineAsync(line);
-                    await writer.FlushAsync();
+                    break;
                 }
+
+                await writer.WriteLineAsync(line);
+                await writer.FlushAsync();
             }
         });
         _ = Task.Run(async () =>
         {
             await using var writer = new StreamWriter(stderrPath, append: false, new UTF8Encoding(false));
-            while (!process.StandardError.EndOfStream)
+            while (true)
             {
                 var line = await process.StandardError.ReadLineAsync();
-                if (line is not null)
+                if (line is null)
                 {
-                    await writer.WriteLineAsync(line);
-                    await writer.FlushAsync();
+                    break;
                 }
+
+                await writer.WriteLineAsync(line);
+                await writer.FlushAsync();
             }
         });
         return process;

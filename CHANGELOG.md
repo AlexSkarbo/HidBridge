@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (runtimectl hardening: warnings cleanup + routing regression tests)
+
+Summary:
+
+- Removed async stream-read analyzer warnings in WebRTC stack process redirection path:
+  - replaced `EndOfStream` polling with null-terminated `ReadLineAsync` loops.
+- Added RuntimeCtl routing regression coverage (parse/alias/dispatch) to prevent command-map regressions during CLI-first migration.
+- Exposed a small internal diagnostics snapshot from `RuntimeCtlApp` for deterministic parse assertions in tests.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/WebRtcStackCommand.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/InternalsVisibleTo.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/RuntimeCtlAppRoutingTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/HidBridge.Platform.Tests.csproj`
+
 ## 2026-03-26 (cli-first: RuntimeCtl decomposition into per-command files + inline documentation)
 
 Summary:

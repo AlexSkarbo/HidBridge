@@ -212,6 +212,22 @@ internal sealed class RuntimeCtlApp
         };
     }
 
+    /// <summary>
+    /// Returns parse/dispatch metadata used by unit tests to validate alias and routing behavior
+    /// without invoking full command execution.
+    /// </summary>
+    internal RuntimeCtlDiagnosticsSnapshot GetDiagnosticsSnapshot()
+    {
+        return new RuntimeCtlDiagnosticsSnapshot(
+            ShowHelp: _showHelp,
+            Error: _error,
+            PlatformRoot: _platformRoot,
+            CommandName: _command?.Name,
+            CommandKind: _command?.Kind.ToString(),
+            ScriptRelativePath: _command?.ScriptRelativePath,
+            ForwardArgs: _forwardArgs.ToArray());
+    }
+
     // For `runtimectl <command> -- <args...>` compatibility: strip leading `--`.
     private static IReadOnlyList<string> NormalizeForwardArgs(List<string> args)
     {
@@ -456,6 +472,15 @@ internal sealed class RuntimeCtlApp
         WebRtcEdgeAgentSmoke,
         PlatformRuntime,
     }
+
+    internal sealed record RuntimeCtlDiagnosticsSnapshot(
+        bool ShowHelp,
+        string? Error,
+        string PlatformRoot,
+        string? CommandName,
+        string? CommandKind,
+        string? ScriptRelativePath,
+        IReadOnlyList<string> ForwardArgs);
 
     internal sealed record ScriptInvocationResult(int ExitCode, string StdOut, string StdErr);
 }
