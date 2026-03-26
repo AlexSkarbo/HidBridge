@@ -40,6 +40,8 @@ internal static class FullCommand
 
         try
         {
+            await ProcessCleanup.CleanupStaleEdgeProcessesAsync();
+
             if (!options.SkipRealmSync)
             {
                 var (keycloakBaseUrl, realmName) = ResolveKeycloakFromAuthority(options.AuthAuthority);
@@ -80,9 +82,13 @@ internal static class FullCommand
                     "-OpsFailOnSloWarning", ToBoolLiteral(options.OpsFailOnSloWarning),
                     "-OpsFailOnSecurityWarning", ToBoolLiteral(options.OpsFailOnSecurityWarning),
                     "-WebRtcCommandExecutor", options.WebRtcCommandExecutor,
+                    "-WebRtcUartPort", options.WebRtcUartPort,
+                    "-WebRtcUartBaud", options.WebRtcUartBaud.ToString(CultureInfo.InvariantCulture),
+                    "-WebRtcUartHmacKey", options.WebRtcUartHmacKey,
                     "-AllowLegacyControlWs", ToBoolLiteral(options.AllowLegacyControlWs),
                     "-WebRtcControlHealthUrl", options.WebRtcControlHealthUrl,
                     "-WebRtcPeerReadyTimeoutSec", Math.Max(5, options.WebRtcPeerReadyTimeoutSec).ToString(),
+                    "-WebRtcAcceptanceMaxDurationSec", Math.Max(60, options.WebRtcAcceptanceMaxDurationSec).ToString(),
                     "-StopOnFailure", ToBoolLiteral(options.StopOnFailure),
                     "-ExportArtifactsOnFailure", ToBoolLiteral(options.ExportArtifactsOnFailure),
                     "-IncludeSmokeDataOnFailure", ToBoolLiteral(options.IncludeSmokeDataOnFailure),
@@ -155,6 +161,7 @@ internal static class FullCommand
         startInfo.ArgumentList.Add("run");
         startInfo.ArgumentList.Add("--project");
         startInfo.ArgumentList.Add(runtimeCtlProject);
+        startInfo.ArgumentList.Add("--no-build");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("--platform-root");
         startInfo.ArgumentList.Add(platformRoot);
@@ -164,15 +171,43 @@ internal static class FullCommand
             startInfo.ArgumentList.Add(arg);
         }
 
+        await File.WriteAllTextAsync(
+            logPath,
+            $"[{DateTimeOffset.UtcNow:O}] RUN {command} {string.Join(' ', commandArgs)}{Environment.NewLine}");
+        Console.WriteLine();
+        Console.WriteLine($"... {stepName} started");
+        Console.WriteLine($"Live log: {logPath}");
+
         var stopwatch = Stopwatch.StartNew();
         using var process = Process.Start(startInfo);
         if (process is null)
         {
             throw new InvalidOperationException($"Failed to start RuntimeCtl command '{command}'.");
         }
+        using var progressCts = new CancellationTokenSource();
+        var progressTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!progressCts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15), progressCts.Token);
+                    if (!progressCts.Token.IsCancellationRequested)
+                    {
+                        Console.WriteLine($"... {stepName} running ({stopwatch.Elapsed:mm\\:ss})");
+                    }
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                // expected on completion
+            }
+        });
         var stdOutTask = process.StandardOutput.ReadToEndAsync();
         var stdErrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
+        progressCts.Cancel();
+        await progressTask;
         var stdOut = await stdOutTask;
         var stdErr = await stdErrTask;
         stopwatch.Stop();
@@ -253,7 +288,7 @@ internal static class FullCommand
         public string Configuration { get; set; } = "Debug";
         public string ConnectionString { get; set; } = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge";
         public string Schema { get; set; } = "hidbridge";
-        public string AuthAuthority { get; set; } = "http://127.0.0.1:18096/realms/hidbridge-dev";
+        public string AuthAuthority { get; set; } = "http://host.docker.internal:18096/realms/hidbridge-dev";
         public bool StopOnFailure { get; set; }
         public bool SkipRealmSync { get; set; }
         public bool SkipCiLocal { get; set; }
@@ -269,9 +304,13 @@ internal static class FullCommand
         public bool OpsFailOnSloWarning { get; set; }
         public bool OpsFailOnSecurityWarning { get; set; }
         public string WebRtcCommandExecutor { get; set; } = "uart";
+        public string WebRtcUartPort { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_UART_PORT") ?? "COM6";
+        public int WebRtcUartBaud { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("HIDBRIDGE_UART_BAUD"), out var parsedWebRtcUartBaud) ? parsedWebRtcUartBaud : 3_000_000;
+        public string WebRtcUartHmacKey { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_UART_HMAC_KEY") ?? "your-master-secret";
         public bool AllowLegacyControlWs { get; set; }
         public string WebRtcControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
         public int WebRtcPeerReadyTimeoutSec { get; set; } = 45;
+        public int WebRtcAcceptanceMaxDurationSec { get; set; } = 420;
         public bool ExportArtifactsOnFailure { get; set; } = true;
         public bool IncludeSmokeDataOnFailure { get; set; } = true;
         public bool IncludeBackupsOnFailure { get; set; } = true;
@@ -320,9 +359,13 @@ internal static class FullCommand
                     case "opsfailonslowarning": options.OpsFailOnSloWarning = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "opsfailonsecuritywarning": options.OpsFailOnSecurityWarning = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "webrtccommandexecutor": options.WebRtcCommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcuartport": options.WebRtcUartPort = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcuartbaud": options.WebRtcUartBaud = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "webrtcuarthmackey": options.WebRtcUartHmacKey = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "allowlegacycontrolws": options.AllowLegacyControlWs = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "webrtccontrolhealthurl": options.WebRtcControlHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "webrtcpeerreadytimeoutsec": options.WebRtcPeerReadyTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "webrtcacceptancemaxdurationsec": options.WebRtcAcceptanceMaxDurationSec = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "exportartifactsonfailure": options.ExportArtifactsOnFailure = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "includesmokedataonfailure": options.IncludeSmokeDataOnFailure = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "includebackupsonfailure": options.IncludeBackupsOnFailure = ParseSwitch(name, value, hasValue, ref i, ref error); break;

@@ -167,6 +167,7 @@ internal static class DemoFlowCommand
                 {
                     ["ASPNETCORE_ENVIRONMENT"] = "Development",
                     ["ASPNETCORE_URLS"] = options.ApiBaseUrl,
+                    ["Kestrel__Endpoints__Http__Url"] = options.ApiBaseUrl,
                     ["HIDBRIDGE_PERSISTENCE_PROVIDER"] = "Sql",
                     ["HIDBRIDGE_SQL_CONNECTION"] = options.ConnectionString,
                     ["HIDBRIDGE_SQL_SCHEMA"] = options.Schema,
@@ -186,6 +187,11 @@ internal static class DemoFlowCommand
                     apiEnvironment["HIDBRIDGE_UART_PORT"] = "COM255";
                     apiEnvironment["HIDBRIDGE_TRANSPORT_PROVIDER"] = "webrtc-datachannel";
                     apiEnvironment["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"] = "false";
+                    apiEnvironment["HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY"] = "false";
+                    apiEnvironment["HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES"] = "transport.webrtc.datachannel.v1@1.0";
+                    // Keep relay route stable during smoke retries so command-path health
+                    // is not downgraded to connector fallback between short ACK timeouts.
+                    apiEnvironment["HIDBRIDGE_WEBRTC_PEER_STALE_AFTER_SEC"] = "90";
                 }
 
                 var apiRuntime = await StartDemoServiceAsync(
@@ -311,18 +317,28 @@ internal static class DemoFlowCommand
                 {
                     if (effectiveSkipDemoGate)
                     {
-                        var smokeArgs = new List<string>
+                        if (options.SkipWebRtcSmokeStep)
                         {
-                            "-ApiBaseUrl", options.ApiBaseUrl,
-                            "-ControlHealthUrl", options.WebRtcControlHealthUrl,
-                            "-RequestTimeoutSec", Math.Max(1, options.WebRtcRequestTimeoutSec).ToString(),
-                            "-ControlHealthAttempts", Math.Max(1, options.WebRtcControlHealthAttempts).ToString(),
-                            "-SkipTransportHealthCheck", ToBoolLiteral(options.SkipTransportHealthCheck),
-                            "-TransportHealthAttempts", (options.TransportHealthAttempts > 0 ? Math.Max(1, options.TransportHealthAttempts) : 20).ToString(),
-                            "-TransportHealthDelayMs", (options.TransportHealthDelayMs > 0 ? Math.Max(100, options.TransportHealthDelayMs) : 500).ToString(),
-                            "-OutputJsonPath", Path.Combine(logRoot, "webrtc-edge-agent-smoke.result.json"),
-                        };
-                        await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "WebRTC Edge Agent Smoke", "webrtc-edge-agent-smoke", smokeArgs);
+                            Console.WriteLine("WARNING: Skipping standalone WebRTC Edge Agent Smoke step by request (-SkipWebRtcSmokeStep).");
+                        }
+                        else
+                        {
+                            var smokeArgs = new List<string>
+                            {
+                                "-ApiBaseUrl", options.ApiBaseUrl,
+                                "-KeycloakBaseUrl", keycloakBaseUrl,
+                                "-RealmName", realmName,
+                                "-TokenScope", "openid",
+                                "-ControlHealthUrl", options.WebRtcControlHealthUrl,
+                                "-RequestTimeoutSec", Math.Max(1, options.WebRtcRequestTimeoutSec).ToString(),
+                                "-ControlHealthAttempts", Math.Max(1, options.WebRtcControlHealthAttempts).ToString(),
+                                "-SkipTransportHealthCheck", ToBoolLiteral(options.SkipTransportHealthCheck),
+                                "-TransportHealthAttempts", (options.TransportHealthAttempts > 0 ? Math.Max(1, options.TransportHealthAttempts) : 20).ToString(),
+                                "-TransportHealthDelayMs", (options.TransportHealthDelayMs > 0 ? Math.Max(100, options.TransportHealthDelayMs) : 500).ToString(),
+                                "-OutputJsonPath", Path.Combine(logRoot, "webrtc-edge-agent-smoke.result.json"),
+                            };
+                            await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "WebRTC Edge Agent Smoke", "webrtc-edge-agent-smoke", smokeArgs);
+                        }
                     }
                     else
                     {
@@ -334,6 +350,7 @@ internal static class DemoFlowCommand
                 {
                     ["ASPNETCORE_ENVIRONMENT"] = "Development",
                     ["ASPNETCORE_URLS"] = options.WebBaseUrl,
+                    ["Kestrel__Endpoints__Http__Url"] = options.WebBaseUrl,
                     ["ControlPlaneApi__BaseUrl"] = options.ApiBaseUrl,
                     ["ControlPlaneApi__PropagateAccessToken"] = "true",
                     ["ControlPlaneApi__PropagateIdentityHeaders"] = "true",
@@ -429,6 +446,7 @@ internal static class DemoFlowCommand
         startInfo.ArgumentList.Add("run");
         startInfo.ArgumentList.Add("--project");
         startInfo.ArgumentList.Add(runtimeCtlProject);
+        startInfo.ArgumentList.Add("--no-build");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("--platform-root");
         startInfo.ArgumentList.Add(platformRoot);
@@ -891,6 +909,7 @@ internal static class DemoFlowCommand
         public bool RequireDemoGateDeviceAck { get; set; }
         public int DemoGateKeyboardInterfaceSelector { get; set; } = -1;
         public bool IncludeWebRtcEdgeAgentSmoke { get; set; }
+        public bool SkipWebRtcSmokeStep { get; set; }
         public string WebRtcCommandExecutor { get; set; } = "uart";
         public bool AllowLegacyControlWs { get; set; }
         public string WebRtcControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
@@ -943,6 +962,7 @@ internal static class DemoFlowCommand
                     case "requiredemogatedeviceack": options.RequireDemoGateDeviceAck = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "demogatekeyboardinterfaceselector": options.DemoGateKeyboardInterfaceSelector = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "includewebrtcedgeagentsmoke": options.IncludeWebRtcEdgeAgentSmoke = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipwebrtcsmokestep": options.SkipWebRtcSmokeStep = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "webrtccommandexecutor":
                     case "webrtccommandeexecutor":
                         options.WebRtcCommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error);

@@ -93,13 +93,17 @@ internal static class WebRtcStackCommand
 
         if (!options.SkipRuntimeBootstrap)
         {
+            var authAuthority = $"{options.KeycloakBaseUrl.TrimEnd('/')}/realms/hidbridge-dev";
             var demoFlowArgs = new List<string>
             {
                 "-ApiBaseUrl", options.ApiBaseUrl,
                 "-WebBaseUrl", options.WebBaseUrl,
+                "-AuthAuthority", authAuthority,
                 "-SkipDoctor",
                 "-SkipDemoGate",
+                "-SkipCiLocal",
                 "-IncludeWebRtcEdgeAgentSmoke",
+                "-SkipWebRtcSmokeStep",
                 "-WebRtcCommandExecutor", options.CommandExecutor,
             };
 
@@ -237,6 +241,10 @@ internal static class WebRtcStackCommand
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE"] = "true";
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR"] = "255";
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR"] = "254";
+        // Use aggressive heartbeat/poll cadence for smoke stability so route readiness
+        // does not flap during short command retries.
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_HEARTBEATINTERVALSEC"] = "3";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_POLLINTERVALMS"] = "100";
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = $"{options.WebBaseUrl.TrimEnd('/')}/media/edge-main";
         if (string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase))
         {
@@ -488,7 +496,21 @@ internal static class WebRtcStackCommand
 
         var stdOut = await process.StandardOutput.ReadToEndAsync();
         var stdErr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        var waitTask = process.WaitForExitAsync();
+        var exited = await Task.WhenAny(waitTask, Task.Delay(TimeSpan.FromSeconds(20))) == waitTask;
+        if (!exited)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // best effort
+            }
+            Console.WriteLine("WARNING: StopExisting process cleanup timed out after 20s and was terminated.");
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(stdOut))
         {
             Console.Write(stdOut);

@@ -180,13 +180,6 @@ internal static class BearerSmokeCommand
                     foreignToken = options.AccessToken;
                     lines.Add("PASS oidc.tokens.provided");
                 }
-                else
-                {
-                    ownerToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.TokenUsername, options.TokenPassword);
-                    viewerToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ViewerTokenUsername, options.ViewerTokenPassword);
-                    foreignToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ForeignTokenUsername, options.ForeignTokenPassword);
-                    lines.Add("PASS oidc.tokens");
-                }
 
                 var unauthorizedStatus = await GetStatusAsync(http, inventoryUri, null);
                 if (unauthorizedStatus is not HttpStatusCode.Unauthorized and not HttpStatusCode.Forbidden)
@@ -195,9 +188,48 @@ internal static class BearerSmokeCommand
                 }
                 lines.Add("PASS inventory.anonymous.denied");
 
-                await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
-                await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
-                await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
+                if (providedAccessToken)
+                {
+                    await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
+                    await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
+                    await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
+                }
+                else
+                {
+                    Exception? lastAuthError = null;
+                    var selectedAuthority = options.AuthAuthority;
+                    foreach (var authorityCandidate in BuildAuthAuthorityCandidates(options.AuthAuthority))
+                    {
+                        try
+                        {
+                            ownerToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.TokenUsername, options.TokenPassword);
+                            viewerToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ViewerTokenUsername, options.ViewerTokenPassword);
+                            foreignToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ForeignTokenUsername, options.ForeignTokenPassword);
+                            await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
+                            await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
+                            await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
+                            selectedAuthority = authorityCandidate;
+                            lastAuthError = null;
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            lastAuthError = ex;
+                        }
+                    }
+
+                    if (lastAuthError is not null)
+                    {
+                        throw lastAuthError;
+                    }
+
+                    lines.Add("PASS oidc.tokens");
+                    if (!string.Equals(selectedAuthority, options.AuthAuthority, StringComparison.OrdinalIgnoreCase))
+                    {
+                        lines.Add($"WARN oidc.authority.fallback={selectedAuthority}");
+                    }
+                }
+
                 lines.Add("PASS inventory.bearer.access");
 
                 var runtimeUri = $"{options.BaseUrl.TrimEnd('/')}/api/v1/runtime/uart";
@@ -366,6 +398,52 @@ internal static class BearerSmokeCommand
         }
         using var resp = await http.SendAsync(req);
         return resp.StatusCode;
+    }
+
+    private static IReadOnlyList<string> BuildAuthAuthorityCandidates(string configuredAuthority)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var candidates = new List<string>();
+
+        static void AddCandidate(List<string> list, HashSet<string> seenSet, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            var normalized = value.Trim().TrimEnd('/');
+            if (seenSet.Add(normalized))
+            {
+                list.Add(normalized);
+            }
+        }
+
+        AddCandidate(candidates, seen, configuredAuthority);
+        if (!Uri.TryCreate(configuredAuthority, UriKind.Absolute, out var uri))
+        {
+            return candidates;
+        }
+
+        var port = uri.IsDefaultPort
+            ? string.Empty
+            : $":{uri.Port}";
+        var pathAndQuery = string.IsNullOrWhiteSpace(uri.PathAndQuery)
+            ? string.Empty
+            : uri.PathAndQuery.TrimEnd('/');
+
+        if (string.Equals(uri.Host, "host.docker.internal", StringComparison.OrdinalIgnoreCase))
+        {
+            AddCandidate(candidates, seen, $"{uri.Scheme}://127.0.0.1{port}{pathAndQuery}");
+            AddCandidate(candidates, seen, $"{uri.Scheme}://localhost{port}{pathAndQuery}");
+        }
+        else if (string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            AddCandidate(candidates, seen, $"{uri.Scheme}://host.docker.internal{port}{pathAndQuery}");
+        }
+
+        return candidates;
     }
 
     private static async Task<bool> TryHealthAsync(HttpClient http, string baseUrl)
@@ -1175,7 +1253,7 @@ internal static class BearerSmokeCommand
         public string DataRoot { get; set; } = string.Empty;
         public string AccessToken { get; set; } = string.Empty;
         public bool EnableApiAuth { get; set; } = true;
-        public string AuthAuthority { get; set; } = "http://127.0.0.1:18096/realms/hidbridge-dev";
+        public string AuthAuthority { get; set; } = "http://host.docker.internal:18096/realms/hidbridge-dev";
         public string AuthAudience { get; set; } = string.Empty;
         public string TokenClientId { get; set; } = "controlplane-smoke";
         public string TokenClientSecret { get; set; } = string.Empty;

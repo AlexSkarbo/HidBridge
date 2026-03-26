@@ -29,7 +29,7 @@ public sealed class RuntimeCtlAppRoutingTests
     }
 
     [Fact]
-    public void Parse_TaskKeepsScriptBridge_ForNotYetMigratedTask()
+    public void Parse_TaskRoutesBearerRollout_ToNativeCommand()
     {
         var platformRoot = ResolvePlatformRoot();
 
@@ -43,9 +43,9 @@ public sealed class RuntimeCtlAppRoutingTests
 
         Assert.False(snapshot.ShowHelp);
         Assert.Null(snapshot.Error);
-        Assert.Equal("task bearer-rollout", snapshot.CommandName);
-        Assert.Equal("ScriptBridge", snapshot.CommandKind);
-        Assert.Equal("Scripts/run_bearer_rollout_phase.ps1", snapshot.ScriptRelativePath);
+        Assert.Equal("bearer-rollout", snapshot.CommandName);
+        Assert.Equal("BearerRollout", snapshot.CommandKind);
+        Assert.Null(snapshot.ScriptRelativePath);
     }
 
     [Fact]

@@ -1146,7 +1146,7 @@ UI/UX напрямок наступного етапу:
 3. Експериментальні стенди/симулятори:
    - `WebRtcTests/exp-022-datachanneldotnet` (залишити як PoC/simulator, не production endpoint).
 
-Поточний `PowerShell` adapter (`Platform/Scripts/run_webrtc_peer_adapter.ps1`) розглядається як тимчасовий migration bridge і має бути замінений на довгоживучий сервіс у `Platform/Edge/Adapters/*`.
+Поточний legacy adapter path на базі `webrtc-peer-adapter` розглядається як тимчасовий migration bridge і має бути замінений на довгоживучий сервіс у `Platform/Edge/Adapters/*`.
 
 ## 20.4 Deployment-модель (обов'язкова)
 

@@ -883,7 +883,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -
 
 Apply only in the current shell:
 ```powershell
-. .\Platform\Scripts\run_bearer_rollout_phase.ps1 -Phase 4 -ApplyOnly
+powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4 -ApplyOnly
 ```
 
 Disable auto-rollback and fail hard:

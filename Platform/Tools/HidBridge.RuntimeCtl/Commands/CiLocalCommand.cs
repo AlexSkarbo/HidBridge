@@ -40,6 +40,8 @@ internal static class CiLocalCommand
 
         try
         {
+            await ProcessCleanup.CleanupStaleEdgeProcessesAsync();
+
             if (!options.SkipDoctor)
             {
                 await RunRuntimeCtlStepAsync(
@@ -73,7 +75,6 @@ internal static class CiLocalCommand
                     "-Schema", options.Schema,
                     "-EnableApiAuth",
                     "-AuthAuthority", options.AuthAuthority,
-                    "-AuthAudience", "",
                     "-TokenClientId", options.TokenClientId,
                     "-TokenUsername", options.TokenUsername,
                     "-TokenPassword", options.TokenPassword,
@@ -153,10 +154,39 @@ internal static class CiLocalCommand
                     throw new InvalidOperationException("WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly.");
                 }
 
+                var acceptanceApiBaseUrl = options.WebRtcApiBaseUrl;
+                var acceptanceWebBaseUrl = options.WebRtcWebBaseUrl;
+                var skipRuntimeBootstrap = false;
+                var sessionEnvPath = Path.Combine(platformRoot, ".logs", "webrtc-peer-adapter.session.env");
+                if (options.PreferExistingRuntime)
+                {
+                    var runtimeCandidates = new[]
+                    {
+                        (ApiBaseUrl: options.WebRtcApiBaseUrl, WebBaseUrl: options.WebRtcWebBaseUrl),
+                        (ApiBaseUrl: options.FallbackApiBaseUrl, WebBaseUrl: options.FallbackWebBaseUrl),
+                    };
+
+                    foreach (var candidate in runtimeCandidates)
+                    {
+                        if (await IsApiHealthyAsync(candidate.ApiBaseUrl, CancellationToken.None)
+                            && HasSessionRuntimeCoordinates(sessionEnvPath))
+                        {
+                            acceptanceApiBaseUrl = candidate.ApiBaseUrl;
+                            acceptanceWebBaseUrl = candidate.WebBaseUrl;
+                            skipRuntimeBootstrap = true;
+                            break;
+                        }
+                    }
+                }
+
                 var acceptanceArgs = new List<string>
                 {
-                    "-ApiBaseUrl", "http://127.0.0.1:18093",
+                    "-ApiBaseUrl", acceptanceApiBaseUrl,
+                    "-WebBaseUrl", acceptanceWebBaseUrl,
                     "-CommandExecutor", options.WebRtcCommandExecutor,
+                    "-UartPort", options.WebRtcUartPort,
+                    "-UartBaud", options.WebRtcUartBaud.ToString(CultureInfo.InvariantCulture),
+                    "-UartHmacKey", options.WebRtcUartHmacKey,
                     "-ControlHealthUrl", options.WebRtcControlHealthUrl,
                     "-KeycloakBaseUrl", options.KeycloakBaseUrl,
                     "-TokenClientId", options.TokenClientId,
@@ -164,13 +194,18 @@ internal static class CiLocalCommand
                     "-TokenUsername", options.TokenUsername,
                     "-TokenPassword", options.TokenPassword,
                     "-PeerReadyTimeoutSec", Math.Max(5, options.WebRtcPeerReadyTimeoutSec).ToString(),
-                    "-SkipRuntimeBootstrap",
+                    "-MaxDurationSec", Math.Max(60, options.WebRtcAcceptanceMaxDurationSec).ToString(),
                 };
 
                 if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
                 {
                     acceptanceArgs.Add("-TokenClientSecret");
                     acceptanceArgs.Add(options.TokenClientSecret);
+                }
+
+                if (skipRuntimeBootstrap)
+                {
+                    acceptanceArgs.Add("-SkipRuntimeBootstrap");
                 }
 
                 if (options.AllowLegacyControlWs)
@@ -314,6 +349,7 @@ internal static class CiLocalCommand
         startInfo.ArgumentList.Add("run");
         startInfo.ArgumentList.Add("--project");
         startInfo.ArgumentList.Add(runtimeCtlProject);
+        startInfo.ArgumentList.Add("--no-build");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("--platform-root");
         startInfo.ArgumentList.Add(platformRoot);
@@ -323,15 +359,43 @@ internal static class CiLocalCommand
             startInfo.ArgumentList.Add(arg);
         }
 
+        await File.WriteAllTextAsync(
+            logPath,
+            $"[{DateTimeOffset.UtcNow:O}] RUN {command} {string.Join(' ', commandArgs)}{Environment.NewLine}");
+        Console.WriteLine();
+        Console.WriteLine($"... {stepName} started");
+        Console.WriteLine($"Live log: {logPath}");
+
         var stopwatch = Stopwatch.StartNew();
         using var process = Process.Start(startInfo);
         if (process is null)
         {
             throw new InvalidOperationException($"Failed to start RuntimeCtl command '{command}'.");
         }
+        using var progressCts = new CancellationTokenSource();
+        var progressTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!progressCts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15), progressCts.Token);
+                    if (!progressCts.Token.IsCancellationRequested)
+                    {
+                        Console.WriteLine($"... {stepName} running ({stopwatch.Elapsed:mm\\:ss})");
+                    }
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                // expected on completion
+            }
+        });
         var stdOutTask = process.StandardOutput.ReadToEndAsync();
         var stdErrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
+        progressCts.Cancel();
+        await progressTask;
         var stdOut = await stdOutTask;
         var stdErr = await stdErrTask;
         stopwatch.Stop();
@@ -348,6 +412,84 @@ internal static class CiLocalCommand
         if (process.ExitCode != 0 && options.StopOnFailure)
         {
             throw new InvalidOperationException($"{stepName} failed with exit code {process.ExitCode}");
+        }
+    }
+
+    private static async Task<bool> IsApiHealthyAsync(string baseUrl, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var http = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(2),
+            };
+
+            using var response = await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (!doc.RootElement.TryGetProperty("status", out var status))
+            {
+                return false;
+            }
+
+            return string.Equals(status.GetString(), "ok", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasSessionRuntimeCoordinates(string sessionEnvPath)
+    {
+        if (!File.Exists(sessionEnvPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string? sessionId = null;
+            string? peerId = null;
+            foreach (var line in File.ReadAllLines(sessionEnvPath))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                var idx = line.IndexOf('=');
+                if (idx <= 0)
+                {
+                    continue;
+                }
+
+                var key = line[..idx].Trim();
+                var value = line[(idx + 1)..].Trim();
+                if (key.Equals("SESSION_ID", StringComparison.OrdinalIgnoreCase))
+                {
+                    sessionId = value;
+                }
+                else if (key.Equals("PEER_ID", StringComparison.OrdinalIgnoreCase))
+                {
+                    peerId = value;
+                }
+            }
+
+            return !string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(peerId);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -411,9 +553,18 @@ internal static class CiLocalCommand
         public bool OpsFailOnSloWarning { get; set; }
         public bool OpsFailOnSecurityWarning { get; set; }
         public string WebRtcCommandExecutor { get; set; } = "uart";
+        public string WebRtcUartPort { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_UART_PORT") ?? "COM6";
+        public int WebRtcUartBaud { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("HIDBRIDGE_UART_BAUD"), out var parsedWebRtcUartBaud) ? parsedWebRtcUartBaud : 3_000_000;
+        public string WebRtcUartHmacKey { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_UART_HMAC_KEY") ?? "your-master-secret";
+        public string WebRtcApiBaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string WebRtcWebBaseUrl { get; set; } = "http://127.0.0.1:18110";
+        public string FallbackApiBaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string FallbackWebBaseUrl { get; set; } = "http://127.0.0.1:18110";
+        public bool PreferExistingRuntime { get; set; } = true;
         public bool AllowLegacyControlWs { get; set; }
         public string WebRtcControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
         public int WebRtcPeerReadyTimeoutSec { get; set; } = 45;
+        public int WebRtcAcceptanceMaxDurationSec { get; set; } = 420;
         public bool WebRtcStopExistingBeforeAcceptance { get; set; } = true;
         public bool WebRtcStopStackAfterAcceptance { get; set; } = true;
         public bool StopOnFailure { get; set; }
@@ -462,8 +613,17 @@ internal static class CiLocalCommand
                     case "foreigntokenpassword": options.ForeignTokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "webrtccommandeexecutor": options.WebRtcCommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "webrtccommandexecutor": options.WebRtcCommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcuartport": options.WebRtcUartPort = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcuartbaud": options.WebRtcUartBaud = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "webrtcuarthmackey": options.WebRtcUartHmacKey = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcapibaseurl": options.WebRtcApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcwebbaseurl": options.WebRtcWebBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "fallbackapibaseurl": options.FallbackApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "fallbackwebbaseurl": options.FallbackWebBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "preferexistingruntime": options.PreferExistingRuntime = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "webrtccontrolhealthurl": options.WebRtcControlHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "webrtcpeerreadytimeoutsec": options.WebRtcPeerReadyTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "webrtcacceptancemaxdurationsec": options.WebRtcAcceptanceMaxDurationSec = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "webrtcmediahealthattempts": options.WebRtcMediaHealthAttempts = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "webrtcmediahealthdelayms": options.WebRtcMediaHealthDelayMs = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "opsslowindowminutes": options.OpsSloWindowMinutes = ParseInt(name, value, hasValue, ref i, ref error); break;

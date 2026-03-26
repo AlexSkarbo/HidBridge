@@ -49,17 +49,11 @@ internal sealed class RuntimeCtlApp
             ["ops-slo-security-verify"] = new("ops-slo-security-verify", "Compatibility alias for ops SLO/security verification (native C# orchestration).", CommandKind.OpsVerify, null),
             ["identity-reset"] = new("identity-reset", "Resets Keycloak realm and smoke principals (native C#).", CommandKind.IdentityReset, null),
             ["platform-runtime"] = new("platform-runtime", "Controls docker runtime profile (native C# orchestration).", CommandKind.PlatformRuntime, null),
-        };
-
-    // Legacy run.ps1 task aliases still served through script bridge for backward compatibility.
-    private static readonly IReadOnlyDictionary<string, string> TaskMap =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["bearer-rollout"] = "Scripts/run_bearer_rollout_phase.ps1",
-            ["identity-onboard"] = "Identity/Keycloak/Onboard-HidBridgeOperator.ps1",
-            ["uart-diagnostics"] = "Scripts/run_uart_diagnostics.ps1",
-            ["webrtc-relay-smoke"] = "Scripts/run_webrtc_relay_smoke.ps1",
-            ["webrtc-peer-adapter"] = "Scripts/run_webrtc_peer_adapter.ps1",
+            ["bearer-rollout"] = new("bearer-rollout", "Runs phased bearer fallback rollout validation (native C# orchestration).", CommandKind.BearerRollout, null),
+            ["identity-onboard"] = new("identity-onboard", "Onboards operator identity in Keycloak (native C#).", CommandKind.IdentityOnboard, null),
+            ["uart-diagnostics"] = new("uart-diagnostics", "Runs UART selector/scenario diagnostics (native C#).", CommandKind.UartDiagnostics, null),
+            ["webrtc-relay-smoke"] = new("webrtc-relay-smoke", "Runs legacy WebRTC relay smoke compatibility lane (native C#).", CommandKind.WebRtcRelaySmoke, null),
+            ["webrtc-peer-adapter"] = new("webrtc-peer-adapter", "Runs deprecated exp-022 peer-adapter compatibility lane (native C#).", CommandKind.WebRtcPeerAdapter, null),
         };
 
     // `run.ps1 -Task <name>` compatibility redirects to native commands where already migrated.
@@ -157,13 +151,7 @@ internal sealed class RuntimeCtlApp
                 return new RuntimeCtlApp(platformRoot, nativeTask, NormalizeForwardArgs(remaining), showHelp: false, error: null);
             }
 
-            if (!TaskMap.TryGetValue(taskName, out var taskScript))
-            {
-                return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: $"Unsupported task '{taskName}'.");
-            }
-
-            var taskSpec = new CommandSpec($"task {taskName}", "run.ps1-compatible task invocation.", CommandKind.ScriptBridge, taskScript);
-            return new RuntimeCtlApp(platformRoot, taskSpec, NormalizeForwardArgs(remaining), showHelp: false, error: null);
+            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: $"Unsupported task '{taskName}'.");
         }
 
         if (!CommandAliases.TryGetValue(commandToken, out var commandSpec))
@@ -207,6 +195,11 @@ internal sealed class RuntimeCtlApp
             CommandKind.WebRtcEdgeAgentSmoke => await WebRtcEdgeAgentSmokeCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.IdentityReset => await IdentityResetCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.PlatformRuntime => await PlatformRuntimeCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.BearerRollout => await BearerRolloutCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.IdentityOnboard => await IdentityOnboardCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.UartDiagnostics => await UartDiagnosticsCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.WebRtcRelaySmoke => await WebRtcRelaySmokeCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.WebRtcPeerAdapter => await WebRtcPeerAdapterCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.ScriptBridge => await RunScriptBridgeAsync(_platformRoot, _command.ScriptRelativePath!, _forwardArgs),
             _ => throw new InvalidOperationException($"Unsupported command kind '{_command.Kind}'."),
         };
@@ -433,10 +426,7 @@ internal sealed class RuntimeCtlApp
         }
 
         Console.WriteLine("\nTask aliases:");
-        foreach (var task in TaskMap.Keys.OrderBy(static x => x, StringComparer.OrdinalIgnoreCase))
-        {
-            Console.WriteLine($"  task {task}");
-        }
+        Console.WriteLine("  task <command-name>   (run.ps1 compatibility; same names as Commands)");
     }
 
     private sealed record CommandSpec(
@@ -471,6 +461,11 @@ internal sealed class RuntimeCtlApp
         WebRtcStack,
         WebRtcEdgeAgentSmoke,
         PlatformRuntime,
+        BearerRollout,
+        IdentityOnboard,
+        UartDiagnostics,
+        WebRtcRelaySmoke,
+        WebRtcPeerAdapter,
     }
 
     internal sealed record RuntimeCtlDiagnosticsSnapshot(

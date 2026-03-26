@@ -1,5 +1,5 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$scriptPath = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "Scripts/run_bearer_rollout_phase.ps1"
-& $scriptPath -Phase 3 @args
+$runner = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "run.ps1"
+& $runner -Task bearer-rollout -Phase 3 @args
 exit $LASTEXITCODE

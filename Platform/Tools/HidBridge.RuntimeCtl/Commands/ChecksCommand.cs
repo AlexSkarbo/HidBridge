@@ -164,7 +164,7 @@ internal static class ChecksCommand
         public string ConnectionString { get; set; } = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge";
         public string Schema { get; set; } = "hidbridge";
         public string BaseUrl { get; set; } = "http://127.0.0.1:18093";
-        public string AuthAuthority { get; set; } = "http://127.0.0.1:18096/realms/hidbridge-dev";
+        public string AuthAuthority { get; set; } = "http://host.docker.internal:18096/realms/hidbridge-dev";
         public string AuthAudience { get; set; } = string.Empty;
         public string TokenClientId { get; set; } = "controlplane-smoke";
         public string TokenClientSecret { get; set; } = string.Empty;
