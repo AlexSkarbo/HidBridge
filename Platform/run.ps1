@@ -10,6 +10,8 @@ param(
     [switch]$SkipDoctor,
     [switch]$SkipChecks,
     [switch]$SkipBearerSmoke,
+    [switch]$SkipRealmSync,
+    [switch]$SkipCiLocal,
     [switch]$StopOnFailure,
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
@@ -17,6 +19,9 @@ param(
     [switch]$SkipWebRtcMediaE2EGate,
     [bool]$IncludeOpsSloSecurityVerify = $true,
     [switch]$SkipOpsSloSecurityVerify,
+    [switch]$ExportArtifactsOnFailure,
+    [switch]$IncludeSmokeDataOnFailure,
+    [switch]$IncludeBackupsOnFailure,
     [string]$WebRtcCommandExecutor,
     [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl,
@@ -146,10 +151,10 @@ $arguments.Add("--") | Out-Null
 $arguments.Add("--platform-root") | Out-Null
 $arguments.Add($PSScriptRoot) | Out-Null
 
-if ([string]::Equals($Task, "ci-local", [System.StringComparison]::OrdinalIgnoreCase)) {
-    $arguments.Add("ci-local") | Out-Null
-}
-else {
+if ([string]::Equals($Task, "ci-local", [System.StringComparison]::OrdinalIgnoreCase) -or
+    [string]::Equals($Task, "full", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $arguments.Add($Task) | Out-Null
+} else {
     $arguments.Add("task") | Out-Null
     $arguments.Add($Task) | Out-Null
 }

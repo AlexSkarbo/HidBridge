@@ -809,7 +809,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 - `Platform/Scripts/` contains the real operational scripts.
 - `Platform/run.ps1` is a thin shim over `HidBridge.RuntimeCtl`:
   - routes most invocations to `RuntimeCtl task <task-name>`
-  - routes `-Task ci-local` directly to native `RuntimeCtl ci-local` (C# orchestration)
+  - routes `-Task ci-local` and `-Task full` directly to native RuntimeCtl commands (C# orchestration)
   - forwards bound PowerShell options/args without script-side policy logic
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks`
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-sql -- -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
@@ -818,11 +818,12 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4`
 - CLI-first preview (`Platform/Tools/HidBridge.RuntimeCtl`):
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -StopOnFailure`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full -- -StopOnFailure`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- webrtc-acceptance -- -CommandExecutor uart -SkipRuntimeBootstrap -StopExisting -StopStackAfter`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- platform-runtime -- -Action up -Build`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task ops-slo-security-verify -- -BaseUrl http://127.0.0.1:18093`
   - current mode is a compatibility bridge: `RuntimeCtl` invokes existing `run_*.ps1` entrypoints while we remove script orchestration step-by-step.
-- `Platform/Scripts/run_ci_local.ps1` is now a compatibility wrapper that forwards to native `RuntimeCtl ci-local`.
+- `Platform/Scripts/run_ci_local.ps1` and `Platform/Scripts/run_full.ps1` are compatibility wrappers that forward to native RuntimeCtl commands.
 - top-level `Platform/run_*.ps1` files are compatibility wrappers that forward to `Platform/Scripts/`.
 
 

@@ -24,82 +24,106 @@ param(
     [int]$WebRtcPeerReadyTimeoutSec = 45,
     [switch]$ExportArtifactsOnFailure = $true,
     [switch]$IncludeSmokeDataOnFailure = $true,
-    [switch]$IncludeBackupsOnFailure = $true
+    [switch]$IncludeBackupsOnFailure = $true,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ForwardArgs
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$platformRoot = Split-Path -Parent $scriptsRoot
-. (Join-Path $scriptsRoot "Common/ScriptCommon.ps1")
+function Add-BoundParametersToArgumentList {
+    param(
+        [hashtable]$Bound,
+        [System.Collections.Generic.List[string]]$Target,
+        [string[]]$Excluded
+    )
 
-$logRoot = New-OperationalLogRoot -PlatformRoot $platformRoot -Category "full"
-$results = New-OperationalResultList
-$artifactExportPath = ""
-
-try {
-    if (-not $SkipRealmSync) {
-        Invoke-LoggedScript -Results $results -Name "Realm Sync" -LogRoot $logRoot -ScriptPath (Join-Path $platformRoot "Identity/Keycloak/Sync-HidBridgeDevRealm.ps1") -Parameters @{} -StopOnFailure:$StopOnFailure
+    $excludedLookup = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $Excluded) {
+        [void]$excludedLookup.Add($item)
     }
 
-    if (-not $SkipCiLocal) {
-        Invoke-LoggedScript -Results $results -Name "CI Local" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_ci_local.ps1") -Parameters @{
-            Configuration = $Configuration
-            ConnectionString = $ConnectionString
-            Schema = $Schema
-            AuthAuthority = $AuthAuthority
-            IncludeWebRtcEdgeAgentAcceptance = $IncludeWebRtcEdgeAgentAcceptance
-            SkipWebRtcEdgeAgentAcceptance = $SkipWebRtcEdgeAgentAcceptance
-            IncludeWebRtcMediaE2EGate = $IncludeWebRtcMediaE2EGate
-            SkipWebRtcMediaE2EGate = $SkipWebRtcMediaE2EGate
-            WebRtcMediaHealthAttempts = [Math]::Max(1, $WebRtcMediaHealthAttempts)
-            WebRtcMediaHealthDelayMs = [Math]::Max(100, $WebRtcMediaHealthDelayMs)
-            IncludeOpsSloSecurityVerify = $IncludeOpsSloSecurityVerify
-            SkipOpsSloSecurityVerify = $SkipOpsSloSecurityVerify
-            OpsSloWindowMinutes = [Math]::Max(5, $OpsSloWindowMinutes)
-            OpsFailOnSloWarning = $OpsFailOnSloWarning
-            OpsFailOnSecurityWarning = $OpsFailOnSecurityWarning
-            WebRtcCommandExecutor = $WebRtcCommandExecutor
-            WebRtcControlHealthUrl = $WebRtcControlHealthUrl
-            WebRtcPeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)
-            ExportArtifactsOnFailure = $ExportArtifactsOnFailure
-            IncludeSmokeDataOnFailure = $IncludeSmokeDataOnFailure
-            IncludeBackupsOnFailure = $IncludeBackupsOnFailure
-            AllowLegacyControlWs = $AllowLegacyControlWs
-        } -StopOnFailure:$StopOnFailure
-    }
-}
-catch {
-    $abortLogPath = Join-Path $logRoot "full.abort.log"
-    Add-Content -Path $abortLogPath -Value $_.Exception.ToString()
-    Add-OperationalResult -Results $results -Name "Full orchestration" -Status "FAIL" -Seconds 0 -ExitCode 1 -LogPath $abortLogPath
-    Write-Host ""
-    Write-Host "Full run aborted: $($_.Exception.Message)" -ForegroundColor Red
-}
+    foreach ($entry in $Bound.GetEnumerator()) {
+        $name = [string]$entry.Key
+        if ($excludedLookup.Contains($name)) {
+            continue
+        }
 
-$failed = @($results | Where-Object { $_.Status -eq "FAIL" })
-if ($ExportArtifactsOnFailure -and $failed.Count -gt 0) {
-    $artifactExportPath = Join-Path $platformRoot ("Artifacts/full-{0}" -f [DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss'))
-    $exportScript = Join-Path $scriptsRoot "run_export_artifacts.ps1"
-    $exportParams = @{ OutputRoot = $artifactExportPath }
-    if ($IncludeSmokeDataOnFailure) { $exportParams.IncludeSmokeData = $true }
-    if ($IncludeBackupsOnFailure) { $exportParams.IncludeBackups = $true }
+        $value = $entry.Value
+        if ($null -eq $value) {
+            continue
+        }
 
-    try {
-        & $exportScript @exportParams *> (Join-Path $logRoot "export-artifacts.log")
-    }
-    catch {
-        Write-Host ""
-        Write-Host "Artifact export failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        if ($value -is [System.Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) {
+                $Target.Add("-$name") | Out-Null
+            }
+            continue
+        }
+
+        if ($value -is [bool]) {
+            $Target.Add("-$name") | Out-Null
+            $Target.Add($value.ToString().ToLowerInvariant()) | Out-Null
+            continue
+        }
+
+        if ($value -is [System.Array]) {
+            foreach ($element in $value) {
+                if ($null -eq $element) {
+                    continue
+                }
+
+                $text = [string]$element
+                if ([string]::IsNullOrWhiteSpace($text)) {
+                    continue
+                }
+
+                $Target.Add("-$name") | Out-Null
+                $Target.Add($text) | Out-Null
+            }
+            continue
+        }
+
+        $Target.Add("-$name") | Out-Null
+        $Target.Add([string]$value) | Out-Null
     }
 }
 
-Write-OperationalSummary -Results $results -LogRoot $logRoot -Header "Full Run Summary"
-if (-not [string]::IsNullOrWhiteSpace($artifactExportPath)) {
-    Write-Host ""
-    Write-Host "Artifacts: $artifactExportPath"
+$platformRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$runtimeCtlProject = Join-Path $platformRoot "Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj"
+if (-not (Test-Path $runtimeCtlProject)) {
+    throw "RuntimeCtl project not found: $runtimeCtlProject"
 }
 
-if ($failed.Count -gt 0) { exit 1 }
-exit 0
+$dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($null -eq $dotnet) {
+    throw "dotnet CLI not found in PATH"
+}
+
+$arguments = [System.Collections.Generic.List[string]]::new()
+$arguments.Add("run") | Out-Null
+$arguments.Add("--project") | Out-Null
+$arguments.Add($runtimeCtlProject) | Out-Null
+$arguments.Add("--") | Out-Null
+$arguments.Add("--platform-root") | Out-Null
+$arguments.Add($platformRoot) | Out-Null
+$arguments.Add("full") | Out-Null
+
+Add-BoundParametersToArgumentList -Bound $PSBoundParameters -Target $arguments -Excluded @("ForwardArgs")
+
+if ($null -ne $ForwardArgs) {
+    foreach ($argument in $ForwardArgs) {
+        if (-not [string]::IsNullOrWhiteSpace($argument)) {
+            $arguments.Add($argument) | Out-Null
+        }
+    }
+}
+
+& $dotnet.Source @arguments
+$exitCode = $LASTEXITCODE
+if ($null -eq $exitCode) {
+    $exitCode = 1
+}
+
+exit $exitCode
