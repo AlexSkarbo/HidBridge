@@ -38,11 +38,24 @@ internal static class WebRtcAcceptanceCommand
             Console.Error.WriteLine($"Acceptance runner project not found: {runnerProject}");
             return 1;
         }
+        var runnerDll = Path.Combine(
+            Path.GetDirectoryName(runnerProject)!,
+            "bin",
+            "Debug",
+            "net10.0",
+            "HidBridge.Acceptance.Runner.dll");
+
+        if (options.StopExisting)
+        {
+            await ProcessCleanup.CleanupStaleEdgeProcessesAsync();
+        }
 
         var runnerArgs = new List<string>
         {
             "--platform-root", platformRoot,
+            "--runtimectl-dll", Path.Combine(AppContext.BaseDirectory, "HidBridge.RuntimeCtl.dll"),
             "--api-base-url", options.ApiBaseUrl,
+            "--web-base-url", options.WebBaseUrl,
             "--command-executor", options.CommandExecutor,
             "--control-health-url", options.ControlHealthUrl,
             "--keycloak-base-url", options.KeycloakBaseUrl,
@@ -128,12 +141,28 @@ internal static class WebRtcAcceptanceCommand
             UseShellExecute = false,
         };
 
-        startInfo.ArgumentList.Add("run");
-        startInfo.ArgumentList.Add("--project");
-        startInfo.ArgumentList.Add(runnerProject);
-        startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add("Debug");
-        startInfo.ArgumentList.Add("--");
+        var buildExitCode = await RunDotnetAsync(
+            platformRoot,
+            [
+                "build",
+                runnerProject,
+                "-c", "Debug",
+                "-v", "minimal",
+                "-nologo",
+            ]);
+        if (buildExitCode != 0)
+        {
+            Console.Error.WriteLine($"Failed to build acceptance runner (exit code {buildExitCode}).");
+            return 1;
+        }
+
+        if (!File.Exists(runnerDll))
+        {
+            Console.Error.WriteLine($"Acceptance runner build output not found: {runnerDll}");
+            return 1;
+        }
+
+        startInfo.ArgumentList.Add(runnerDll);
         foreach (var arg in runnerArgs)
         {
             startInfo.ArgumentList.Add(arg);
@@ -146,6 +175,52 @@ internal static class WebRtcAcceptanceCommand
             return 1;
         }
 
+        var maxDuration = TimeSpan.FromSeconds(Math.Max(60, options.MaxDurationSec));
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(maxDuration);
+        }
+        catch (TimeoutException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // best-effort kill
+            }
+
+            Console.Error.WriteLine($"WebRTC acceptance exceeded timeout ({(int)maxDuration.TotalSeconds}s) and was terminated.");
+            return 1;
+        }
+
+        return process.ExitCode;
+    }
+
+    private static async Task<int> RunDotnetAsync(string workingDirectory, IReadOnlyList<string> args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return 1;
+        }
+
         await process.WaitForExitAsync();
         return process.ExitCode;
     }
@@ -153,6 +228,7 @@ internal static class WebRtcAcceptanceCommand
     private sealed class WebRtcAcceptanceOptions
     {
         public string ApiBaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string WebBaseUrl { get; set; } = "http://127.0.0.1:18110";
         public string CommandExecutor { get; set; } = "uart";
         public bool AllowLegacyControlWs { get; set; }
         public string ControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
@@ -185,7 +261,8 @@ internal static class WebRtcAcceptanceCommand
         public bool SkipRuntimeBootstrap { get; set; }
         public bool StopExisting { get; set; }
         public bool StopStackAfter { get; set; }
-        public string OutputJsonPath { get; set; } = "Platform/.logs/webrtc-edge-agent-acceptance.result.json";
+        public int MaxDurationSec { get; set; } = 600;
+        public string OutputJsonPath { get; set; } = ".logs/webrtc-edge-agent-acceptance.result.json";
 
         public static bool TryParse(IReadOnlyList<string> args, out WebRtcAcceptanceOptions options, out string? error)
         {
@@ -214,6 +291,7 @@ internal static class WebRtcAcceptanceCommand
                 {
                     case "apibaseurl": options.ApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "baseurl": options.ApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webbaseurl": options.WebBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "commandexecutor": options.CommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "allowlegacycontrolws": options.AllowLegacyControlWs = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "controlhealthurl": options.ControlHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
@@ -246,6 +324,7 @@ internal static class WebRtcAcceptanceCommand
                     case "skipruntimebootstrap": options.SkipRuntimeBootstrap = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "stopexisting": options.StopExisting = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "stopstackafter": options.StopStackAfter = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "maxdurationsec": options.MaxDurationSec = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "outputjsonpath": options.OutputJsonPath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     default:
                         error = $"Unsupported webrtc-acceptance option '{token}'.";

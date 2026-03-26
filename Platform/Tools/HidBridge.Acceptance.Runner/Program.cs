@@ -32,6 +32,9 @@ try
     {
         Console.WriteLine("\n=== WebRTC Stack ===");
         bootstrapRuntime = await BootstrapWebRtcStackAsync(options, platformRoot, stackSummaryPath, CancellationToken.None);
+        // Refresh runtime coordinates from the session env written by webrtc-stack bootstrap.
+        // Without this refresh, smoke may keep using a stale session from a previous run.
+        sessionRuntime = ResolveSessionRuntime(options, platformRoot);
         result.Stack = TryReadJson(stackSummaryPath) ?? JsonSerializer.SerializeToElement(new
         {
             sessionId = sessionRuntime.SessionId,
@@ -138,7 +141,12 @@ static async Task<SmokeSummary> RunSmokeAsync(
     apiClient.DefaultRequestHeaders.Add("X-HidBridge-Role", "operator.admin,operator.moderator,operator.viewer");
 
     sessionRuntime = await EnsureControlLeaseAsync(options, apiClient, sessionRuntime, cancellationToken);
-    await MarkPeerOnlineAsync(options, apiClient, sessionRuntime, cancellationToken);
+    if (options.ForceMarkPeerOnline)
+    {
+        // Legacy compatibility switch: explicitly keep this opt-in so native edge-agent
+        // metadata (media/readiness fields) is not overwritten during normal acceptance runs.
+        await MarkPeerOnlineAsync(options, apiClient, sessionRuntime, cancellationToken);
+    }
     var readiness = options.SkipTransportHealthCheck
         ? null
         : await WaitRelayTransportReadyAsync(options, apiClient, sessionRuntime.SessionId, cancellationToken);
@@ -279,10 +287,21 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
     CancellationToken cancellationToken)
 {
     var runtimeCtlProject = Path.Combine(platformRoot, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj");
+    var runtimeCtlDllFromOption = ResolveOutputPath(options.RuntimeCtlDllPath, platformRoot);
+    var useProvidedRuntimeCtlDll = !string.IsNullOrWhiteSpace(options.RuntimeCtlDllPath)
+                                   && File.Exists(runtimeCtlDllFromOption);
     if (!File.Exists(runtimeCtlProject))
     {
         throw new FileNotFoundException($"RuntimeCtl project not found: {runtimeCtlProject}");
     }
+    var runtimeCtlDll = useProvidedRuntimeCtlDll
+        ? runtimeCtlDllFromOption
+        : Path.Combine(
+            Path.GetDirectoryName(runtimeCtlProject)!,
+            "bin",
+            "Debug",
+            "net10.0",
+            "HidBridge.RuntimeCtl.dll");
 
     var logRoot = Path.GetDirectoryName(stackSummaryPath) ?? platformRoot;
     Directory.CreateDirectory(logRoot);
@@ -298,15 +317,37 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
         RedirectStandardError = true,
     };
 
-    startInfo.ArgumentList.Add("run");
-    startInfo.ArgumentList.Add("--project");
-    startInfo.ArgumentList.Add(runtimeCtlProject);
-    startInfo.ArgumentList.Add("--");
+    if (!useProvidedRuntimeCtlDll)
+    {
+        var buildExitCode = await RunDotnetAsync(
+            platformRoot,
+            [
+                "build",
+                runtimeCtlProject,
+                "-c", "Debug",
+                "-v", "minimal",
+                "-nologo",
+            ],
+            cancellationToken);
+        if (buildExitCode != 0)
+        {
+            throw new InvalidOperationException($"RuntimeCtl build failed with exit code {buildExitCode}.");
+        }
+
+        if (!File.Exists(runtimeCtlDll))
+        {
+            throw new InvalidOperationException($"RuntimeCtl build output not found: {runtimeCtlDll}");
+        }
+    }
+
+    startInfo.ArgumentList.Add(runtimeCtlDll);
     startInfo.ArgumentList.Add("--platform-root");
     startInfo.ArgumentList.Add(platformRoot);
     startInfo.ArgumentList.Add("webrtc-stack");
     startInfo.ArgumentList.Add("-ApiBaseUrl");
     startInfo.ArgumentList.Add(options.ApiBaseUrl);
+    startInfo.ArgumentList.Add("-WebBaseUrl");
+    startInfo.ArgumentList.Add(options.WebBaseUrl);
     startInfo.ArgumentList.Add("-CommandExecutor");
     startInfo.ArgumentList.Add(options.CommandExecutor);
     startInfo.ArgumentList.Add("-OutputJsonPath");
@@ -346,37 +387,68 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
     var stdErrTask = process.StandardError.ReadToEndAsync(cancellationToken);
     var bootstrapTimeout = TimeSpan.FromSeconds(Math.Max(30, options.RequestTimeoutSec * 6));
     Console.WriteLine($"Waiting for WebRTC stack summary ({bootstrapTimeout.TotalSeconds:0}s timeout)...");
-    try
+    var startedAt = DateTimeOffset.UtcNow;
+    var nextProgressAt = startedAt.AddSeconds(15);
+    JsonElement? stackJson = null;
+    while (true)
     {
-        await process.WaitForExitAsync(cancellationToken).WaitAsync(bootstrapTimeout, cancellationToken);
-    }
-    catch (TimeoutException)
-    {
-        try
+        cancellationToken.ThrowIfCancellationRequested();
+
+        stackJson = TryReadJson(stackSummaryPath);
+        if (stackJson is not null)
         {
-            process.Kill(entireProcessTree: false);
-        }
-        catch
-        {
-            // best effort
+            Console.WriteLine($"Detected WebRTC stack summary: {stackSummaryPath}");
+            break;
         }
 
-        throw new InvalidOperationException(
-            $"WebRTC stack bootstrap timed out after {bootstrapTimeout.TotalSeconds:0}s: {stackSummaryPath}");
+        if (process.HasExited)
+        {
+            break;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now - startedAt >= bootstrapTimeout)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: false);
+            }
+            catch
+            {
+                // best effort
+            }
+
+            throw new InvalidOperationException(
+                $"WebRTC stack bootstrap timed out after {bootstrapTimeout.TotalSeconds:0}s: {stackSummaryPath}");
+        }
+
+        if (now >= nextProgressAt)
+        {
+            Console.WriteLine($"... waiting for stack summary ({(now - startedAt):mm\\:ss})");
+            nextProgressAt = now.AddSeconds(15);
+        }
+
+        await Task.Delay(500, cancellationToken);
     }
 
-    var stdOut = await stdOutTask;
-    var stdErr = await stdErrTask;
+    if (!process.HasExited)
+    {
+        // Summary is already produced; terminate lingering wrapper to avoid indefinite waits.
+        TryKillProcess(process, killTree: true);
+    }
+
+    await WaitForExitOrThrowAsync(process, TimeSpan.FromSeconds(20), cancellationToken);
+    var stdOut = await AwaitOrFallbackAsync(stdOutTask, TimeSpan.FromSeconds(3), cancellationToken, "stdout capture timed out.");
+    var stdErr = await AwaitOrFallbackAsync(stdErrTask, TimeSpan.FromSeconds(3), cancellationToken, "stderr capture timed out.");
     await File.WriteAllTextAsync(stdoutPath, stdOut, cancellationToken);
     await File.WriteAllTextAsync(stderrPath, stdErr, cancellationToken);
 
-    if (process.ExitCode != 0)
+    if (process.ExitCode != 0 && stackJson is null)
     {
         throw new InvalidOperationException(
             $"WebRTC stack bootstrap failed with exit code {process.ExitCode}. See logs: {stdoutPath} / {stderrPath}");
     }
 
-    var stackJson = TryReadJson(stackSummaryPath);
     if (stackJson is not { } stack)
     {
         throw new InvalidOperationException($"WebRTC stack bootstrap did not produce summary JSON: {stackSummaryPath}");
@@ -397,6 +469,51 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
     Console.WriteLine($"Log:   {stdoutPath}");
 
     return new StackBootstrapRuntime(adapterPid, exp022Pid);
+}
+
+static void TryKillProcess(Process process, bool killTree)
+{
+    try
+    {
+        if (!process.HasExited)
+        {
+            process.Kill(entireProcessTree: killTree);
+        }
+    }
+    catch
+    {
+        // best effort
+    }
+}
+
+static async Task WaitForExitOrThrowAsync(Process process, TimeSpan timeout, CancellationToken cancellationToken)
+{
+    try
+    {
+        await process.WaitForExitAsync(cancellationToken).WaitAsync(timeout, cancellationToken);
+    }
+    catch (TimeoutException)
+    {
+        TryKillProcess(process, killTree: true);
+        throw new InvalidOperationException(
+            $"WebRTC stack bootstrap process did not exit within {timeout.TotalSeconds:0}s after summary detection.");
+    }
+}
+
+static async Task<string> AwaitOrFallbackAsync(
+    Task<string> task,
+    TimeSpan timeout,
+    CancellationToken cancellationToken,
+    string fallbackMessage)
+{
+    try
+    {
+        return await task.WaitAsync(timeout, cancellationToken);
+    }
+    catch (TimeoutException)
+    {
+        return fallbackMessage;
+    }
 }
 
 static void StopProcessById(int? pid, string label)
@@ -684,9 +801,11 @@ static async Task<object?> WaitRelayTransportReadyAsync(
     {
         try
         {
-            using var response = await client.GetAsync(readinessUri, cancellationToken);
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probeCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, Math.Min(3, options.RequestTimeoutSec))));
+            using var response = await client.GetAsync(readinessUri, probeCts.Token);
             response.EnsureSuccessStatusCode();
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(probeCts.Token));
             var root = doc.RootElement;
             var ready = root.TryGetProperty("ready", out var readyElement) && readyElement.ValueKind == JsonValueKind.True;
             last = JsonSerializer.Deserialize<object>(root.GetRawText());
@@ -726,10 +845,12 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
     {
         try
         {
-            using var readinessResponse = await client.GetAsync(readinessUri, cancellationToken);
+            using var readinessProbeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            readinessProbeCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, Math.Min(3, options.RequestTimeoutSec))));
+            using var readinessResponse = await client.GetAsync(readinessUri, readinessProbeCts.Token);
             if (readinessResponse.IsSuccessStatusCode)
             {
-                using var readinessDoc = JsonDocument.Parse(await readinessResponse.Content.ReadAsStringAsync(cancellationToken));
+                using var readinessDoc = JsonDocument.Parse(await readinessResponse.Content.ReadAsStringAsync(readinessProbeCts.Token));
                 var readinessRoot = readinessDoc.RootElement.Clone();
                 lastReadiness = JsonSerializer.Deserialize<object>(readinessRoot.GetRawText());
 
@@ -748,10 +869,12 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
 
         try
         {
-            using var streamsResponse = await client.GetAsync(streamsUri, cancellationToken);
+            using var streamsProbeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            streamsProbeCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, Math.Min(3, options.RequestTimeoutSec))));
+            using var streamsResponse = await client.GetAsync(streamsUri, streamsProbeCts.Token);
             if (streamsResponse.IsSuccessStatusCode)
             {
-                using var streamsDoc = JsonDocument.Parse(await streamsResponse.Content.ReadAsStringAsync(cancellationToken));
+                using var streamsDoc = JsonDocument.Parse(await streamsResponse.Content.ReadAsStringAsync(streamsProbeCts.Token));
                 var streamsRoot = streamsDoc.RootElement.Clone();
                 lastStreams = JsonSerializer.Deserialize<object>(streamsRoot.GetRawText());
                 if (streamsRoot.ValueKind == JsonValueKind.Array)
@@ -981,6 +1104,32 @@ static async Task WriteJsonAsync(string path, object payload)
     await File.WriteAllTextAsync(path, json);
 }
 
+static async Task<int> RunDotnetAsync(
+    string workingDirectory,
+    IReadOnlyList<string> args,
+    CancellationToken cancellationToken)
+{
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = "dotnet",
+        WorkingDirectory = workingDirectory,
+        UseShellExecute = false,
+    };
+    foreach (var arg in args)
+    {
+        startInfo.ArgumentList.Add(arg);
+    }
+
+    using var process = Process.Start(startInfo);
+    if (process is null)
+    {
+        return 1;
+    }
+
+    await process.WaitForExitAsync(cancellationToken);
+    return process.ExitCode;
+}
+
 static string ResolveOutputPath(string outputPath, string platformRoot)
 {
     if (Path.IsPathRooted(outputPath))
@@ -994,6 +1143,7 @@ static string ResolveOutputPath(string outputPath, string platformRoot)
 internal sealed class AcceptanceRunnerOptions
 {
     public string ApiBaseUrl { get; private set; } = "http://127.0.0.1:18093";
+    public string WebBaseUrl { get; private set; } = "http://127.0.0.1:18110";
     public string CommandExecutor { get; private set; } = "uart";
     public bool AllowLegacyControlWs { get; private set; }
     public string ControlHealthUrl { get; private set; } = "http://127.0.0.1:28092/health";
@@ -1012,6 +1162,7 @@ internal sealed class AcceptanceRunnerOptions
     public int TokenRequestAttempts { get; private set; } = 5;
     public int TokenRequestDelayMs { get; private set; } = 500;
     public bool SkipTransportHealthCheck { get; private set; }
+    public bool ForceMarkPeerOnline { get; private set; }
     public int TransportHealthAttempts { get; private set; } = 20;
     public int TransportHealthDelayMs { get; private set; } = 500;
     public bool SkipControlHealthCheck { get; private set; }
@@ -1042,8 +1193,9 @@ internal sealed class AcceptanceRunnerOptions
     public bool StopExisting { get; private set; }
     public bool StopStackAfter { get; private set; }
     public bool SmokeOnly { get; private set; }
-    public string OutputJsonPath { get; private set; } = "Platform/.logs/webrtc-edge-agent-acceptance.result.json";
+    public string OutputJsonPath { get; private set; } = ".logs/webrtc-edge-agent-acceptance.result.json";
     public string PlatformRoot { get; private set; } = string.Empty;
+    public string RuntimeCtlDllPath { get; private set; } = string.Empty;
 
     public static AcceptanceRunnerOptions Parse(string[] args)
     {
@@ -1061,6 +1213,7 @@ internal sealed class AcceptanceRunnerOptions
             {
                 case "allow-legacy-controlws": options.AllowLegacyControlWs = true; break;
                 case "skip-transport-health-check": options.SkipTransportHealthCheck = true; break;
+                case "force-mark-peer-online": options.ForceMarkPeerOnline = true; break;
                 case "skip-control-health-check": options.SkipControlHealthCheck = true; break;
                 case "skip-runtime-bootstrap": options.SkipRuntimeBootstrap = true; break;
                 case "stop-existing": options.StopExisting = true; break;
@@ -1068,6 +1221,7 @@ internal sealed class AcceptanceRunnerOptions
                 case "skip-control-lease-request": options.SkipControlLeaseRequest = true; break;
                 case "smoke-only": options.SmokeOnly = true; break;
                 case "api-base-url": options.ApiBaseUrl = RequireValue(args, ref i, arg); break;
+                case "web-base-url": options.WebBaseUrl = RequireValue(args, ref i, arg); break;
                 case "command-executor": options.CommandExecutor = RequireValue(args, ref i, arg); break;
                 case "command-action": options.CommandAction = RequireValue(args, ref i, arg); break;
                 case "command-text": options.CommandText = RequireValue(args, ref i, arg); break;
@@ -1110,6 +1264,7 @@ internal sealed class AcceptanceRunnerOptions
                 case "endpoint-id": options.EndpointId = RequireValue(args, ref i, arg); break;
                 case "output-json-path": options.OutputJsonPath = RequireValue(args, ref i, arg); break;
                 case "platform-root": options.PlatformRoot = RequireValue(args, ref i, arg); break;
+                case "runtimectl-dll": options.RuntimeCtlDllPath = RequireValue(args, ref i, arg); break;
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
             }

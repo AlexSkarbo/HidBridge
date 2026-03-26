@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-26 (webrtc-acceptance: default output path fix)
+
+Summary:
+
+- Fixed default acceptance summary output path to avoid duplicated `Platform/Platform` nesting when running with `--platform-root Platform`.
+- Updated defaults in both RuntimeCtl command options and Acceptance runner options to write under `.logs/...` relative to platform root.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/WebRtcAcceptanceCommand.cs`
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+
 ## 2026-03-26 (runtimectl hardening: warnings cleanup + routing regression tests)
 
 Summary:
