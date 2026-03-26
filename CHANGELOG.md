@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-03-26 (cli-first: native clean-logs/token-debug/room-cleanup tasks)
+
+Summary:
+
+- Added native RuntimeCtl commands:
+  - `clean-logs`
+  - `token-debug`
+  - `close-failed-rooms`
+  - `close-stale-rooms`
+- Removed these tasks from `TaskMap` script-bridge path so they run without PowerShell orchestration.
+- Updated demo-flow internal orchestration to call native commands for:
+  - `ci-local`
+  - `full`
+  - `webrtc-edge-agent-smoke`
+  (no root wrapper dependency).
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+
 ## 2026-03-26 (final cleanup: removed top-level run_*.ps1 wrappers)
 
 Summary:

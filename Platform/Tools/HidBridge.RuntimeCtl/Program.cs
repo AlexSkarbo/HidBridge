@@ -18,6 +18,10 @@ internal sealed class RuntimeCtlApp
             ["bearer-smoke"] = new("bearer-smoke", "Runs API bearer smoke lane (native C#).", CommandKind.BearerSmoke, null),
             ["smoke-bearer"] = new("smoke-bearer", "Runs API bearer smoke lane (native C#).", CommandKind.BearerSmoke, null),
             ["export-artifacts"] = new("export-artifacts", "Exports runtime artifacts (native C#).", CommandKind.ExportArtifacts, null),
+            ["clean-logs"] = new("clean-logs", "Prunes old operational logs/smoke-data (native C#).", CommandKind.CleanLogs, null),
+            ["token-debug"] = new("token-debug", "Acquires/inspects OIDC token and dumps claims (native C#).", CommandKind.TokenDebug, null),
+            ["close-failed-rooms"] = new("close-failed-rooms", "Closes failed sessions via API action endpoint (native C#).", CommandKind.CloseFailedRooms, null),
+            ["close-stale-rooms"] = new("close-stale-rooms", "Closes stale sessions via API action endpoint (native C#).", CommandKind.CloseStaleRooms, null),
             ["ci-local"] = new("ci-local", "Runs local CI gate lane (native C# orchestration).", CommandKind.CiLocal, null),
             ["full"] = new("full", "Runs full local gate lane (native C# orchestration).", CommandKind.Full, null),
             ["demo-flow"] = new("demo-flow", "Runs demo bootstrap flow (native C# orchestration).", CommandKind.DemoFlow, null),
@@ -40,16 +44,12 @@ internal sealed class RuntimeCtlApp
             ["smoke"] = "Scripts/run_smoke.ps1",
             ["smoke-file"] = "Scripts/run_file_smoke.ps1",
             ["smoke-sql"] = "Scripts/run_sql_smoke.ps1",
-            ["clean-logs"] = "Scripts/run_clean_logs.ps1",
-            ["token-debug"] = "Scripts/run_token_debug.ps1",
             ["bearer-rollout"] = "Scripts/run_bearer_rollout_phase.ps1",
             ["identity-onboard"] = "Identity/Keycloak/Onboard-HidBridgeOperator.ps1",
             ["demo-seed"] = "Scripts/run_demo_seed.ps1",
             ["uart-diagnostics"] = "Scripts/run_uart_diagnostics.ps1",
             ["webrtc-relay-smoke"] = "Scripts/run_webrtc_relay_smoke.ps1",
             ["webrtc-peer-adapter"] = "Scripts/run_webrtc_peer_adapter.ps1",
-            ["close-failed-rooms"] = "Scripts/run_close_failed_rooms.ps1",
-            ["close-stale-rooms"] = "Scripts/run_close_stale_rooms.ps1",
             ["platform-runtime"] = "Scripts/run_platform_runtime_profile.ps1",
         };
 
@@ -177,6 +177,10 @@ internal sealed class RuntimeCtlApp
             CommandKind.Checks => await ChecksCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.BearerSmoke => await BearerSmokeCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.ExportArtifacts => await ArtifactExportCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.CleanLogs => await CleanLogsCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.TokenDebug => await TokenDebugCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.CloseFailedRooms => await CloseFailedRoomsCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.CloseStaleRooms => await CloseStaleRoomsCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.CiLocal => await CiLocalCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.Full => await FullCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.WebRtcAcceptance => await WebRtcAcceptanceCommand.RunAsync(_platformRoot, _forwardArgs),
@@ -411,6 +415,10 @@ internal sealed class RuntimeCtlApp
         Checks,
         BearerSmoke,
         ExportArtifacts,
+        CleanLogs,
+        TokenDebug,
+        CloseFailedRooms,
+        CloseStaleRooms,
         CiLocal,
         Full,
         WebRtcAcceptance,
@@ -2370,6 +2378,1018 @@ internal static class ArtifactExportCommand
             {
                 return false;
             }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
+internal static class CleanLogsCommand
+{
+    public static Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!CleanLogsOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"clean-logs options error: {parseError}");
+            return Task.FromResult(1);
+        }
+
+        var targets = new List<string>
+        {
+            Path.Combine(platformRoot, ".logs"),
+        };
+        if (options.IncludeSmokeData)
+        {
+            targets.Add(Path.Combine(platformRoot, ".smoke-data"));
+        }
+
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-1 * Math.Abs(options.KeepDays));
+        var removed = new List<string>();
+
+        foreach (var target in targets)
+        {
+            if (!Directory.Exists(target))
+            {
+                continue;
+            }
+
+            var directories = Directory.EnumerateDirectories(target, "*", SearchOption.AllDirectories)
+                .OrderByDescending(static x => x.Length)
+                .ThenByDescending(static x => x, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            foreach (var directory in directories)
+            {
+                var info = new DirectoryInfo(directory);
+                var lastWriteUtc = new DateTimeOffset(info.LastWriteTimeUtc);
+                if (lastWriteUtc > cutoff)
+                {
+                    continue;
+                }
+
+                removed.Add(directory);
+                if (!options.WhatIf)
+                {
+                    try
+                    {
+                        Directory.Delete(directory, recursive: true);
+                    }
+                    catch
+                    {
+                        // best effort for cleanup mode
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine("=== Cleanup Summary ===");
+        Console.WriteLine($"KeepDays: {options.KeepDays}");
+        Console.WriteLine($"IncludeSmokeData: {options.IncludeSmokeData}");
+        Console.WriteLine($"RemovedCount: {removed.Count}");
+        if (removed.Count > 0)
+        {
+            Console.WriteLine("Removed paths:");
+            foreach (var item in removed)
+            {
+                Console.WriteLine(item);
+            }
+        }
+
+        return Task.FromResult(0);
+    }
+
+    private sealed class CleanLogsOptions
+    {
+        public int KeepDays { get; set; } = 7;
+        public bool IncludeSmokeData { get; set; }
+        public bool WhatIf { get; set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out CleanLogsOptions options, out string? error)
+        {
+            options = new CleanLogsOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "keepdays":
+                        options.KeepDays = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "includesmokedata":
+                        options.IncludeSmokeData = ParseSwitch(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "whatif":
+                        options.WhatIf = ParseSwitch(name, value, hasValue, ref i, ref error);
+                        break;
+                    default:
+                        error = $"Unsupported clean-logs option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static int ParseInt(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            var raw = RequireValue(name, value, ref index, ref hasValue, ref error);
+            if (error is not null)
+            {
+                return 0;
+            }
+            if (!int.TryParse(raw, out var parsed))
+            {
+                error = $"Option -{name} requires an integer value.";
+                return 0;
+            }
+            return parsed;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
+internal static class TokenDebugCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!TokenDebugOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"token-debug options error: {parseError}");
+            return 1;
+        }
+
+        var logRoot = Path.Combine(platformRoot, ".logs", "token-debug", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(logRoot);
+        var summaryPath = Path.Combine(logRoot, "token.summary.txt");
+        var headerPath = Path.Combine(logRoot, "token.header.json");
+        var payloadPath = Path.Combine(logRoot, "token.payload.json");
+        var rawPath = Path.Combine(logRoot, "token.raw.txt");
+        var rawResponsePath = Path.Combine(logRoot, "token.response.json");
+        var idTokenHeaderPath = Path.Combine(logRoot, "id_token.header.json");
+        var idTokenPayloadPath = Path.Combine(logRoot, "id_token.payload.json");
+        var idTokenRawPath = Path.Combine(logRoot, "id_token.raw.txt");
+        var userinfoPath = Path.Combine(logRoot, "userinfo.json");
+
+        try
+        {
+            var source = "provided-token";
+            var accessToken = options.AccessToken;
+            JsonDocument? tokenResponse = null;
+
+            if (string.IsNullOrWhiteSpace(accessToken)
+                || string.Equals(accessToken, "auto", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(accessToken, "<token>", StringComparison.OrdinalIgnoreCase))
+            {
+                tokenResponse = await RequestTokenResponseAsync(options);
+                if (!tokenResponse.RootElement.TryGetProperty("access_token", out var accessTokenElement))
+                {
+                    throw new InvalidOperationException("OIDC token response did not contain access_token.");
+                }
+                accessToken = accessTokenElement.GetString() ?? string.Empty;
+                source = "oidc-password-grant";
+                await File.WriteAllTextAsync(rawResponsePath, JsonSerializer.Serialize(tokenResponse.RootElement, new JsonSerializerOptions { WriteIndented = true }));
+            }
+
+            var parts = accessToken.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                throw new InvalidOperationException("Access token is not a JWT.");
+            }
+
+            var headerJson = DecodeJwtSegment(parts[0]);
+            var payloadJson = DecodeJwtSegment(parts[1]);
+            await File.WriteAllTextAsync(rawPath, accessToken);
+            await File.WriteAllTextAsync(headerPath, headerJson);
+            await File.WriteAllTextAsync(payloadPath, payloadJson);
+
+            using var headerDoc = JsonDocument.Parse(headerJson);
+            using var payloadDoc = JsonDocument.Parse(payloadJson);
+
+            string? idTokenSubject = null;
+            if (string.Equals(source, "oidc-password-grant", StringComparison.OrdinalIgnoreCase)
+                && tokenResponse is not null
+                && tokenResponse.RootElement.TryGetProperty("id_token", out var idTokenElement)
+                && !string.IsNullOrWhiteSpace(idTokenElement.GetString()))
+            {
+                var idToken = idTokenElement.GetString() ?? string.Empty;
+                var idParts = idToken.Split('.', StringSplitOptions.RemoveEmptyEntries);
+                if (idParts.Length >= 2)
+                {
+                    var idHeader = DecodeJwtSegment(idParts[0]);
+                    var idPayload = DecodeJwtSegment(idParts[1]);
+                    await File.WriteAllTextAsync(idTokenRawPath, idToken);
+                    await File.WriteAllTextAsync(idTokenHeaderPath, idHeader);
+                    await File.WriteAllTextAsync(idTokenPayloadPath, idPayload);
+
+                    using var idPayloadDoc = JsonDocument.Parse(idPayload);
+                    idTokenSubject = GetStringClaim(idPayloadDoc.RootElement, "sub");
+                }
+            }
+
+            JsonDocument? userinfoDoc = null;
+            if (string.Equals(source, "oidc-password-grant", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    userinfoDoc = await RequestUserInfoAsync(options, accessToken);
+                    await File.WriteAllTextAsync(userinfoPath, JsonSerializer.Serialize(userinfoDoc.RootElement, new JsonSerializerOptions { WriteIndented = true }));
+                }
+                catch (Exception ex)
+                {
+                    await File.WriteAllTextAsync(userinfoPath, ex.Message);
+                }
+            }
+
+            var roles = GetRoles(payloadDoc.RootElement);
+            var preferredUsername = GetStringClaim(payloadDoc.RootElement, "preferred_username");
+            var tenantId = GetStringClaim(payloadDoc.RootElement, "tenant_id");
+            var organizationId = GetStringClaim(payloadDoc.RootElement, "org_id");
+            var callerContextReady = !string.IsNullOrWhiteSpace(preferredUsername)
+                                     && !string.IsNullOrWhiteSpace(tenantId)
+                                     && !string.IsNullOrWhiteSpace(organizationId)
+                                     && roles.Any(static x => x.StartsWith("operator.", StringComparison.Ordinal));
+
+            var userinfoRoot = userinfoDoc?.RootElement;
+            var issuedAt = GetLongClaim(payloadDoc.RootElement, "iat");
+            var expiresAt = GetLongClaim(payloadDoc.RootElement, "exp");
+
+            var summary = new List<string>
+            {
+                "=== Token Debug Summary ===",
+                $"Realm: {options.Realm}",
+                $"ClientId: {options.ClientId}",
+                $"Username: {options.Username}",
+                $"Source: {source}",
+                $"Subject: {GetStringClaim(payloadDoc.RootElement, "sub")}",
+                $"PreferredUsername: {preferredUsername}",
+                $"Email: {GetStringClaim(payloadDoc.RootElement, "email")}",
+                $"TenantId: {tenantId}",
+                $"OrganizationId: {organizationId}",
+                $"IdTokenSubject: {idTokenSubject}",
+                $"UserInfoSubject: {GetStringClaim(userinfoRoot, "sub")}",
+                $"UserInfoPreferredUsername: {GetStringClaim(userinfoRoot, "preferred_username")}",
+                $"UserInfoEmail: {GetStringClaim(userinfoRoot, "email")}",
+                $"UserInfoTenantId: {GetStringClaim(userinfoRoot, "tenant_id")}",
+                $"UserInfoOrganizationId: {GetStringClaim(userinfoRoot, "org_id")}",
+                $"CallerContextReady: {(callerContextReady ? "true" : "false")}",
+                $"Audience: {string.Join(", ", GetAudience(payloadDoc.RootElement))}",
+                $"IssuedAtUtc: {FormatUnix(issuedAt)}",
+                $"ExpiresAtUtc: {FormatUnix(expiresAt)}",
+                $"Roles: {string.Join(", ", roles)}",
+                $"RawTokenResponse: {rawResponsePath}",
+                $"HeaderJson: {headerPath}",
+                $"PayloadJson: {payloadPath}",
+                $"IdTokenHeaderJson: {idTokenHeaderPath}",
+                $"IdTokenPayloadJson: {idTokenPayloadPath}",
+                $"IdTokenRaw: {idTokenRawPath}",
+                $"UserInfoJson: {userinfoPath}",
+                $"RawToken: {rawPath}",
+            };
+
+            await File.WriteAllLinesAsync(summaryPath, summary);
+            foreach (var line in summary)
+            {
+                Console.WriteLine(line);
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+
+    private static string DecodeJwtSegment(string segment)
+    {
+        var padded = segment.Replace('-', '+').Replace('_', '/');
+        var remainder = padded.Length % 4;
+        if (remainder == 2)
+        {
+            padded += "==";
+        }
+        else if (remainder == 3)
+        {
+            padded += "=";
+        }
+        var bytes = Convert.FromBase64String(padded);
+        using var doc = JsonDocument.Parse(bytes);
+        return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static string? GetStringClaim(JsonElement? element, string name)
+    {
+        if (element is null || element.Value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        if (!element.Value.TryGetProperty(name, out var claim))
+        {
+            return null;
+        }
+        return claim.ValueKind switch
+        {
+            JsonValueKind.String => claim.GetString(),
+            JsonValueKind.Number => claim.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => claim.GetRawText(),
+        };
+    }
+
+    private static long? GetLongClaim(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var claim))
+        {
+            return null;
+        }
+        if (claim.ValueKind == JsonValueKind.Number && claim.TryGetInt64(out var value))
+        {
+            return value;
+        }
+        if (claim.ValueKind == JsonValueKind.String && long.TryParse(claim.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<string> GetRoles(JsonElement payload)
+    {
+        var roles = new HashSet<string>(StringComparer.Ordinal);
+        if (payload.TryGetProperty("realm_access", out var realmAccess)
+            && realmAccess.ValueKind == JsonValueKind.Object
+            && realmAccess.TryGetProperty("roles", out var roleArray)
+            && roleArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in roleArray.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                {
+                    roles.Add(item.GetString()!);
+                }
+            }
+        }
+
+        if (payload.TryGetProperty("role", out var topLevelRoles))
+        {
+            if (topLevelRoles.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(topLevelRoles.GetString()))
+            {
+                roles.Add(topLevelRoles.GetString()!);
+            }
+            else if (topLevelRoles.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in topLevelRoles.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                    {
+                        roles.Add(item.GetString()!);
+                    }
+                }
+            }
+        }
+
+        return roles.ToArray();
+    }
+
+    private static IReadOnlyList<string> GetAudience(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("aud", out var aud))
+        {
+            return Array.Empty<string>();
+        }
+        if (aud.ValueKind == JsonValueKind.String)
+        {
+            var value = aud.GetString();
+            return string.IsNullOrWhiteSpace(value) ? Array.Empty<string>() : new[] { value };
+        }
+        if (aud.ValueKind == JsonValueKind.Array)
+        {
+            return aud.EnumerateArray()
+                .Where(static x => x.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(x.GetString()))
+                .Select(static x => x.GetString()!)
+                .ToArray();
+        }
+        return Array.Empty<string>();
+    }
+
+    private static string FormatUnix(long? unixSeconds)
+    {
+        if (!unixSeconds.HasValue)
+        {
+            return string.Empty;
+        }
+        return DateTimeOffset.FromUnixTimeSeconds(unixSeconds.Value).UtcDateTime.ToString("O");
+    }
+
+    private static async Task<JsonDocument> RequestTokenResponseAsync(TokenDebugOptions options)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var scopeCandidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(options.Scope))
+        {
+            scopeCandidates.Add(options.Scope);
+        }
+        if (!scopeCandidates.Contains("openid", StringComparer.Ordinal))
+        {
+            scopeCandidates.Add("openid");
+        }
+        if (!scopeCandidates.Contains(string.Empty, StringComparer.Ordinal))
+        {
+            scopeCandidates.Add(string.Empty);
+        }
+
+        string? lastError = null;
+        foreach (var scope in scopeCandidates)
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["client_id"] = options.ClientId,
+                ["username"] = options.Username,
+                ["password"] = options.Password,
+            };
+            if (!string.IsNullOrWhiteSpace(options.ClientSecret))
+            {
+                form["client_secret"] = options.ClientSecret;
+            }
+            if (!string.IsNullOrWhiteSpace(scope))
+            {
+                form["scope"] = scope;
+            }
+
+            using var response = await client.PostAsync(
+                $"{options.KeycloakBaseUrl.TrimEnd('/')}/realms/{Uri.EscapeDataString(options.Realm)}/protocol/openid-connect/token",
+                new FormUrlEncodedContent(form));
+            var payload = await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode)
+            {
+                return JsonDocument.Parse(payload);
+            }
+
+            lastError = $"Token request failed ({(int)response.StatusCode}): {payload}";
+            var invalidScope = response.StatusCode == HttpStatusCode.BadRequest
+                               && payload.Contains("invalid_scope", StringComparison.OrdinalIgnoreCase);
+            var hasMore = !string.Equals(scope, scopeCandidates[^1], StringComparison.Ordinal);
+            if (invalidScope && hasMore)
+            {
+                continue;
+            }
+
+            throw new InvalidOperationException(lastError);
+        }
+
+        throw new InvalidOperationException(lastError ?? "Token request failed.");
+    }
+
+    private static async Task<JsonDocument> RequestUserInfoAsync(TokenDebugOptions options, string accessToken)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{options.KeycloakBaseUrl.TrimEnd('/')}/realms/{Uri.EscapeDataString(options.Realm)}/protocol/openid-connect/userinfo");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var response = await client.SendAsync(request);
+        var payload = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"UserInfo request failed ({(int)response.StatusCode}): {payload}");
+        }
+        return JsonDocument.Parse(payload);
+    }
+
+    private sealed class TokenDebugOptions
+    {
+        public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
+        public string Realm { get; set; } = "hidbridge-dev";
+        public string ClientId { get; set; } = "controlplane-smoke";
+        public string ClientSecret { get; set; } = string.Empty;
+        public string Username { get; set; } = "operator.smoke.admin";
+        public string Password { get; set; } = "ChangeMe123!";
+        public string Scope { get; set; } = "openid profile email";
+        public string AccessToken { get; set; } = "auto";
+
+        public static bool TryParse(IReadOnlyList<string> args, out TokenDebugOptions options, out string? error)
+        {
+            options = new TokenDebugOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "keycloakbaseurl": options.KeycloakBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "realm": options.Realm = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "clientid": options.ClientId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "clientsecret": options.ClientSecret = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "username": options.Username = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "password": options.Password = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "scope": options.Scope = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "accesstoken": options.AccessToken = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    default:
+                        error = $"Unsupported token-debug option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+    }
+}
+
+internal static class CloseFailedRoomsCommand
+{
+    public static Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args) =>
+        RoomCleanupCommand.RunAsync(
+            args,
+            new RoomCleanupCommand.Mode(
+                SummaryTitle: "Close Failed Rooms",
+                FoundLabel: "Failed sessions found",
+                EndpointPath: "/api/v1/sessions/actions/close-failed",
+                DefaultPrincipalId: "failed-room-cleanup",
+                DefaultReason: "manual failed-room cleanup",
+                SupportsStaleAfterMinutes: false));
+}
+
+internal static class CloseStaleRoomsCommand
+{
+    public static Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args) =>
+        RoomCleanupCommand.RunAsync(
+            args,
+            new RoomCleanupCommand.Mode(
+                SummaryTitle: "Close Stale Rooms",
+                FoundLabel: "Stale sessions found",
+                EndpointPath: "/api/v1/sessions/actions/close-stale",
+                DefaultPrincipalId: "stale-room-cleanup",
+                DefaultReason: "manual stale-room cleanup",
+                SupportsStaleAfterMinutes: true));
+}
+
+internal static class RoomCleanupCommand
+{
+    internal sealed record Mode(
+        string SummaryTitle,
+        string FoundLabel,
+        string EndpointPath,
+        string DefaultPrincipalId,
+        string DefaultReason,
+        bool SupportsStaleAfterMinutes);
+
+    public static async Task<int> RunAsync(IReadOnlyList<string> args, Mode mode)
+    {
+        if (!CleanupOptions.TryParse(args, mode, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"{mode.EndpointPath} options error: {parseError}");
+            return 1;
+        }
+
+        try
+        {
+            var token = options.AccessToken;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                token = await RequestTokenAsync(options);
+            }
+
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.BaseUrl.TrimEnd('/')}{mode.EndpointPath}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("X-HidBridge-UserId", options.PrincipalId);
+            request.Headers.Add("X-HidBridge-PrincipalId", options.PrincipalId);
+            request.Headers.Add("X-HidBridge-TenantId", options.TenantId);
+            request.Headers.Add("X-HidBridge-OrganizationId", options.OrganizationId);
+            request.Headers.Add("X-HidBridge-Role", "operator.admin,operator.moderator,operator.viewer");
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["dryRun"] = options.DryRun,
+                ["reason"] = options.Reason,
+            };
+            if (mode.SupportsStaleAfterMinutes)
+            {
+                payload["staleAfterMinutes"] = options.StaleAfterMinutes;
+            }
+
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var response = await client.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"HTTP POST {mode.EndpointPath} failed ({(int)response.StatusCode}): {responseBody}");
+            }
+
+            using var resultDoc = JsonDocument.Parse(responseBody);
+            var root = resultDoc.RootElement;
+            var scanned = GetInt(root, "scannedSessions");
+            var matched = GetInt(root, "matchedSessions");
+            var closed = GetInt(root, "closedSessions");
+            var skipped = GetInt(root, "skippedSessions");
+            var failedClosures = GetInt(root, "failedClosures");
+            var matchedIds = GetStringArray(root, "matchedSessionIds");
+            var closedIds = GetStringArray(root, "closedSessionIds");
+            var errors = GetStringArray(root, "errors");
+
+            Console.WriteLine();
+            Console.WriteLine($"=== {mode.SummaryTitle} Summary ===");
+            Console.WriteLine($"BaseUrl: {options.BaseUrl}");
+            if (mode.SupportsStaleAfterMinutes)
+            {
+                Console.WriteLine($"Stale after minutes: {options.StaleAfterMinutes}");
+            }
+            Console.WriteLine($"Sessions visible: {scanned}");
+            Console.WriteLine($"{mode.FoundLabel}: {matched}");
+            Console.WriteLine($"Dry run: {options.DryRun}");
+            Console.WriteLine($"Closed sessions: {closed}");
+            Console.WriteLine($"Skipped sessions: {skipped}");
+            Console.WriteLine($"Close failures: {failedClosures}");
+            if (matchedIds.Count > 0)
+            {
+                Console.WriteLine($"{mode.FoundLabel.Replace(" found", " IDs")}: {string.Join(", ", matchedIds)}");
+            }
+            if (closedIds.Count > 0)
+            {
+                Console.WriteLine($"Closed session IDs: {string.Join(", ", closedIds)}");
+            }
+            if (errors.Count > 0)
+            {
+                Console.WriteLine("Close errors:");
+                foreach (var error in errors)
+                {
+                    Console.WriteLine($"  - {error}");
+                }
+            }
+
+            return errors.Count > 0 ? 1 : 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+
+    private static int GetInt(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value))
+        {
+            return 0;
+        }
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var numeric))
+        {
+            return numeric;
+        }
+        if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+        return 0;
+    }
+
+    private static List<string> GetStringArray(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value))
+        {
+            return new List<string>();
+        }
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var text = value.GetString();
+            return string.IsNullOrWhiteSpace(text) ? new List<string>() : new List<string> { text };
+        }
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+        return value.EnumerateArray()
+            .Where(static x => x.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(x.GetString()))
+            .Select(static x => x.GetString()!)
+            .ToList();
+    }
+
+    private static async Task<string> RequestTokenAsync(CleanupOptions options)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var scopeCandidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(options.TokenScope))
+        {
+            scopeCandidates.Add(options.TokenScope);
+        }
+        if (!scopeCandidates.Contains("openid", StringComparer.Ordinal))
+        {
+            scopeCandidates.Add("openid");
+        }
+        if (!scopeCandidates.Contains(string.Empty, StringComparer.Ordinal))
+        {
+            scopeCandidates.Add(string.Empty);
+        }
+
+        string? lastError = null;
+        foreach (var scope in scopeCandidates)
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["client_id"] = options.TokenClientId,
+                ["username"] = options.TokenUsername,
+                ["password"] = options.TokenPassword,
+            };
+            if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
+            {
+                form["client_secret"] = options.TokenClientSecret;
+            }
+            if (!string.IsNullOrWhiteSpace(scope))
+            {
+                form["scope"] = scope;
+            }
+
+            using var response = await client.PostAsync(
+                $"{options.KeycloakBaseUrl.TrimEnd('/')}/realms/{Uri.EscapeDataString(options.RealmName)}/protocol/openid-connect/token",
+                new FormUrlEncodedContent(form));
+            var payload = await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(payload);
+                if (!doc.RootElement.TryGetProperty("access_token", out var token))
+                {
+                    throw new InvalidOperationException("OIDC token response did not contain access_token.");
+                }
+                return token.GetString() ?? string.Empty;
+            }
+
+            lastError = $"Token request failed ({(int)response.StatusCode}): {payload}";
+            var invalidScope = response.StatusCode == HttpStatusCode.BadRequest
+                               && payload.Contains("invalid_scope", StringComparison.OrdinalIgnoreCase);
+            var hasMore = !string.Equals(scope, scopeCandidates[^1], StringComparison.Ordinal);
+            if (invalidScope && hasMore)
+            {
+                continue;
+            }
+            throw new InvalidOperationException(lastError);
+        }
+
+        throw new InvalidOperationException(lastError ?? "Token request failed.");
+    }
+
+    private sealed class CleanupOptions
+    {
+        public string BaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
+        public string RealmName { get; set; } = "hidbridge-dev";
+        public string TokenClientId { get; set; } = "controlplane-smoke";
+        public string TokenClientSecret { get; set; } = string.Empty;
+        public string TokenScope { get; set; } = "openid profile email";
+        public string TokenUsername { get; set; } = "operator.smoke.admin";
+        public string TokenPassword { get; set; } = "ChangeMe123!";
+        public string AccessToken { get; set; } = string.Empty;
+        public string PrincipalId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = "local-tenant";
+        public string OrganizationId { get; set; } = "local-org";
+        public string Reason { get; set; } = string.Empty;
+        public int StaleAfterMinutes { get; set; } = 30;
+        public bool DryRun { get; set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, Mode mode, out CleanupOptions options, out string? error)
+        {
+            options = new CleanupOptions
+            {
+                PrincipalId = mode.DefaultPrincipalId,
+                Reason = mode.DefaultReason,
+            };
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "baseurl": options.BaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "keycloakbaseurl": options.KeycloakBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "realmname": options.RealmName = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenclientid": options.TokenClientId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenclientsecret": options.TokenClientSecret = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenscope": options.TokenScope = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenusername": options.TokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenpassword": options.TokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "accesstoken": options.AccessToken = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "principalid": options.PrincipalId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tenantid": options.TenantId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "organizationid": options.OrganizationId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "reason": options.Reason = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "dryrun": options.DryRun = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "staleafterminutes":
+                        if (!mode.SupportsStaleAfterMinutes)
+                        {
+                            if (hasValue)
+                            {
+                                i++;
+                            }
+                            break;
+                        }
+                        options.StaleAfterMinutes = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    default:
+                        error = $"Unsupported cleanup option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            if (mode.SupportsStaleAfterMinutes && options.StaleAfterMinutes < 1)
+            {
+                error = "StaleAfterMinutes must be greater than 0.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static int ParseInt(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            var raw = RequireValue(name, value, ref index, ref hasValue, ref error);
+            if (error is not null)
+            {
+                return 0;
+            }
+            if (!int.TryParse(raw, out var parsed))
+            {
+                error = $"Option -{name} requires an integer value.";
+                return 0;
+            }
+            return parsed;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
             switch (value.Trim().ToLowerInvariant())
             {
                 case "1":
