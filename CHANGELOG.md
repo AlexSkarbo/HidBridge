@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (cli-first: RuntimeCtl decomposition into per-command files + inline documentation)
+
+Summary:
+
+- Split monolithic `Platform/Tools/HidBridge.RuntimeCtl/Program.cs` into per-lane command files under `Platform/Tools/HidBridge.RuntimeCtl/Commands/`.
+- Kept `Program.cs` as a compact router/compatibility layer (command alias map, task bridge, shared process helpers).
+- Added explicit XML and inline comments to document:
+  - top-level dispatch model,
+  - command execution contract (parse -> orchestrate -> logs/exit-code),
+  - script-bridge purpose and planned retirement direction.
+- Fixed post-split compile issue in `PlatformRuntimeCommand` (`System.ComponentModel` import for `Win32Exception` handling).
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/*.cs`
+
 ## 2026-03-26 (cli-first: native platform-runtime + script-step removal in full/demo-flow)
 
 Summary:
