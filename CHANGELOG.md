@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-03-26 (runtimectl native webrtc-stack + demo-flow, run.ps1 minimized)
+
+Summary:
+
+- Completed CLI-first migration for WebRTC orchestration:
+  - `webrtc-stack` is now native in `HidBridge.RuntimeCtl`.
+  - `demo-flow` is now native in `HidBridge.RuntimeCtl`.
+- `run_webrtc_stack.ps1` and `run_demo_flow.ps1` are reduced to thin compatibility wrappers that only delegate to RuntimeCtl.
+- `Platform/run.ps1` is reduced to a minimal compatibility shim with direct routing to native RuntimeCtl commands (`demo-flow`, `webrtc-stack`, plus previously migrated native commands).
+- Legacy `controlws/exp-022` mode remains explicitly gated (`HIDBRIDGE_ENABLE_LEGACY_EXP022`) without reintroducing script-side policy logic.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Scripts/run_webrtc_stack.ps1`
+- `Platform/Scripts/run_demo_flow.ps1`
+- `Platform/run.ps1`
+
 ## 2026-03-25 (pr-b.2 regression tests: session media panel)
 
 Summary:

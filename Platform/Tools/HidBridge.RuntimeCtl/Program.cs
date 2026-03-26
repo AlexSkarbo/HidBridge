@@ -15,7 +15,8 @@ internal sealed class RuntimeCtlApp
             ["doctor"] = new("doctor", "Runs environment and API health checks.", CommandKind.ScriptBridge, "run_doctor.ps1"),
             ["ci-local"] = new("ci-local", "Runs local CI gate lane (native C# orchestration).", CommandKind.CiLocal, null),
             ["full"] = new("full", "Runs full local gate lane (native C# orchestration).", CommandKind.Full, null),
-            ["webrtc-stack"] = new("webrtc-stack", "Bootstraps WebRTC stack and edge adapter.", CommandKind.ScriptBridge, "run_webrtc_stack.ps1"),
+            ["demo-flow"] = new("demo-flow", "Runs demo bootstrap flow (native C# orchestration).", CommandKind.DemoFlow, null),
+            ["webrtc-stack"] = new("webrtc-stack", "Bootstraps WebRTC stack and edge adapter (native C# orchestration).", CommandKind.WebRtcStack, null),
             ["webrtc-acceptance"] = new("webrtc-acceptance", "Runs WebRTC edge-agent acceptance (native C# orchestration).", CommandKind.WebRtcAcceptance, null),
             ["ops-verify"] = new("ops-verify", "Runs ops SLO/security verification (native C# orchestration).", CommandKind.OpsVerify, null),
             ["identity-reset"] = new("identity-reset", "Resets Keycloak realm and smoke principals.", CommandKind.ScriptBridge, "run_identity_reset.ps1"),
@@ -164,6 +165,8 @@ internal sealed class RuntimeCtlApp
             CommandKind.Full => await FullCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.WebRtcAcceptance => await WebRtcAcceptanceCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.OpsVerify => await OpsVerifyCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.DemoFlow => await DemoFlowCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.WebRtcStack => await WebRtcStackCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.ScriptBridge => await RunScriptBridgeAsync(_platformRoot, _command.ScriptRelativePath!, _forwardArgs),
             _ => throw new InvalidOperationException($"Unsupported command kind '{_command.Kind}'."),
         };
@@ -388,6 +391,8 @@ internal sealed class RuntimeCtlApp
         Full,
         WebRtcAcceptance,
         OpsVerify,
+        DemoFlow,
+        WebRtcStack,
     }
 
     internal sealed record ScriptInvocationResult(int ExitCode, string StdOut, string StdErr);
@@ -1726,6 +1731,1733 @@ internal static class OpsVerifyCommand
     }
 
     private sealed record OpsCheck(string Name, string Status, string Message, object? Observed, object? Expected);
+}
+
+internal static class WebRtcStackCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!WebRtcStackOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"webrtc-stack options error: {parseError}");
+            return 1;
+        }
+
+        if (!string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(options.CommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine("CommandExecutor must be 'uart' or 'controlws'.");
+            return 1;
+        }
+
+        if (string.Equals(options.CommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!options.AllowLegacyControlWs)
+            {
+                Console.Error.WriteLine("CommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' or pass -AllowLegacyControlWs.");
+                return 1;
+            }
+
+            if (!TestLegacyExp022Enabled())
+            {
+                Console.Error.WriteLine("run_webrtc_stack controlws mode is disabled. Set HIDBRIDGE_ENABLE_LEGACY_EXP022=true in your shell to run exp-022/controlws lab flows.");
+                return 1;
+            }
+        }
+
+        if (options.PeerReadyTimeoutSpecified)
+        {
+            Console.WriteLine("WARNING: PeerReadyTimeoutSec is deprecated for webrtc-stack and ignored.");
+        }
+        if (options.TokenScopeSpecified && !string.IsNullOrWhiteSpace(options.TokenScope))
+        {
+            Console.WriteLine("WARNING: TokenScope is deprecated for webrtc-stack and ignored.");
+        }
+        if (options.AdapterDurationSecSpecified)
+        {
+            Console.WriteLine("WARNING: AdapterDurationSec is deprecated for webrtc-stack and ignored.");
+        }
+
+        var scriptsRoot = Path.Combine(platformRoot, "Scripts");
+        var repoRoot = Directory.GetParent(platformRoot)?.FullName ?? platformRoot;
+        var logRoot = Path.Combine(platformRoot, ".logs", "webrtc-stack", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(logRoot);
+
+        var sessionId = $"room-webrtc-peer-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
+        var peerId = string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase)
+            ? "peer-local-uart-edge"
+            : "peer-local-exp022";
+
+        var sessionEnvPath = Path.Combine(platformRoot, ".logs", "webrtc-peer-adapter.session.env");
+        var stackSummaryPath = Path.Combine(logRoot, "webrtc-stack.summary.json");
+        var edgeAgentProject = Path.Combine(repoRoot, "Platform", "Edge", "HidBridge.EdgeProxy.Agent", "HidBridge.EdgeProxy.Agent.csproj");
+        var exp022Script = Path.Combine(repoRoot, "WebRtcTests", "exp-022-datachanneldotnet", "start.ps1");
+        var exp022Stdout = Path.Combine(logRoot, "exp022.stdout.log");
+        var exp022Stderr = Path.Combine(logRoot, "exp022.stderr.log");
+        var adapterStdout = Path.Combine(logRoot, "webrtc-peer-adapter.stdout.log");
+        var adapterStderr = Path.Combine(logRoot, "webrtc-peer-adapter.stderr.log");
+
+        if (options.StopExisting)
+        {
+            await StopExistingProcessesAsync();
+        }
+
+        if (!options.SkipRuntimeBootstrap)
+        {
+            var demoFlowArgs = new List<string>
+            {
+                "-ApiBaseUrl", options.ApiBaseUrl,
+                "-WebBaseUrl", options.WebBaseUrl,
+                "-SkipDoctor",
+                "-SkipDemoGate",
+                "-IncludeWebRtcEdgeAgentSmoke",
+                "-WebRtcCommandExecutor", options.CommandExecutor,
+            };
+
+            if (options.AllowLegacyControlWs)
+            {
+                demoFlowArgs.Add("-AllowLegacyControlWs");
+            }
+            if (options.SkipIdentityReset)
+            {
+                demoFlowArgs.Add("-SkipIdentityReset");
+            }
+            if (options.SkipCiLocal)
+            {
+                demoFlowArgs.Add("-SkipCiLocal");
+            }
+            if (string.Equals(options.CommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+            {
+                demoFlowArgs.Add("-WebRtcControlHealthUrl");
+                demoFlowArgs.Add(ConvertControlWsToHealthUrl(options.ControlWsUrl));
+            }
+
+            var demoExitCode = await DemoFlowCommand.RunAsync(platformRoot, demoFlowArgs);
+            if (demoExitCode != 0)
+            {
+                Console.Error.WriteLine($"demo-flow failed with exit code {demoExitCode}.");
+                return demoExitCode;
+            }
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionEnvPath) ?? platformRoot);
+        var sessionEnv = string.Join(
+            Environment.NewLine,
+            [
+                $"SESSION_ID={sessionId}",
+                $"PEER_ID={peerId}",
+                $"ENDPOINT_ID={options.EndpointId}",
+                $"PRINCIPAL_ID={options.PrincipalId}",
+                "TENANT_ID=local-tenant",
+                "ORGANIZATION_ID=local-org",
+                $"COMMAND_EXECUTOR={options.CommandExecutor}",
+                string.Empty,
+            ]);
+        await File.WriteAllTextAsync(sessionEnvPath, sessionEnv, Encoding.ASCII);
+
+        EnsureFile(exp022Stdout);
+        EnsureFile(exp022Stderr);
+        EnsureFile(adapterStdout);
+        EnsureFile(adapterStderr);
+
+        Process? exp022Process = null;
+        Process? adapterProcess = null;
+
+        if (string.Equals(options.CommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(exp022Script))
+            {
+                Console.Error.WriteLine($"Legacy exp-022 script not found: {exp022Script}");
+                return 1;
+            }
+
+            var wsUri = new Uri(options.ControlWsUrl);
+            var wsBind = string.Equals(wsUri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+                ? "127.0.0.1"
+                : wsUri.Host;
+
+            var (shell, shellPrefix) = ResolvePowerShellExecutable();
+            var exp022Start = new ProcessStartInfo
+            {
+                FileName = shell,
+                WorkingDirectory = repoRoot,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            foreach (var item in shellPrefix)
+            {
+                exp022Start.ArgumentList.Add(item);
+            }
+            exp022Start.ArgumentList.Add("-File");
+            exp022Start.ArgumentList.Add(exp022Script);
+            exp022Start.ArgumentList.Add("-Mode");
+            exp022Start.ArgumentList.Add("dc-hid-poc");
+            exp022Start.ArgumentList.Add("-UartPort");
+            exp022Start.ArgumentList.Add(options.UartPort);
+            exp022Start.ArgumentList.Add("-UartBaud");
+            exp022Start.ArgumentList.Add(options.UartBaud.ToString());
+            exp022Start.ArgumentList.Add("-UartHmacKey");
+            exp022Start.ArgumentList.Add(options.UartHmacKey);
+            exp022Start.ArgumentList.Add("-ControlWsBind");
+            exp022Start.ArgumentList.Add(wsBind);
+            exp022Start.ArgumentList.Add("-ControlWsPort");
+            exp022Start.ArgumentList.Add(wsUri.Port.ToString());
+            exp022Start.ArgumentList.Add("-DurationSec");
+            exp022Start.ArgumentList.Add(options.Exp022DurationSec.ToString());
+
+            exp022Process = StartRedirectedProcess(exp022Start, exp022Stdout, exp022Stderr);
+        }
+
+        if (!File.Exists(edgeAgentProject))
+        {
+            Console.Error.WriteLine($"EdgeProxy.Agent project not found: {edgeAgentProject}");
+            return 1;
+        }
+
+        var adapterStart = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = repoRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        adapterStart.ArgumentList.Add("run");
+        adapterStart.ArgumentList.Add("--project");
+        adapterStart.ArgumentList.Add(edgeAgentProject);
+        adapterStart.ArgumentList.Add("-c");
+        adapterStart.ArgumentList.Add("Debug");
+
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_BASEURL"] = options.ApiBaseUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_SESSIONID"] = sessionId;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_PEERID"] = peerId;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ENDPOINTID"] = options.EndpointId;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_CONTROLWSURL"] = options.ControlWsUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_PRINCIPALID"] = options.PrincipalId;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME"] = options.TokenUsername;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD"] = options.TokenPassword;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_TOKENSCOPE"] = "openid";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV"] = "operator.admin,operator.moderator,operator.viewer,operator.edge";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL"] = options.KeycloakBaseUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM"] = "hidbridge-dev";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR"] = options.CommandExecutor;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTPORT"] = options.UartPort;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTBAUD"] = options.UartBaud.ToString();
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTHMACKEY"] = options.UartHmacKey;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE"] = "true";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR"] = "255";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR"] = "254";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = $"{options.WebBaseUrl.TrimEnd('/')}/media/edge-main";
+        if (string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase))
+        {
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL"] = string.Empty;
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = "true";
+        }
+        else
+        {
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL"] = ConvertControlWsToHealthUrl(options.ControlWsUrl);
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = "false";
+        }
+
+        adapterProcess = StartRedirectedProcess(adapterStart, adapterStdout, adapterStderr);
+
+        await Task.Delay(500);
+        if (adapterProcess.HasExited)
+        {
+            var tail = await ReadLogTailAsync(adapterStderr, 40);
+            if (string.IsNullOrWhiteSpace(tail))
+            {
+                Console.Error.WriteLine($"Edge proxy agent exited early with code {adapterProcess.ExitCode}. See: {adapterStderr}");
+                return 1;
+            }
+
+            Console.Error.WriteLine($"Edge proxy agent exited early with code {adapterProcess.ExitCode}.");
+            Console.Error.WriteLine(tail);
+            return 1;
+        }
+
+        var summary = new
+        {
+            apiBaseUrl = options.ApiBaseUrl,
+            webBaseUrl = options.WebBaseUrl,
+            commandExecutor = options.CommandExecutor,
+            controlWsUrl = options.ControlWsUrl,
+            runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
+            sessionId,
+            peerId,
+            exp022Pid = exp022Process?.Id,
+            adapterPid = adapterProcess.Id,
+            sessionEnvPath,
+            exp022Stdout,
+            exp022Stderr,
+            adapterStdout,
+            adapterStderr,
+        };
+
+        var summaryJson = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(stackSummaryPath, summaryJson, Encoding.UTF8);
+
+        if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
+        {
+            var outputPath = Path.IsPathRooted(options.OutputJsonPath)
+                ? options.OutputJsonPath
+                : Path.Combine(platformRoot, options.OutputJsonPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? platformRoot);
+            await File.WriteAllTextAsync(outputPath, summaryJson, Encoding.UTF8);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("=== WebRTC Stack Summary ===");
+        Console.WriteLine($"API:            {options.ApiBaseUrl}");
+        Console.WriteLine($"Web:            {options.WebBaseUrl}");
+        Console.WriteLine($"Executor:       {options.CommandExecutor}");
+        if (exp022Process is not null)
+        {
+            Console.WriteLine($"Control WS:     {options.ControlWsUrl}");
+        }
+        Console.WriteLine($"Session:        {sessionId}");
+        Console.WriteLine($"Peer:           {peerId}");
+        Console.WriteLine($"Adapter PID:    {adapterProcess.Id}");
+        Console.WriteLine($"Session env:    {sessionEnvPath}");
+        Console.WriteLine($"Summary JSON:   {stackSummaryPath}");
+        if (exp022Process is not null)
+        {
+            Console.WriteLine($"exp-022 stdout: {exp022Stdout}");
+            Console.WriteLine($"exp-022 stderr: {exp022Stderr}");
+        }
+        Console.WriteLine($"adapter stdout: {adapterStdout}");
+        Console.WriteLine($"adapter stderr: {adapterStderr}");
+        Console.WriteLine();
+        Console.WriteLine("Stop commands:");
+        Console.WriteLine($"- Stop-Process -Id {adapterProcess.Id} -Force");
+        if (exp022Process is not null)
+        {
+            Console.WriteLine($"- Stop-Process -Id {exp022Process.Id} -Force");
+        }
+        Console.WriteLine("- Stop runtime via demo-flow output (API/Web PIDs).");
+
+        return 0;
+    }
+
+    private static void EnsureFile(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Directory.GetCurrentDirectory());
+        using var _ = File.Create(path);
+    }
+
+    internal static Process StartRedirectedProcess(ProcessStartInfo startInfo, string stdoutPath, string stderrPath)
+    {
+        var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start process: {startInfo.FileName}");
+        _ = Task.Run(async () =>
+        {
+            await using var writer = new StreamWriter(stdoutPath, append: false, new UTF8Encoding(false));
+            while (!process.StandardOutput.EndOfStream)
+            {
+                var line = await process.StandardOutput.ReadLineAsync();
+                if (line is not null)
+                {
+                    await writer.WriteLineAsync(line);
+                    await writer.FlushAsync();
+                }
+            }
+        });
+        _ = Task.Run(async () =>
+        {
+            await using var writer = new StreamWriter(stderrPath, append: false, new UTF8Encoding(false));
+            while (!process.StandardError.EndOfStream)
+            {
+                var line = await process.StandardError.ReadLineAsync();
+                if (line is not null)
+                {
+                    await writer.WriteLineAsync(line);
+                    await writer.FlushAsync();
+                }
+            }
+        });
+        return process;
+    }
+
+    private static async Task<string> ReadLogTailAsync(string path, int lines)
+    {
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        var all = await File.ReadAllLinesAsync(path);
+        if (all.Length <= lines)
+        {
+            return string.Join(Environment.NewLine, all);
+        }
+
+        return string.Join(Environment.NewLine, all.Skip(Math.Max(0, all.Length - lines)));
+    }
+
+    private static string ConvertControlWsToHealthUrl(string controlWsUrl)
+    {
+        var uri = new Uri(controlWsUrl);
+        var scheme = string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
+        return $"{scheme}://{uri.Host}:{uri.Port}/health";
+    }
+
+    private static bool TestLegacyExp022Enabled()
+    {
+        foreach (var candidate in ReadLegacyEnvCandidates("HIDBRIDGE_ENABLE_LEGACY_EXP022"))
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            switch (candidate.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string?> ReadLegacyEnvCandidates(string name)
+    {
+        yield return Environment.GetEnvironmentVariable(name);
+        if (OperatingSystem.IsWindows())
+        {
+            string? user = null;
+            string? machine = null;
+            try { user = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User); } catch { }
+            try { machine = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine); } catch { }
+            yield return user;
+            yield return machine;
+        }
+    }
+
+    private static async Task StopExistingProcessesAsync()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var script = """
+            $needles = @('HidBridge.EdgeProxy.Agent', 'exp-022-datachanneldotnet')
+            function Stop-MatchingProcesses {
+                param([string]$ProcessName, [string[]]$Needles)
+                $processes = @(Get-CimInstance Win32_Process -Filter "Name='$ProcessName'" -ErrorAction SilentlyContinue)
+                $currentPid = $PID
+                foreach ($proc in $processes) {
+                    if ($proc.ProcessId -eq $currentPid) { continue }
+                    $line = [string]$proc.CommandLine
+                    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                    $matches = $false
+                    foreach ($needle in $Needles) {
+                        if ($line -like "*$needle*") { $matches = $true; break }
+                    }
+                    if (-not $matches) { continue }
+                    try {
+                        Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+                        Write-Host "Stopped PID $($proc.ProcessId): $ProcessName"
+                    } catch {
+                        Write-Warning "Failed to stop PID $($proc.ProcessId): $($_.Exception.Message)"
+                    }
+                }
+            }
+            Stop-MatchingProcesses -ProcessName 'dotnet.exe' -Needles $needles
+            Stop-MatchingProcesses -ProcessName 'pwsh.exe' -Needles $needles
+            Stop-MatchingProcesses -ProcessName 'powershell.exe' -Needles $needles
+            """;
+
+        var (shell, shellPrefix) = ResolvePowerShellExecutable();
+        var psi = new ProcessStartInfo
+        {
+            FileName = shell,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var token in shellPrefix)
+        {
+            psi.ArgumentList.Add(token);
+        }
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(script);
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            return;
+        }
+
+        var stdOut = await process.StandardOutput.ReadToEndAsync();
+        var stdErr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (!string.IsNullOrWhiteSpace(stdOut))
+        {
+            Console.Write(stdOut);
+        }
+        if (!string.IsNullOrWhiteSpace(stdErr))
+        {
+            Console.Write(stdErr);
+        }
+    }
+
+    private static (string Shell, IReadOnlyList<string> PrefixArgs) ResolvePowerShellExecutable()
+    {
+        static string? FindInPath(IReadOnlyList<string> names)
+        {
+            var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            var entries = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var name in names)
+            {
+                foreach (var entry in entries)
+                {
+                    var candidate = Path.Combine(entry, name);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var shell = FindInPath(["powershell.exe", "pwsh.exe"])
+                ?? throw new InvalidOperationException("Unable to locate powershell.exe or pwsh.exe in PATH.");
+            return (shell, ["-NoProfile", "-ExecutionPolicy", "Bypass"]);
+        }
+
+        var unixShell = FindInPath(["pwsh"])
+            ?? throw new InvalidOperationException("Unable to locate pwsh in PATH.");
+        return (unixShell, ["-NoProfile"]);
+    }
+
+    private sealed class WebRtcStackOptions
+    {
+        public string ApiBaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string WebBaseUrl { get; set; } = "http://127.0.0.1:18110";
+        public string CommandExecutor { get; set; } = "uart";
+        public bool AllowLegacyControlWs { get; set; }
+        public string ControlWsUrl { get; set; } = "ws://127.0.0.1:28092/ws/control";
+        public string UartPort { get; set; } = "COM6";
+        public int UartBaud { get; set; } = 3000000;
+        public string UartHmacKey { get; set; } = "your-master-secret";
+        public int Exp022DurationSec { get; set; } = 600;
+        public int AdapterDurationSec { get; set; } = 900;
+        public string EndpointId { get; set; } = "endpoint_local_demo";
+        public string PrincipalId { get; set; } = "smoke-runner";
+        public string TokenUsername { get; set; } = "operator.smoke.admin";
+        public string TokenPassword { get; set; } = "ChangeMe123!";
+        public string KeycloakBaseUrl { get; set; } = "http://host.docker.internal:18096";
+        public string TokenScope { get; set; } = string.Empty;
+        public int PeerReadyTimeoutSec { get; set; } = 30;
+        public string OutputJsonPath { get; set; } = string.Empty;
+        public bool SkipIdentityReset { get; set; } = true;
+        public bool SkipCiLocal { get; set; } = true;
+        public bool SkipRuntimeBootstrap { get; set; }
+        public bool StopExisting { get; set; }
+        public bool PeerReadyTimeoutSpecified { get; set; }
+        public bool AdapterDurationSecSpecified { get; set; }
+        public bool TokenScopeSpecified { get; set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out WebRtcStackOptions options, out string? error)
+        {
+            options = new WebRtcStackOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                string? value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "apibaseurl": options.ApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webbaseurl": options.WebBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "commandexecutor": options.CommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "allowlegacycontrolws": options.AllowLegacyControlWs = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "controlwsurl": options.ControlWsUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "uartport": options.UartPort = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "uartbaud": options.UartBaud = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "uarthmackey": options.UartHmacKey = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "exp022durationsec": options.Exp022DurationSec = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "adapterdurationsec":
+                        options.AdapterDurationSec = ParseInt(name, value, hasValue, ref i, ref error);
+                        options.AdapterDurationSecSpecified = true;
+                        break;
+                    case "endpointid": options.EndpointId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "principalid": options.PrincipalId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenusername": options.TokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenpassword": options.TokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "keycloakbaseurl": options.KeycloakBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenscope":
+                        options.TokenScope = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        options.TokenScopeSpecified = true;
+                        break;
+                    case "peerreadytimeoutsec":
+                        options.PeerReadyTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error);
+                        options.PeerReadyTimeoutSpecified = true;
+                        break;
+                    case "outputjsonpath": options.OutputJsonPath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "skipidentityreset": options.SkipIdentityReset = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipcilocal": options.SkipCiLocal = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipruntimebootstrap": options.SkipRuntimeBootstrap = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "stopexisting": options.StopExisting = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    default:
+                        error = $"Unsupported webrtc-stack option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+
+            index++;
+            return value;
+        }
+
+        private static int ParseInt(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            var raw = RequireValue(name, value, ref index, ref hasValue, ref error);
+            if (error is not null)
+            {
+                return 0;
+            }
+            if (!int.TryParse(raw, out var parsed))
+            {
+                error = $"Option -{name} requires an integer value.";
+                return 0;
+            }
+            return parsed;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires boolean value true/false when explicitly set.";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
+internal static class DemoFlowCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!DemoFlowOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"demo-flow options error: {parseError}");
+            return 1;
+        }
+
+        var scriptsRoot = Path.Combine(platformRoot, "Scripts");
+        var repoRoot = Directory.GetParent(platformRoot)?.FullName ?? platformRoot;
+        var logRoot = Path.Combine(platformRoot, ".logs", "demo-flow", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(logRoot);
+
+        var results = new List<DemoFlowStepResult>();
+        var runtimeServices = new List<DemoRuntimeService>();
+        var runtimeStarted = new List<DemoRuntimeService>();
+        var serviceStartupAttempted = false;
+        var effectiveReuse = options.ReuseRunningServices;
+        var effectiveSkipCiLocal = options.SkipCiLocal;
+        var effectiveSkipDemoGate = options.SkipDemoGate;
+
+        var authUri = new Uri(options.AuthAuthority);
+        var keycloakBaseUrl = authUri.IsDefaultPort
+            ? $"{authUri.Scheme}://{authUri.Host}"
+            : $"{authUri.Scheme}://{authUri.Host}:{authUri.Port}";
+        var realmName = "hidbridge-dev";
+        var path = authUri.AbsolutePath;
+        if (path.StartsWith("/realms/", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2)
+            {
+                realmName = parts[1];
+            }
+        }
+
+        if (options.IncludeWebRtcEdgeAgentSmoke && string.Equals(options.WebRtcCommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!options.AllowLegacyControlWs)
+            {
+                Console.Error.WriteLine("WebRtcCommandExecutor 'controlws' is legacy compatibility mode. Use 'uart' for production path, or pass -AllowLegacyControlWs explicitly.");
+                return 1;
+            }
+
+            if (!TestLegacyExp022Enabled())
+            {
+                Console.Error.WriteLine("run_demo_flow controlws mode is disabled. Set HIDBRIDGE_ENABLE_LEGACY_EXP022=true in your shell to run exp-022/controlws lab flows.");
+                return 1;
+            }
+            Console.WriteLine("WARNING: Legacy controlws executor enabled for demo-flow WebRTC validation (exp-022 compatibility mode).");
+        }
+
+        if (options.IncludeWebRtcEdgeAgentSmoke)
+        {
+            if (!effectiveReuse)
+            {
+                if (await TestApiHealthAsync(options.ApiBaseUrl))
+                {
+                    Console.WriteLine("WARNING: IncludeWebRtcEdgeAgentSmoke enabled: forcing service reuse to avoid restarting live WebRTC relay sessions.");
+                    effectiveReuse = true;
+                }
+                else
+                {
+                    Console.WriteLine($"WARNING: IncludeWebRtcEdgeAgentSmoke enabled but API is not healthy at {options.ApiBaseUrl.TrimEnd('/')}/health. Starting runtime services normally (no reuse).");
+                }
+            }
+
+            if (!effectiveSkipCiLocal)
+            {
+                Console.WriteLine("WARNING: IncludeWebRtcEdgeAgentSmoke enabled: skipping CI Local to avoid replacing the active API runtime during WebRTC relay validation.");
+                effectiveSkipCiLocal = true;
+            }
+        }
+
+        try
+        {
+            var apiUri = new Uri(options.ApiBaseUrl);
+            var webUri = new Uri(options.WebBaseUrl);
+            if (!effectiveReuse)
+            {
+                await StopPortListenersAsync(apiUri.Port, "API");
+                await StopPortListenersAsync(webUri.Port, "Web");
+            }
+
+            var skipDoctorInCi = false;
+            if (!options.SkipIdentityReset)
+            {
+                await RunScriptStepAsync(platformRoot, logRoot, results, "Identity Reset", "run_identity_reset.ps1", Array.Empty<string>());
+            }
+
+            if (!options.SkipDoctor)
+            {
+                var doctorRequireApi = !options.IncludeWebRtcEdgeAgentSmoke;
+                var doctorStartApiProbe = !options.IncludeWebRtcEdgeAgentSmoke;
+                var doctorArgs = new List<string>
+                {
+                    "-StartApiProbe", ToBoolLiteral(doctorStartApiProbe),
+                    "-RequireApi", ToBoolLiteral(doctorRequireApi),
+                    "-ApiConfiguration", options.Configuration,
+                    "-ApiPersistenceProvider", "Sql",
+                    "-ApiConnectionString", options.ConnectionString,
+                    "-ApiSchema", options.Schema,
+                    "-KeycloakBaseUrl", keycloakBaseUrl,
+                };
+                await RunScriptStepAsync(platformRoot, logRoot, results, "Doctor", "run_doctor.ps1", doctorArgs);
+                skipDoctorInCi = true;
+            }
+
+            if (!effectiveSkipCiLocal)
+            {
+                var ciArgs = new List<string>
+                {
+                    "-Configuration", options.Configuration,
+                    "-ConnectionString", options.ConnectionString,
+                    "-Schema", options.Schema,
+                    "-AuthAuthority", options.AuthAuthority,
+                    "-SkipDoctor", ToBoolLiteral(skipDoctorInCi),
+                };
+                await RunScriptStepAsync(platformRoot, logRoot, results, "CI Local", "run_ci_local.ps1", ciArgs);
+            }
+
+            if (options.IncludeFull)
+            {
+                var fullArgs = new List<string>
+                {
+                    "-Configuration", options.Configuration,
+                    "-ConnectionString", options.ConnectionString,
+                    "-Schema", options.Schema,
+                    "-AuthAuthority", options.AuthAuthority,
+                };
+                await RunScriptStepAsync(platformRoot, logRoot, results, "Full", "run_full.ps1", fullArgs);
+            }
+
+            if (!options.SkipServiceStartup)
+            {
+                serviceStartupAttempted = true;
+                var apiProjectPath = Path.Combine(repoRoot, "Platform", "Platform", "HidBridge.ControlPlane.Api", "HidBridge.ControlPlane.Api.csproj");
+                var webProjectPath = Path.Combine(repoRoot, "Platform", "Clients", "HidBridge.ControlPlane.Web", "HidBridge.ControlPlane.Web.csproj");
+
+                var apiEnvironment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["ASPNETCORE_ENVIRONMENT"] = "Development",
+                    ["ASPNETCORE_URLS"] = options.ApiBaseUrl,
+                    ["HIDBRIDGE_PERSISTENCE_PROVIDER"] = "Sql",
+                    ["HIDBRIDGE_SQL_CONNECTION"] = options.ConnectionString,
+                    ["HIDBRIDGE_SQL_SCHEMA"] = options.Schema,
+                    ["HIDBRIDGE_SQL_APPLY_MIGRATIONS"] = "true",
+                    ["HIDBRIDGE_AUTH_ENABLED"] = "true",
+                    ["HIDBRIDGE_AUTH_AUTHORITY"] = options.AuthAuthority,
+                    ["HIDBRIDGE_AUTH_AUDIENCE"] = "",
+                    ["HIDBRIDGE_AUTH_REQUIRE_HTTPS_METADATA"] = "false",
+                    ["HIDBRIDGE_AUTH_BEARER_ONLY_PREFIXES"] = "",
+                    ["HIDBRIDGE_AUTH_CALLER_CONTEXT_REQUIRED_PREFIXES"] = "",
+                    ["HIDBRIDGE_AUTH_HEADER_FALLBACK_DISABLED_PATTERNS"] = "",
+                };
+                if (options.IncludeWebRtcEdgeAgentSmoke)
+                {
+                    apiEnvironment["HIDBRIDGE_UART_PASSIVE_HEALTH_MODE"] = "true";
+                    apiEnvironment["HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE"] = "true";
+                    apiEnvironment["HIDBRIDGE_UART_PORT"] = "COM255";
+                    apiEnvironment["HIDBRIDGE_TRANSPORT_PROVIDER"] = "webrtc-datachannel";
+                    apiEnvironment["HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR"] = "false";
+                }
+
+                var apiRuntime = await StartDemoServiceAsync(
+                    platformRoot, repoRoot, logRoot, results, options, "Start API", apiProjectPath,
+                    options.ApiBaseUrl, new Uri(options.ApiBaseUrl).Host, new Uri(options.ApiBaseUrl).Port, "api-runtime",
+                    useHealthProbe: true, effectiveReuse, apiEnvironment);
+                runtimeServices.Add(apiRuntime);
+                if (apiRuntime.Process is not null)
+                {
+                    runtimeStarted.Add(apiRuntime);
+                }
+
+                await RunScriptStepAsync(
+                    platformRoot,
+                    logRoot,
+                    results,
+                    "Demo Seed",
+                    "run_demo_seed.ps1",
+                    [
+                        "-BaseUrl", options.ApiBaseUrl,
+                        "-KeycloakBaseUrl", keycloakBaseUrl,
+                        "-RealmName", realmName,
+                    ]);
+
+                var webrtcSessionEnvPath = Path.Combine(platformRoot, ".logs", "webrtc-peer-adapter.session.env");
+                var shouldBootstrapWebRtcStack = false;
+                if (options.IncludeWebRtcEdgeAgentSmoke)
+                {
+                    if (!effectiveReuse)
+                    {
+                        shouldBootstrapWebRtcStack = true;
+                    }
+                    else if (string.Equals(options.WebRtcCommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!await TestControlHealthAsync(options.WebRtcControlHealthUrl, Math.Max(1, options.WebRtcControlHealthAttempts), 500))
+                        {
+                            shouldBootstrapWebRtcStack = true;
+                        }
+                    }
+                    else if (!File.Exists(webrtcSessionEnvPath))
+                    {
+                        shouldBootstrapWebRtcStack = true;
+                    }
+                }
+
+                if (shouldBootstrapWebRtcStack)
+                {
+                    Console.WriteLine("WARNING: Bootstrapping WebRTC edge stack automatically for demo-flow WebRTC gate.");
+                    var bootstrapArgs = new List<string>
+                    {
+                        "-ApiBaseUrl", options.ApiBaseUrl,
+                        "-WebBaseUrl", options.WebBaseUrl,
+                        "-CommandExecutor", options.WebRtcCommandExecutor,
+                        "-SkipRuntimeBootstrap",
+                        "-SkipIdentityReset",
+                        "-SkipCiLocal",
+                        "-StopExisting",
+                    };
+                    if (options.AllowLegacyControlWs)
+                    {
+                        bootstrapArgs.Add("-AllowLegacyControlWs");
+                    }
+                    if (string.Equals(options.WebRtcCommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+                    {
+                        bootstrapArgs.Add("-ControlWsUrl");
+                        bootstrapArgs.Add(ConvertControlHealthToWebSocketUrl(options.WebRtcControlHealthUrl));
+                    }
+
+                    await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "WebRTC Stack Bootstrap", "webrtc-stack", bootstrapArgs);
+                }
+
+                if (options.IncludeWebRtcEdgeAgentSmoke
+                    && string.Equals(options.WebRtcCommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase)
+                    && !await TestControlHealthAsync(options.WebRtcControlHealthUrl, Math.Max(1, options.WebRtcControlHealthAttempts), 500))
+                {
+                    throw new InvalidOperationException($"WebRTC control health endpoint is still not ready after bootstrap: {options.WebRtcControlHealthUrl}");
+                }
+
+                if (!effectiveSkipDemoGate)
+                {
+                    var demoGateArgs = new List<string>
+                    {
+                        "-BaseUrl", options.ApiBaseUrl,
+                        "-KeycloakBaseUrl", keycloakBaseUrl,
+                        "-RealmName", realmName,
+                        "-OutputJsonPath", Path.Combine(logRoot, "demo-gate.result.json"),
+                    };
+                    if (options.IncludeWebRtcEdgeAgentSmoke)
+                    {
+                        demoGateArgs.AddRange(
+                        [
+                            "-TransportProvider", "webrtc-datachannel",
+                            "-ControlHealthUrl", options.WebRtcControlHealthUrl,
+                            "-RequestTimeoutSec", Math.Max(1, options.WebRtcRequestTimeoutSec).ToString(),
+                            "-ControlHealthAttempts", Math.Max(1, options.WebRtcControlHealthAttempts).ToString(),
+                            "-PrincipalId", "smoke-runner",
+                        ]);
+                        if (options.SkipTransportHealthCheck)
+                        {
+                            demoGateArgs.Add("-SkipTransportHealthCheck");
+                        }
+                        if (options.TransportHealthAttempts > 0)
+                        {
+                            demoGateArgs.Add("-TransportHealthAttempts");
+                            demoGateArgs.Add(Math.Max(1, options.TransportHealthAttempts).ToString());
+                        }
+                        if (options.TransportHealthDelayMs > 0)
+                        {
+                            demoGateArgs.Add("-TransportHealthDelayMs");
+                            demoGateArgs.Add(Math.Max(100, options.TransportHealthDelayMs).ToString());
+                        }
+                    }
+                    if (options.RequireDemoGateDeviceAck)
+                    {
+                        demoGateArgs.Add("-RequireDeviceAck");
+                        if (options.DemoGateKeyboardInterfaceSelector >= 0 && options.DemoGateKeyboardInterfaceSelector <= 255)
+                        {
+                            demoGateArgs.Add("-KeyboardInterfaceSelector");
+                            demoGateArgs.Add(options.DemoGateKeyboardInterfaceSelector.ToString());
+                        }
+                    }
+
+                    await RunScriptStepAsync(platformRoot, logRoot, results, "Demo Gate", "run_demo_gate.ps1", demoGateArgs);
+                }
+
+                if (options.IncludeWebRtcEdgeAgentSmoke)
+                {
+                    if (effectiveSkipDemoGate)
+                    {
+                        var smokeArgs = new List<string>
+                        {
+                            "-ApiBaseUrl", options.ApiBaseUrl,
+                            "-ControlHealthUrl", options.WebRtcControlHealthUrl,
+                            "-RequestTimeoutSec", Math.Max(1, options.WebRtcRequestTimeoutSec).ToString(),
+                            "-ControlHealthAttempts", Math.Max(1, options.WebRtcControlHealthAttempts).ToString(),
+                            "-SkipTransportHealthCheck", ToBoolLiteral(options.SkipTransportHealthCheck),
+                            "-TransportHealthAttempts", (options.TransportHealthAttempts > 0 ? Math.Max(1, options.TransportHealthAttempts) : 20).ToString(),
+                            "-TransportHealthDelayMs", (options.TransportHealthDelayMs > 0 ? Math.Max(100, options.TransportHealthDelayMs) : 500).ToString(),
+                            "-OutputJsonPath", Path.Combine(logRoot, "webrtc-edge-agent-smoke.result.json"),
+                        };
+                        await RunScriptStepAsync(platformRoot, logRoot, results, "WebRTC Edge Agent Smoke", "run_webrtc_edge_agent_smoke.ps1", smokeArgs);
+                    }
+                    else
+                    {
+                        Console.WriteLine("WARNING: Skipping standalone WebRTC Edge Agent Smoke step because Demo Gate already executed WebRTC transport validation in this run.");
+                    }
+                }
+
+                var webEnvironment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["ASPNETCORE_ENVIRONMENT"] = "Development",
+                    ["ASPNETCORE_URLS"] = options.WebBaseUrl,
+                    ["ControlPlaneApi__BaseUrl"] = options.ApiBaseUrl,
+                    ["ControlPlaneApi__PropagateAccessToken"] = "true",
+                    ["ControlPlaneApi__PropagateIdentityHeaders"] = "true",
+                    ["Identity__Enabled"] = "true",
+                    ["Identity__ProviderDisplayName"] = "Keycloak",
+                    ["Identity__Authority"] = options.AuthAuthority,
+                    ["Identity__ClientId"] = "controlplane-web",
+                    ["Identity__ClientSecret"] = "hidbridge-web-dev-secret",
+                    ["Identity__RequireHttpsMetadata"] = "false",
+                    ["Identity__DisablePushedAuthorization"] = "true",
+                    ["Identity__PrincipalClaimType"] = "principal_id",
+                    ["Identity__TenantClaimType"] = "tenant_id",
+                    ["Identity__OrganizationClaimType"] = "org_id",
+                    ["Identity__RoleClaimType"] = "role",
+                };
+                if (options.EnableCallerContextScope)
+                {
+                    webEnvironment["Identity__Scopes__0"] = "hidbridge-caller-context-v2";
+                }
+
+                var webRuntime = await StartDemoServiceAsync(
+                    platformRoot, repoRoot, logRoot, results, options, "Start Web", webProjectPath,
+                    options.WebBaseUrl, new Uri(options.WebBaseUrl).Host, new Uri(options.WebBaseUrl).Port, "web-runtime",
+                    useHealthProbe: false, effectiveReuse, webEnvironment);
+                runtimeServices.Add(webRuntime);
+                if (webRuntime.Process is not null)
+                {
+                    runtimeStarted.Add(webRuntime);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            var abortLogPath = Path.Combine(logRoot, "demo-flow.abort.log");
+            await File.AppendAllTextAsync(abortLogPath, ex + Environment.NewLine);
+            results.Add(new DemoFlowStepResult("Demo flow orchestration", "FAIL", 0, 1, abortLogPath));
+            Console.WriteLine();
+            Console.WriteLine($"Demo flow aborted: {ex.Message}");
+        }
+
+        WriteSummary(results, logRoot, "Demo Flow Summary");
+
+        if (runtimeServices.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Demo endpoints:");
+            foreach (var runtime in runtimeServices)
+            {
+                Console.WriteLine($"- {runtime.Name}: {runtime.BaseUrl}");
+            }
+
+            if (runtimeStarted.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Stop commands:");
+                foreach (var runtime in runtimeStarted)
+                {
+                    Console.WriteLine($"- Stop-Process -Id {runtime.Process!.Id}");
+                }
+            }
+        }
+        else if (serviceStartupAttempted)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Runtime services were already running; no new processes were started.");
+        }
+
+        return results.Any(static r => string.Equals(r.Status, "FAIL", StringComparison.OrdinalIgnoreCase)) ? 1 : 0;
+    }
+
+    private static async Task RunScriptStepAsync(
+        string platformRoot,
+        string logRoot,
+        List<DemoFlowStepResult> results,
+        string name,
+        string scriptFile,
+        IReadOnlyList<string> scriptArgs)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"=== {name} ===");
+        var stopwatch = Stopwatch.StartNew();
+        var logPath = Path.Combine(logRoot, $"{NormalizeName(name)}.log");
+        var invocation = await RuntimeCtlApp.RunScriptToLogAsync(platformRoot, Path.Combine("Scripts", scriptFile), scriptArgs, logPath);
+        stopwatch.Stop();
+        if (invocation.ExitCode != 0)
+        {
+            results.Add(new DemoFlowStepResult(name, "FAIL", stopwatch.Elapsed.TotalSeconds, invocation.ExitCode, logPath));
+            Console.WriteLine($"FAIL  {name}");
+            Console.WriteLine($"Log:   {logPath}");
+            throw new InvalidOperationException($"{name} failed with exit code {invocation.ExitCode}. See log: {logPath}");
+        }
+
+        results.Add(new DemoFlowStepResult(name, "PASS", stopwatch.Elapsed.TotalSeconds, 0, logPath));
+        Console.WriteLine($"PASS  {name}");
+        Console.WriteLine($"Log:   {logPath}");
+    }
+
+    private static async Task RunRuntimeCtlStepAsync(
+        string platformRoot,
+        string logRoot,
+        List<DemoFlowStepResult> results,
+        string name,
+        string command,
+        IReadOnlyList<string> commandArgs)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"=== {name} ===");
+        var stopwatch = Stopwatch.StartNew();
+        var logPath = Path.Combine(logRoot, $"{NormalizeName(name)}.log");
+
+        var runtimeCtlProject = Path.Combine(platformRoot, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = platformRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("run");
+        startInfo.ArgumentList.Add("--project");
+        startInfo.ArgumentList.Add(runtimeCtlProject);
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add("--platform-root");
+        startInfo.ArgumentList.Add(platformRoot);
+        startInfo.ArgumentList.Add(command);
+        foreach (var arg in commandArgs)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            results.Add(new DemoFlowStepResult(name, "FAIL", stopwatch.Elapsed.TotalSeconds, 1, logPath));
+            throw new InvalidOperationException($"Failed to start RuntimeCtl command '{command}'.");
+        }
+
+        var stdOutTask = process.StandardOutput.ReadToEndAsync();
+        var stdErrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var stdOut = await stdOutTask;
+        var stdErr = await stdErrTask;
+        stopwatch.Stop();
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? platformRoot);
+        await File.WriteAllTextAsync(logPath, $"{stdOut}{Environment.NewLine}{stdErr}".Trim());
+
+        if (process.ExitCode != 0)
+        {
+            results.Add(new DemoFlowStepResult(name, "FAIL", stopwatch.Elapsed.TotalSeconds, process.ExitCode, logPath));
+            Console.WriteLine($"FAIL  {name}");
+            Console.WriteLine($"Log:   {logPath}");
+            throw new InvalidOperationException($"{name} failed with exit code {process.ExitCode}. See log: {logPath}");
+        }
+
+        results.Add(new DemoFlowStepResult(name, "PASS", stopwatch.Elapsed.TotalSeconds, 0, logPath));
+        Console.WriteLine($"PASS  {name}");
+        Console.WriteLine($"Log:   {logPath}");
+    }
+
+    private static async Task<DemoRuntimeService> StartDemoServiceAsync(
+        string platformRoot,
+        string repoRoot,
+        string logRoot,
+        List<DemoFlowStepResult> results,
+        DemoFlowOptions options,
+        string name,
+        string projectPath,
+        string baseUrl,
+        string targetHost,
+        int port,
+        string category,
+        bool useHealthProbe,
+        bool reuseRunningService,
+        IReadOnlyDictionary<string, string> environment)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"=== {name} ===");
+        var stdoutLog = Path.Combine(logRoot, $"{category}.stdout.log");
+        var stderrLog = Path.Combine(logRoot, $"{category}.stderr.log");
+        EnsureEmptyFile(stdoutLog);
+        EnsureEmptyFile(stderrLog);
+
+        var sw = Stopwatch.StartNew();
+        if (await TestTcpPortAsync(targetHost, port))
+        {
+            if (reuseRunningService)
+            {
+                if (useHealthProbe && !await TestApiHealthAsync(baseUrl))
+                {
+                    throw new InvalidOperationException($"{name} reuse requested but health probe failed at {baseUrl.TrimEnd('/')}/health. Ensure runtime is running and healthy, or run without -ReuseRunningServices.");
+                }
+
+                sw.Stop();
+                results.Add(new DemoFlowStepResult(name, "PASS", sw.Elapsed.TotalSeconds, 0, stdoutLog));
+                Console.WriteLine($"PASS  {name}");
+                Console.WriteLine($"URL:   {baseUrl} (already running)");
+                return new DemoRuntimeService(name, baseUrl, Started: false, AlreadyRunning: true, Process: null, stdoutLog, stderrLog);
+            }
+
+            await StopPortListenersAsync(port, name);
+            await Task.Delay(500);
+            if (await TestTcpPortAsync(targetHost, port))
+            {
+                if (useHealthProbe && await TestApiHealthAsync(baseUrl))
+                {
+                    sw.Stop();
+                    results.Add(new DemoFlowStepResult(name, "PASS", sw.Elapsed.TotalSeconds, 0, stdoutLog));
+                    Console.WriteLine($"PASS  {name}");
+                    Console.WriteLine($"URL:   {baseUrl} (already running)");
+                    return new DemoRuntimeService(name, baseUrl, Started: false, AlreadyRunning: true, Process: null, stdoutLog, stderrLog);
+                }
+
+                throw new InvalidOperationException($"{name} could not claim port {port} because another process is still listening.");
+            }
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = repoRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("run");
+        startInfo.ArgumentList.Add("--project");
+        startInfo.ArgumentList.Add(projectPath);
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(options.Configuration);
+        startInfo.ArgumentList.Add("--no-launch-profile");
+        if (options.NoBuild)
+        {
+            startInfo.ArgumentList.Add("--no-build");
+        }
+        foreach (var entry in environment)
+        {
+            startInfo.Environment[entry.Key] = entry.Value;
+        }
+
+        var process = WebRtcStackCommand.StartRedirectedProcess(startInfo, stdoutLog, stderrLog);
+        var started = false;
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            await Task.Delay(500);
+            if (useHealthProbe)
+            {
+                if (await TestApiHealthAsync(baseUrl))
+                {
+                    started = true;
+                    break;
+                }
+            }
+            else
+            {
+                if (await TestTcpPortAsync(targetHost, port))
+                {
+                    started = true;
+                    break;
+                }
+            }
+
+            if (process.HasExited)
+            {
+                break;
+            }
+        }
+
+        sw.Stop();
+        if (started)
+        {
+            results.Add(new DemoFlowStepResult(name, "PASS", sw.Elapsed.TotalSeconds, 0, stdoutLog));
+            Console.WriteLine($"PASS  {name}");
+            Console.WriteLine($"URL:   {baseUrl}");
+            Console.WriteLine($"PID:   {process.Id}");
+            Console.WriteLine($"Out:   {stdoutLog}");
+            Console.WriteLine($"Err:   {stderrLog}");
+            return new DemoRuntimeService(name, baseUrl, Started: true, AlreadyRunning: false, process, stdoutLog, stderrLog);
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // ignore cleanup errors
+        }
+
+        results.Add(new DemoFlowStepResult(name, "FAIL", sw.Elapsed.TotalSeconds, 1, stderrLog));
+        Console.WriteLine($"FAIL  {name}");
+        Console.WriteLine($"Out:   {stdoutLog}");
+        Console.WriteLine($"Err:   {stderrLog}");
+        throw new InvalidOperationException($"{name} failed to start. See logs: {stdoutLog} / {stderrLog}");
+    }
+
+    private static async Task<bool> TestApiHealthAsync(string baseUrl)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var response = await http.GetAsync($"{baseUrl.TrimEnd('/')}/health");
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+            using var stream = await response.Content.ReadAsStreamAsync();
+            using var json = await JsonDocument.ParseAsync(stream);
+            return json.RootElement.TryGetProperty("status", out var status)
+                   && string.Equals(status.GetString(), "ok", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> TestControlHealthAsync(string url, int attempts, int delayMs)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        for (var attempt = 0; attempt < Math.Max(1, attempts); attempt++)
+        {
+            try
+            {
+                using var response = await http.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    using var stream = await response.Content.ReadAsStreamAsync();
+                    using var json = await JsonDocument.ParseAsync(stream);
+                    if (json.RootElement.TryGetProperty("ok", out var okProp)
+                        && (okProp.ValueKind is JsonValueKind.True or JsonValueKind.False))
+                    {
+                        if (okProp.GetBoolean())
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            await Task.Delay(Math.Max(100, delayMs));
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> TestTcpPortAsync(string host, int port, int timeoutMs = 1500)
+    {
+        using var client = new System.Net.Sockets.TcpClient();
+        try
+        {
+            var connectTask = client.ConnectAsync(host, port);
+            var timeoutTask = Task.Delay(timeoutMs);
+            var completed = await Task.WhenAny(connectTask, timeoutTask);
+            if (completed == timeoutTask)
+            {
+                return false;
+            }
+            await connectTask;
+            return client.Connected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task StopPortListenersAsync(int port, string label)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var script = $$"""
+            $port = {{port}}
+            $label = '{{label}}'
+            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+            foreach ($listenerPid in $listeners) {
+                if (-not $listenerPid -or $listenerPid -le 0) { continue }
+                try {
+                    $existingProcess = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue
+                    if ($null -eq $existingProcess) {
+                        Write-Warning "Preflight cleanup ($label): PID $listenerPid already stopped before port $port cleanup."
+                        continue
+                    }
+                    Stop-Process -Id $listenerPid -Force -ErrorAction Stop
+                    Write-Host "Preflight cleanup ($label): stopped listener PID $listenerPid on port $port."
+                } catch {
+                    $existingProcess = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue
+                    if ($null -eq $existingProcess) {
+                        Write-Warning "Preflight cleanup ($label): PID $listenerPid exited during port $port cleanup."
+                        continue
+                    }
+                    throw "Preflight cleanup ($label) failed to stop PID $listenerPid on port $port."
+                }
+            }
+            """;
+
+        var (shell, prefix) = ResolvePowerShellExecutable();
+        var psi = new ProcessStartInfo
+        {
+            FileName = shell,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var item in prefix)
+        {
+            psi.ArgumentList.Add(item);
+        }
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(script);
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            return;
+        }
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (!string.IsNullOrWhiteSpace(stdout))
+        {
+            Console.Write(stdout);
+        }
+        if (!string.IsNullOrWhiteSpace(stderr))
+        {
+            Console.Write(stderr);
+        }
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Preflight cleanup ({label}) failed for port {port}.");
+        }
+    }
+
+    private static (string Shell, IReadOnlyList<string> PrefixArgs) ResolvePowerShellExecutable()
+    {
+        static string? FindInPath(IReadOnlyList<string> names)
+        {
+            var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            var entries = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var name in names)
+            {
+                foreach (var entry in entries)
+                {
+                    var candidate = Path.Combine(entry, name);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+            return null;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var shell = FindInPath(["powershell.exe", "pwsh.exe"])
+                ?? throw new InvalidOperationException("Unable to locate powershell.exe or pwsh.exe in PATH.");
+            return (shell, ["-NoProfile", "-ExecutionPolicy", "Bypass"]);
+        }
+
+        var unixShell = FindInPath(["pwsh"])
+            ?? throw new InvalidOperationException("Unable to locate pwsh in PATH.");
+        return (unixShell, ["-NoProfile"]);
+    }
+
+    private static string ConvertControlHealthToWebSocketUrl(string controlHealthUrl)
+    {
+        var uri = new Uri(controlHealthUrl);
+        var builder = new UriBuilder(uri)
+        {
+            Scheme = string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws",
+            Path = uri.AbsolutePath.EndsWith("/health", StringComparison.OrdinalIgnoreCase)
+                ? uri.AbsolutePath[..^"/health".Length] + "/ws/control"
+                : "/ws/control",
+        };
+        return builder.Uri.AbsoluteUri;
+    }
+
+    private static bool TestLegacyExp022Enabled()
+    {
+        foreach (var candidate in ReadLegacyEnvCandidates("HIDBRIDGE_ENABLE_LEGACY_EXP022"))
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+            switch (candidate.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static IEnumerable<string?> ReadLegacyEnvCandidates(string name)
+    {
+        yield return Environment.GetEnvironmentVariable(name);
+        if (OperatingSystem.IsWindows())
+        {
+            string? user = null;
+            string? machine = null;
+            try { user = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User); } catch { }
+            try { machine = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine); } catch { }
+            yield return user;
+            yield return machine;
+        }
+    }
+
+    private static string ToBoolLiteral(bool value) => value ? "true" : "false";
+
+    private static string NormalizeName(string name)
+        => string.Concat(name.Select(ch => char.IsLetterOrDigit(ch) || ch is '.' or '_' or '-' ? ch : '-'))
+            .Trim('-');
+
+    private static void WriteSummary(IReadOnlyList<DemoFlowStepResult> results, string logRoot, string header)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"=== {header} ===");
+        Console.WriteLine();
+        Console.WriteLine($"{"Name",-28} {"Status",-6} {"Seconds",7} {"ExitCode",8}");
+        foreach (var result in results)
+        {
+            Console.WriteLine($"{result.Name,-28} {result.Status,-6} {result.Seconds,7:F2} {result.ExitCode,8}");
+        }
+        Console.WriteLine();
+        Console.WriteLine($"Logs root: {logRoot}");
+        foreach (var result in results)
+        {
+            Console.WriteLine($"{result.Name}: {result.LogPath}");
+        }
+    }
+
+    private static void EnsureEmptyFile(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Directory.GetCurrentDirectory());
+        File.WriteAllText(path, string.Empty);
+    }
+
+    private sealed record DemoFlowStepResult(string Name, string Status, double Seconds, int ExitCode, string LogPath);
+
+    private sealed record DemoRuntimeService(
+        string Name,
+        string BaseUrl,
+        bool Started,
+        bool AlreadyRunning,
+        Process? Process,
+        string StdoutLog,
+        string StderrLog);
+
+    private sealed class DemoFlowOptions
+    {
+        public string Configuration { get; set; } = "Debug";
+        public string ConnectionString { get; set; } = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge";
+        public string Schema { get; set; } = "hidbridge";
+        public string AuthAuthority { get; set; } = "http://127.0.0.1:18096/realms/hidbridge-dev";
+        public string ApiBaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string WebBaseUrl { get; set; } = "http://127.0.0.1:18110";
+        public bool SkipIdentityReset { get; set; }
+        public bool SkipDoctor { get; set; }
+        public bool SkipCiLocal { get; set; }
+        public bool IncludeFull { get; set; }
+        public bool SkipServiceStartup { get; set; }
+        public bool SkipDemoGate { get; set; }
+        public bool NoBuild { get; set; }
+        public bool ShowServiceWindows { get; set; }
+        public bool ReuseRunningServices { get; set; }
+        public bool EnableCallerContextScope { get; set; }
+        public bool RequireDemoGateDeviceAck { get; set; }
+        public int DemoGateKeyboardInterfaceSelector { get; set; } = -1;
+        public bool IncludeWebRtcEdgeAgentSmoke { get; set; }
+        public string WebRtcCommandExecutor { get; set; } = "uart";
+        public bool AllowLegacyControlWs { get; set; }
+        public string WebRtcControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
+        public int WebRtcRequestTimeoutSec { get; set; } = 15;
+        public int WebRtcControlHealthAttempts { get; set; } = 20;
+        public bool SkipTransportHealthCheck { get; set; }
+        public int TransportHealthAttempts { get; set; } = -1;
+        public int TransportHealthDelayMs { get; set; } = -1;
+
+        public static bool TryParse(IReadOnlyList<string> args, out DemoFlowOptions options, out string? error)
+        {
+            options = new DemoFlowOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+                switch (name.ToLowerInvariant())
+                {
+                    case "configuration": options.Configuration = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "connectionstring": options.ConnectionString = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "schema": options.Schema = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "authauthority": options.AuthAuthority = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "apibaseurl": options.ApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webbaseurl": options.WebBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "skipidentityreset": options.SkipIdentityReset = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipdoctor": options.SkipDoctor = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipcilocal": options.SkipCiLocal = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "includefull": options.IncludeFull = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipservicestartup": options.SkipServiceStartup = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "skipdemogate": options.SkipDemoGate = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "nobuild": options.NoBuild = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "showservicewindows": options.ShowServiceWindows = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "reuserunningservices": options.ReuseRunningServices = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "enablecallercontextscope": options.EnableCallerContextScope = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "requiredemogatedeviceack": options.RequireDemoGateDeviceAck = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "demogatekeyboardinterfaceselector": options.DemoGateKeyboardInterfaceSelector = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "includewebrtcedgeagentsmoke": options.IncludeWebRtcEdgeAgentSmoke = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "webrtccommandexecutor":
+                    case "webrtccommandeexecutor":
+                        options.WebRtcCommandExecutor = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "allowlegacycontrolws": options.AllowLegacyControlWs = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "webrtccontrolhealthurl": options.WebRtcControlHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "webrtcrequesttimeoutsec": options.WebRtcRequestTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "webrtccontrolhealthattempts": options.WebRtcControlHealthAttempts = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "skiptransporthealthcheck": options.SkipTransportHealthCheck = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "transporthealthattempts": options.TransportHealthAttempts = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "transporthealthdelayms": options.TransportHealthDelayMs = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    default:
+                        error = $"Unsupported demo-flow option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            if (!string.Equals(options.WebRtcCommandExecutor, "uart", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(options.WebRtcCommandExecutor, "controlws", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "WebRtcCommandExecutor must be 'uart' or 'controlws'.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static int ParseInt(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            var raw = RequireValue(name, value, ref index, ref hasValue, ref error);
+            if (error is not null)
+            {
+                return 0;
+            }
+            if (!int.TryParse(raw, out var parsed))
+            {
+                error = $"Option -{name} requires an integer value.";
+                return 0;
+            }
+            return parsed;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires boolean value true/false when explicitly set.";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
 }
 
 internal static class WebRtcAcceptanceCommand
