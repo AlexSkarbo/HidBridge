@@ -45,7 +45,7 @@ internal static class WebRtcAcceptanceCommand
             "net10.0",
             "HidBridge.Acceptance.Runner.dll");
 
-        if (options.StopExisting)
+        if (options.StopExisting || options.AutoCleanupStaleProcesses)
         {
             await ProcessCleanup.CleanupStaleEdgeProcessesAsync();
         }
@@ -78,6 +78,7 @@ internal static class WebRtcAcceptanceCommand
             "--uart-hmac-key", options.UartHmacKey,
             "--principal-id", options.PrincipalId,
             "--peer-ready-timeout-sec", options.PeerReadyTimeoutSec.ToString(),
+            "--stack-bootstrap-timeout-sec", options.StackBootstrapTimeoutSec.ToString(),
             "--output-json-path", options.OutputJsonPath,
         };
 
@@ -182,23 +183,54 @@ internal static class WebRtcAcceptanceCommand
         }
         catch (TimeoutException)
         {
-            try
+            await TerminateAcceptanceProcessAsync(process);
+            if (options.AutoCleanupStaleProcesses)
             {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch
-            {
-                // best-effort kill
+                await ProcessCleanup.CleanupStaleEdgeProcessesAsync();
             }
 
             Console.Error.WriteLine($"WebRTC acceptance exceeded timeout ({(int)maxDuration.TotalSeconds}s) and was terminated.");
             return 1;
         }
 
-        return process.ExitCode;
+        var exitCode = process.ExitCode;
+        if (exitCode != 0 && options.AutoCleanupStaleProcesses)
+        {
+            await ProcessCleanup.CleanupStaleEdgeProcessesAsync();
+        }
+
+        return exitCode;
+    }
+
+    private static async Task TerminateAcceptanceProcessAsync(Process process)
+    {
+        if (process.HasExited)
+        {
+            return;
+        }
+
+        try
+        {
+            process.Kill(entireProcessTree: false);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            return;
+        }
+        catch
+        {
+            // Escalate to tree kill.
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // best-effort kill
+        }
     }
 
     private static async Task<int> RunDotnetAsync(string workingDirectory, IReadOnlyList<string> args)
@@ -261,6 +293,8 @@ internal static class WebRtcAcceptanceCommand
         public bool SkipRuntimeBootstrap { get; set; }
         public bool StopExisting { get; set; }
         public bool StopStackAfter { get; set; }
+        public bool AutoCleanupStaleProcesses { get; set; } = true;
+        public int StackBootstrapTimeoutSec { get; set; } = 90;
         public int MaxDurationSec { get; set; } = 600;
         public string OutputJsonPath { get; set; } = ".logs/webrtc-edge-agent-acceptance.result.json";
 
@@ -324,6 +358,8 @@ internal static class WebRtcAcceptanceCommand
                     case "skipruntimebootstrap": options.SkipRuntimeBootstrap = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "stopexisting": options.StopExisting = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "stopstackafter": options.StopStackAfter = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "autocleanupstaleprocesses": options.AutoCleanupStaleProcesses = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "stackbootstraptimeoutsec": options.StackBootstrapTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "maxdurationsec": options.MaxDurationSec = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "outputjsonpath": options.OutputJsonPath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     default:

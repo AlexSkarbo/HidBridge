@@ -385,7 +385,7 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
 
     var stdOutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
     var stdErrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-    var bootstrapTimeout = TimeSpan.FromSeconds(Math.Max(30, options.RequestTimeoutSec * 6));
+    var bootstrapTimeout = TimeSpan.FromSeconds(Math.Max(30, options.StackBootstrapTimeoutSec));
     Console.WriteLine($"Waiting for WebRTC stack summary ({bootstrapTimeout.TotalSeconds:0}s timeout)...");
     var startedAt = DateTimeOffset.UtcNow;
     var nextProgressAt = startedAt.AddSeconds(15);
@@ -411,7 +411,7 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
         {
             try
             {
-                process.Kill(entireProcessTree: false);
+                process.Kill(entireProcessTree: true);
             }
             catch
             {
@@ -1156,6 +1156,7 @@ internal sealed class AcceptanceRunnerOptions
     public string TokenUsername { get; private set; } = "operator.smoke.admin";
     public string TokenPassword { get; private set; } = "ChangeMe123!";
     public int RequestTimeoutSec { get; private set; } = 15;
+    public int StackBootstrapTimeoutSec { get; private set; } = 90;
     public int ControlHealthAttempts { get; private set; } = 20;
     public int KeycloakHealthAttempts { get; private set; } = 60;
     public int KeycloakHealthDelayMs { get; private set; } = 500;
@@ -1243,6 +1244,7 @@ internal sealed class AcceptanceRunnerOptions
                 case "token-username": options.TokenUsername = RequireValue(args, ref i, arg); break;
                 case "token-password": options.TokenPassword = RequireValue(args, ref i, arg); break;
                 case "request-timeout-sec": options.RequestTimeoutSec = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "stack-bootstrap-timeout-sec": options.StackBootstrapTimeoutSec = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "control-health-attempts": options.ControlHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "control-health-delay-ms": options.ControlHealthDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "keycloak-health-attempts": options.KeycloakHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;

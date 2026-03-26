@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (webrtc-acceptance timeout/cleanup hardening in native RuntimeCtl)
+
+Summary:
+
+- Hardened native `webrtc-acceptance` against long hangs and stale process buildup:
+  - added explicit stack-bootstrap timeout option passed from RuntimeCtl to Acceptance runner,
+  - changed bootstrap timeout handling to terminate the whole process tree,
+  - added automatic stale-process cleanup on timeout/failure (not only with `-StopExisting`).
+- Added RuntimeCtl options for operational tuning:
+  - `-StackBootstrapTimeoutSec` (default `90`),
+  - `-AutoCleanupStaleProcesses` (default `true`).
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/WebRtcAcceptanceCommand.cs`
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+
 ## 2026-03-26 (ci-first gate: native RuntimeCtl workflow + strict no-PS policy)
 
 Summary:
