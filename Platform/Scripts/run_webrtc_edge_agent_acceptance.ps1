@@ -1,4 +1,5 @@
 param(
+    [Alias("BaseUrl")]
     [string]$ApiBaseUrl = "http://127.0.0.1:18093",
     [ValidateSet("uart", "controlws")]
     [string]$CommandExecutor = "uart",
@@ -33,73 +34,106 @@ param(
     [switch]$SkipRuntimeBootstrap,
     [switch]$StopExisting,
     [switch]$StopStackAfter,
-    [string]$OutputJsonPath = "Platform/.logs/webrtc-edge-agent-acceptance.result.json"
+    [string]$OutputJsonPath = "Platform/.logs/webrtc-edge-agent-acceptance.result.json",
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ForwardArgs
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$platformRoot = Split-Path -Parent $scriptsRoot
-$runnerProject = Join-Path $platformRoot "Tools/HidBridge.Acceptance.Runner/HidBridge.Acceptance.Runner.csproj"
+function Add-BoundParametersToArgumentList {
+    param(
+        [hashtable]$Bound,
+        [System.Collections.Generic.List[string]]$Target,
+        [string[]]$Excluded
+    )
 
-if (-not (Test-Path -Path $runnerProject -PathType Leaf)) {
-    throw "Acceptance runner project not found: $runnerProject"
+    $excludedLookup = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $Excluded) {
+        [void]$excludedLookup.Add($item)
+    }
+
+    foreach ($entry in $Bound.GetEnumerator()) {
+        $name = [string]$entry.Key
+        if ($excludedLookup.Contains($name)) {
+            continue
+        }
+
+        $value = $entry.Value
+        if ($null -eq $value) {
+            continue
+        }
+
+        if ($value -is [System.Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) {
+                $Target.Add("-$name") | Out-Null
+            }
+            continue
+        }
+
+        if ($value -is [bool]) {
+            $Target.Add("-$name") | Out-Null
+            $Target.Add($value.ToString().ToLowerInvariant()) | Out-Null
+            continue
+        }
+
+        if ($value -is [System.Array]) {
+            foreach ($element in $value) {
+                if ($null -eq $element) {
+                    continue
+                }
+
+                $text = [string]$element
+                if ([string]::IsNullOrWhiteSpace($text)) {
+                    continue
+                }
+
+                $Target.Add("-$name") | Out-Null
+                $Target.Add($text) | Out-Null
+            }
+            continue
+        }
+
+        $Target.Add("-$name") | Out-Null
+        $Target.Add([string]$value) | Out-Null
+    }
 }
 
-$runnerArgs = @(
-    "--platform-root", $platformRoot,
-    "--api-base-url", $ApiBaseUrl,
-    "--command-executor", $CommandExecutor,
-    "--control-health-url", $ControlHealthUrl,
-    "--keycloak-base-url", $KeycloakBaseUrl,
-    "--realm-name", $RealmName,
-    "--token-client-id", $TokenClientId,
-    "--token-username", $TokenUsername,
-    "--token-password", $TokenPassword,
-    "--request-timeout-sec", [string]$RequestTimeoutSec,
-    "--control-health-attempts", [string]$ControlHealthAttempts,
-    "--keycloak-health-attempts", [string]$KeycloakHealthAttempts,
-    "--keycloak-health-delay-ms", [string]$KeycloakHealthDelayMs,
-    "--token-request-attempts", [string]$TokenRequestAttempts,
-    "--token-request-delay-ms", [string]$TokenRequestDelayMs,
-    "--transport-health-attempts", [string]$TransportHealthAttempts,
-    "--transport-health-delay-ms", [string]$TransportHealthDelayMs,
-    "--media-health-attempts", [string]$MediaHealthAttempts,
-    "--media-health-delay-ms", [string]$MediaHealthDelayMs,
-    "--uart-port", $UartPort,
-    "--uart-baud", [string]$UartBaud,
-    "--uart-hmac-key", $UartHmacKey,
-    "--principal-id", $PrincipalId,
-    "--peer-ready-timeout-sec", [string]$PeerReadyTimeoutSec,
-    "--output-json-path", $OutputJsonPath
-)
-
-if ($AllowLegacyControlWs) { $runnerArgs += "--allow-legacy-controlws" }
-if ($SkipTransportHealthCheck) { $runnerArgs += "--skip-transport-health-check" }
-if ($RequireMediaReady) { $runnerArgs += "--require-media-ready" }
-if ($RequireMediaPlaybackUrl) { $runnerArgs += "--require-media-playback-url" }
-if (-not [string]::IsNullOrWhiteSpace($TokenClientSecret)) {
-    $runnerArgs += "--token-client-secret"
-    $runnerArgs += $TokenClientSecret
-}
-if (-not [string]::IsNullOrWhiteSpace($TokenScope)) {
-    $runnerArgs += "--token-scope"
-    $runnerArgs += $TokenScope
-}
-if ($SkipRuntimeBootstrap) { $runnerArgs += "--skip-runtime-bootstrap" }
-if ($StopExisting) { $runnerArgs += "--stop-existing" }
-if ($StopStackAfter) { $runnerArgs += "--stop-stack-after" }
-if (-not [string]::IsNullOrWhiteSpace($ControlWsUrl)) {
-    $runnerArgs += "--control-ws-url"
-    $runnerArgs += $ControlWsUrl
+$platformRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$runtimeCtlProject = Join-Path $platformRoot "Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj"
+if (-not (Test-Path $runtimeCtlProject)) {
+    throw "RuntimeCtl project not found: $runtimeCtlProject"
 }
 
-$arguments = @("run", "--project", $runnerProject, "-c", "Debug", "--") + $runnerArgs
-& dotnet @arguments
-
-if ($null -eq $LASTEXITCODE) {
-    exit 1
+$dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($null -eq $dotnet) {
+    throw "dotnet CLI not found in PATH"
 }
 
-exit $LASTEXITCODE
+$arguments = [System.Collections.Generic.List[string]]::new()
+$arguments.Add("run") | Out-Null
+$arguments.Add("--project") | Out-Null
+$arguments.Add($runtimeCtlProject) | Out-Null
+$arguments.Add("--") | Out-Null
+$arguments.Add("--platform-root") | Out-Null
+$arguments.Add($platformRoot) | Out-Null
+$arguments.Add("webrtc-acceptance") | Out-Null
+
+Add-BoundParametersToArgumentList -Bound $PSBoundParameters -Target $arguments -Excluded @("ForwardArgs")
+
+if ($null -ne $ForwardArgs) {
+    foreach ($argument in $ForwardArgs) {
+        if (-not [string]::IsNullOrWhiteSpace($argument)) {
+            $arguments.Add($argument) | Out-Null
+        }
+    }
+}
+
+& $dotnet.Source @arguments
+$exitCode = $LASTEXITCODE
+if ($null -eq $exitCode) {
+    $exitCode = 1
+}
+
+exit $exitCode

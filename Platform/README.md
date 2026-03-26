@@ -823,7 +823,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- platform-runtime -- -Action up -Build`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task ops-slo-security-verify -- -BaseUrl http://127.0.0.1:18093`
   - current mode is a compatibility bridge: `RuntimeCtl` invokes existing `run_*.ps1` entrypoints while we remove script orchestration step-by-step.
-- `Platform/Scripts/run_ci_local.ps1` and `Platform/Scripts/run_full.ps1` are compatibility wrappers that forward to native RuntimeCtl commands.
+- `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, and `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1` are compatibility wrappers that forward to native RuntimeCtl commands.
 - top-level `Platform/run_*.ps1` files are compatibility wrappers that forward to `Platform/Scripts/`.
 
 

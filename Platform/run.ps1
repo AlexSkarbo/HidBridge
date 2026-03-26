@@ -154,6 +154,8 @@ $arguments.Add($PSScriptRoot) | Out-Null
 if ([string]::Equals($Task, "ci-local", [System.StringComparison]::OrdinalIgnoreCase) -or
     [string]::Equals($Task, "full", [System.StringComparison]::OrdinalIgnoreCase)) {
     $arguments.Add($Task) | Out-Null
+} elseif ([string]::Equals($Task, "webrtc-edge-agent-acceptance", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $arguments.Add("webrtc-acceptance") | Out-Null
 } else {
     $arguments.Add("task") | Out-Null
     $arguments.Add($Task) | Out-Null
