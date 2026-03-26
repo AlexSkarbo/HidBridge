@@ -156,6 +156,8 @@ if ([string]::Equals($Task, "ci-local", [System.StringComparison]::OrdinalIgnore
     $arguments.Add($Task) | Out-Null
 } elseif ([string]::Equals($Task, "webrtc-edge-agent-acceptance", [System.StringComparison]::OrdinalIgnoreCase)) {
     $arguments.Add("webrtc-acceptance") | Out-Null
+} elseif ([string]::Equals($Task, "ops-slo-security-verify", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $arguments.Add("ops-verify") | Out-Null
 } else {
     $arguments.Add("task") | Out-Null
     $arguments.Add($Task) | Out-Null
