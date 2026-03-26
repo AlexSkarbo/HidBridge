@@ -36,24 +36,20 @@ internal sealed class RuntimeCtlApp
     private static readonly IReadOnlyDictionary<string, string> TaskMap =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["checks"] = "run_checks.ps1",
-            ["tests"] = "run_all_tests.ps1",
-            ["smoke"] = "run_smoke.ps1",
-            ["smoke-file"] = "run_file_smoke.ps1",
-            ["smoke-sql"] = "run_sql_smoke.ps1",
-            ["smoke-bearer"] = "run_api_bearer_smoke.ps1",
-            ["clean-logs"] = "run_clean_logs.ps1",
-            ["export-artifacts"] = "run_export_artifacts.ps1",
-            ["token-debug"] = "run_token_debug.ps1",
-            ["bearer-rollout"] = "run_bearer_rollout_phase.ps1",
-            ["identity-onboard"] = "run_identity_onboard.ps1",
-            ["demo-seed"] = "run_demo_seed.ps1",
-            ["uart-diagnostics"] = "run_uart_diagnostics.ps1",
-            ["webrtc-relay-smoke"] = "run_webrtc_relay_smoke.ps1",
-            ["webrtc-peer-adapter"] = "run_webrtc_peer_adapter.ps1",
-            ["webrtc-stack-terminal-b"] = "run_webrtc_stack_terminal_b.ps1",
-            ["close-failed-rooms"] = "run_close_failed_rooms.ps1",
-            ["close-stale-rooms"] = "run_close_stale_rooms.ps1",
+            ["tests"] = "Scripts/run_all_tests.ps1",
+            ["smoke"] = "Scripts/run_smoke.ps1",
+            ["smoke-file"] = "Scripts/run_file_smoke.ps1",
+            ["smoke-sql"] = "Scripts/run_sql_smoke.ps1",
+            ["clean-logs"] = "Scripts/run_clean_logs.ps1",
+            ["token-debug"] = "Scripts/run_token_debug.ps1",
+            ["bearer-rollout"] = "Scripts/run_bearer_rollout_phase.ps1",
+            ["identity-onboard"] = "Identity/Keycloak/Onboard-HidBridgeOperator.ps1",
+            ["demo-seed"] = "Scripts/run_demo_seed.ps1",
+            ["uart-diagnostics"] = "Scripts/run_uart_diagnostics.ps1",
+            ["webrtc-relay-smoke"] = "Scripts/run_webrtc_relay_smoke.ps1",
+            ["webrtc-peer-adapter"] = "Scripts/run_webrtc_peer_adapter.ps1",
+            ["close-failed-rooms"] = "Scripts/run_close_failed_rooms.ps1",
+            ["close-stale-rooms"] = "Scripts/run_close_stale_rooms.ps1",
             ["platform-runtime"] = "Scripts/run_platform_runtime_profile.ps1",
         };
 
@@ -531,9 +527,9 @@ internal static class DoctorCommand
                 File.Exists(Path.Combine(platformRoot, "Identity", "Keycloak", "realm-import", "hidbridge-dev-realm.json")) ? "PASS" : "FAIL",
                 "realm import present");
             AddCheck(
-                "smoke-client-wrapper",
-                File.Exists(Path.Combine(platformRoot, "run_api_bearer_smoke.ps1")) ? "PASS" : "FAIL",
-                "bearer smoke wrapper present");
+                "smoke-script",
+                File.Exists(Path.Combine(platformRoot, "Scripts", "run_api_bearer_smoke.ps1")) ? "PASS" : "FAIL",
+                "bearer smoke script present");
 
             if (keycloakPortOk)
             {
@@ -4539,7 +4535,7 @@ internal static class DemoFlowCommand
                     "-AuthAuthority", options.AuthAuthority,
                     "-SkipDoctor", ToBoolLiteral(skipDoctorInCi),
                 };
-                await RunScriptStepAsync(platformRoot, logRoot, results, "CI Local", "run_ci_local.ps1", ciArgs);
+                await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "CI Local", "ci-local", ciArgs);
             }
 
             if (options.IncludeFull)
@@ -4551,7 +4547,7 @@ internal static class DemoFlowCommand
                     "-Schema", options.Schema,
                     "-AuthAuthority", options.AuthAuthority,
                 };
-                await RunScriptStepAsync(platformRoot, logRoot, results, "Full", "run_full.ps1", fullArgs);
+                await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "Full", "full", fullArgs);
             }
 
             if (!options.SkipServiceStartup)
@@ -4600,7 +4596,7 @@ internal static class DemoFlowCommand
                     logRoot,
                     results,
                     "Demo Seed",
-                    "run_demo_seed.ps1",
+                    "Scripts/run_demo_seed.ps1",
                     [
                         "-BaseUrl", options.ApiBaseUrl,
                         "-KeycloakBaseUrl", keycloakBaseUrl,
@@ -4723,7 +4719,7 @@ internal static class DemoFlowCommand
                             "-TransportHealthDelayMs", (options.TransportHealthDelayMs > 0 ? Math.Max(100, options.TransportHealthDelayMs) : 500).ToString(),
                             "-OutputJsonPath", Path.Combine(logRoot, "webrtc-edge-agent-smoke.result.json"),
                         };
-                        await RunScriptStepAsync(platformRoot, logRoot, results, "WebRTC Edge Agent Smoke", "run_webrtc_edge_agent_smoke.ps1", smokeArgs);
+                        await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "WebRTC Edge Agent Smoke", "webrtc-edge-agent-smoke", smokeArgs);
                     }
                     else
                     {

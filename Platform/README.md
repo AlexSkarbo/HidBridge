@@ -243,25 +243,17 @@ Developer request examples:
 - `Platform/Platform/HidBridge.ControlPlane.Api/HidBridge.ControlPlane.Api.http`
 
 Test entrypoint:
-- `Platform/run_all_tests.ps1`
-- `Platform/run_checks.ps1`
-- `Platform/run_smoke.ps1`
-- `Platform/run_backend_smoke.ps1`
-- `Platform/run_file_smoke.ps1`
-- `Platform/run_sql_smoke.ps1`
-- `Platform/run_demo_flow.ps1`
-- `Platform/run_demo_gate.ps1`
-- `Platform/run_uart_diagnostics.ps1`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform checks`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-smoke`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full`
+- compatibility shim: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task <task-name>`
 - The runner restores the solution, builds it, and then runs `HidBridge.Platform.Tests`.
-- `Platform/run_checks.ps1` runs the unit-test pipeline first and then runs the selected smoke profile.
-- `Platform/run_smoke.ps1` is the single entrypoint wrapper that dispatches to file or SQL smoke validation.
-- `Platform/run_backend_smoke.ps1` is the canonical smoke runner for both persistence providers.
-- `Platform/run_file_smoke.ps1` wraps the generic smoke runner with `HIDBRIDGE_PERSISTENCE_PROVIDER=File` and an isolated data root.
-- `Platform/run_sql_smoke.ps1` wraps the generic smoke runner with `HIDBRIDGE_PERSISTENCE_PROVIDER=Sql`, applies migrations, probes `/health`, opens one session, and reads back persisted snapshots.
-- `Platform/run_demo_gate.ps1` runs the deterministic demo gate (`open session -> request control -> dispatch command -> verify journal -> close session`).
+- `checks` runs the unit-test pipeline first and then runs the selected smoke profile.
+- `demo-gate` runs the deterministic demo gate (`open session -> request control -> dispatch command -> verify journal -> close session`).
   - default mode is transport-agnostic (`action=noop`) and validates auth/session/control/journal pipeline deterministically.
   - use `-RequireDeviceAck` only when you explicitly want UART device-ack validation.
-- `Platform/run_uart_diagnostics.ps1` runs a selector sweep (`itfSel`) across multiple command scenarios (`keyboard.shortcut`, `keyboard.text`, `mouse.move`, `keyboard.reset`) and prints a consolidated matrix.
+- `task uart-diagnostics` runs a selector sweep (`itfSel`) across multiple command scenarios (`keyboard.shortcut`, `keyboard.text`, `mouse.move`, `keyboard.reset`) and prints a consolidated matrix.
 - Collaboration tests validate:
   - participant upsert/remove
   - share grant/accept/revoke
@@ -307,15 +299,15 @@ Local PostgreSQL for Platform:
 - Default connection string for that container:
   - `Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge`
 - Example unified smoke-run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_smoke.ps1 -Provider File`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_smoke.ps1 -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke -Provider File`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 - Example full checks run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_checks.ps1 -Provider File`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_checks.ps1 -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks -Provider File`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 - Example file smoke-run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_file_smoke.ps1`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-file`
 - Example smoke-run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_sql_smoke.ps1 -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 
 Docker runtime profile (step `21`):
 - unified container profile:
@@ -523,7 +515,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
 - task entry:
   - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`
 - direct wrapper:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run_webrtc_peer_adapter.ps1 -AllowLegacyControlWs -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
+  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
 - behavior:
   - auto-creates session when `-SessionId` is missing (reuses ready endpoint; provider=`webrtc-datachannel`)
   - marks peer online via `/transport/webrtc/peers/{peerId}/online`
@@ -679,7 +671,8 @@ Keycloak dev realm sync:
 
 
 Protected non-web API smoke:
-- `Platform/run_api_bearer_smoke.ps1`
+- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-smoke`
+- або direct: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-smoke`
 - if `-AccessToken "<token>"`, `-AccessToken "auto"` or empty token mode is used, the script acquires dev JWTs from Keycloak automatically
 - if `-AccessToken` contains a real JWT, the script uses that token as-is
 - auto mode uses Keycloak dev client:
@@ -692,7 +685,7 @@ Protected non-web API smoke:
   - summary
   - data root
   - log/result file paths
-- `Platform/run_token_debug.ps1` acquires or inspects a JWT and writes:
+- `task token-debug` acquires or inspects a JWT and writes:
   - access token header/payload
   - raw token response
   - optional `id_token` header/payload
@@ -745,7 +738,7 @@ Policy governance diagnostics:
   - `shares / participants`
   - `commands`
 - smoke/direct-grant token scripts тепер запитують `openid profile email`, щоб bearer-first контур отримував richer OIDC claims без `invalid_scope` на dev Keycloak baseline.
-- `run_doctor.ps1` тепер показує окремий сигнал `smoke-claims`, щоб було видно, чи bearer token вже містить достатній caller context.
+- `doctor` тепер показує окремий сигнал `smoke-claims`, щоб було видно, чи bearer token вже містить достатній caller context.
 - safe staged profile для `HIDBRIDGE_AUTH_HEADER_FALLBACK_DISABLED_PATTERNS` описано в:
   - `Docs/SystemArchitecture/HidBridge_Bearer_Rollout_Profile_UA.md`
 - для контрольованого reset/reimport dev realm додано:
@@ -815,15 +808,15 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ops-verify -- -BaseUrl http://127.0.0.1:18093`
 - `Platform/run.ps1` remains a minimal compatibility shim (legacy task syntax -> RuntimeCtl).
 - `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`, `Platform/Scripts/run_ops_slo_security_verify.ps1`, `Platform/Scripts/run_demo_flow.ps1`, and `Platform/Scripts/run_webrtc_stack.ps1` are thin wrappers over RuntimeCtl.
-- top-level `Platform/run_*.ps1` files remain compatibility wrappers for existing operator habits.
+- top-level `Platform/run_*.ps1` wrappers were removed; use `Platform/run.ps1 -Task <name>` or direct RuntimeCtl commands.
 
 
 **Operational Helpers**
-- `Platform/run_doctor.ps1` checks local prerequisites: `.NET`, Keycloak port, PostgreSQL port, API port, realm artifacts, and smoke wrapper presence.
+- `doctor` checks local prerequisites: `.NET`, Keycloak port, PostgreSQL port, API port, realm artifacts, and smoke script presence.
 - `Ops Status` in `HidBridge.ControlPlane.Web` now surfaces latest local operational artifacts via `/ops-artifacts/file?...`.
-- `Platform/run_clean_logs.ps1` prunes old `Platform/.logs` and, optionally, `Platform/.smoke-data`.
+- `task clean-logs` prunes old `Platform/.logs` and, optionally, `Platform/.smoke-data`.
 - `Platform/Scripts/Common/ScriptCommon.ps1` contains shared logging and operational helper functions used by the script suite.
-- `Platform/run_ops_slo_security_verify.ps1` performs the SLO/security verify lane used by `ci-local`/`full`:
+- `ops-verify` performs the SLO/security verify lane used by `ci-local`/`full`:
   - `ci-local` now includes `Ops SLO + Security Verify` by default.
   - emergency/local bypass only:
     - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -SkipOpsSloSecurityVerify`
@@ -831,20 +824,20 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task doctor -- -StartApiProbe -RequireApi`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task clean-logs -- -KeepDays 5 -IncludeSmokeData`
 
-- `Platform/run_doctor.ps1` now supports:
+- `doctor` now supports:
   - `-RequireApi` to fail if API is not running
   - `-StartApiProbe` to start `ControlPlane.Api`, probe `/health`, and stop it
   - live `Keycloak` checks for realm, `controlplane-smoke`, and smoke users
 
-- `Platform/run_ci_local.ps1` runs a practical local CI sequence:
+- `ci-local` runs a practical local CI sequence:
   - `doctor -StartApiProbe -RequireApi`
-  - `run_checks.ps1 -Provider Sql`
-  - `run_api_bearer_smoke.ps1`
-  - `run_all_tests.ps1` includes hosted lease-orchestration integration coverage:
+  - `checks -Provider Sql`
+  - `bearer-smoke`
+  - `checks` includes hosted lease-orchestration integration coverage:
     - `HostedWebRtcFullStackIntegrationTests` (happy path + deterministic lease-conflict propagation)
   - mandatory WebRTC edge-agent acceptance lane (CI gate):
     - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -WebRtcCommandExecutor uart`
-    - acceptance now uses dedicated `.NET` orchestration runner (`Platform/Tools/HidBridge.Acceptance.Runner`) via thin wrapper `run_webrtc_edge_agent_acceptance.ps1`: starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
+    - acceptance now uses dedicated `.NET` orchestration runner (`Platform/Tools/HidBridge.Acceptance.Runner`): starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
     - mandatory media E2E gate inside acceptance:
       - requires `mediaReady=true` and non-empty `mediaPlaybackUrl`/`playbackUrl` within bounded retries
       - tune with `-WebRtcMediaHealthAttempts` / `-WebRtcMediaHealthDelayMs` (or launcher-level `-MediaHealthAttempts` / `-MediaHealthDelayMs`)
@@ -852,7 +845,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
     - optional timeout tuning for acceptance lane: `-PeerReadyTimeoutSec 45` (mapped to `-WebRtcPeerReadyTimeoutSec` for `ci-local`/`full`).
     - emergency/local override only: `-SkipWebRtcEdgeAgentAcceptance`
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`
-- `Platform/run_export_artifacts.ps1` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
+- `export-artifacts` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
 - additional unified launcher examples:
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task export-artifacts -- -IncludeSmokeData -IncludeBackups`
@@ -860,11 +853,6 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 Unified full run:
 ```powershell
 dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full
-```
-
-Direct wrapper:
-```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run_full.ps1
 ```
 
 What it does:

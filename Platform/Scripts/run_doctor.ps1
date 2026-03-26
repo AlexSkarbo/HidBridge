@@ -140,7 +140,7 @@ try {
 
     Add-DoctorResult -Name "realm-sync-script" -Status ($(if (Test-Path (Join-Path $platformRoot "Identity/Keycloak/Sync-HidBridgeDevRealm.ps1")) { "PASS" } else { "FAIL" })) -Message "realm sync script present"
     Add-DoctorResult -Name "realm-import" -Status ($(if (Test-Path (Join-Path $platformRoot "Identity/Keycloak/realm-import/hidbridge-dev-realm.json")) { "PASS" } else { "FAIL" })) -Message "realm import present"
-    Add-DoctorResult -Name "smoke-client-wrapper" -Status ($(if (Test-Path (Join-Path $platformRoot "run_api_bearer_smoke.ps1")) { "PASS" } else { "FAIL" })) -Message "bearer smoke wrapper present"
+    Add-DoctorResult -Name "smoke-script" -Status ($(if (Test-Path (Join-Path $platformRoot "Scripts/run_api_bearer_smoke.ps1")) { "PASS" } else { "FAIL" })) -Message "bearer smoke script present"
 
     if ($keycloakPortOk) {
         $adminToken = Get-KeycloakAdminToken -BaseUrl $KeycloakBaseUrl -AdminRealm "master" -AdminUser $AdminUser -AdminPassword $AdminPassword

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (final cleanup: removed top-level run_*.ps1 wrappers)
+
+Summary:
+
+- Removed obsolete top-level `Platform/run_*.ps1` wrapper scripts; `Platform/run.ps1` is now the single compatibility entrypoint.
+- Moved script-bridge task paths to direct targets under `Platform/Scripts/*` (and `Identity/Keycloak/*` where applicable), so runtime task bridging no longer depends on deleted root wrappers.
+- Updated RuntimeCtl orchestration call sites to avoid deleted wrappers (`demo-flow` now calls native `ci-local`/`full`/`webrtc-edge-agent-smoke` commands directly).
+- Updated doctor smoke-script probe checks to validate `Platform/Scripts/run_api_bearer_smoke.ps1`.
+- Updated runbook text in `Platform/README.md` to CLI-first/task-first examples after wrapper removal.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Scripts/run_doctor.ps1`
+- `Platform/README.md`
+- removed: `Platform/run_*.ps1` wrapper set
+
 ## 2026-03-26 (cli-first: run.ps1 minimized + native task alias completion)
 
 Summary:
