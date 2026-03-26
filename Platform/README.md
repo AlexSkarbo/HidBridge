@@ -806,25 +806,16 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 
 
 **Script Layout**
-- `Platform/Scripts/` contains the real operational scripts.
-- `Platform/run.ps1` is a thin shim over `HidBridge.RuntimeCtl`:
-  - routes most invocations to `RuntimeCtl task <task-name>`
-  - routes `-Task ci-local` and `-Task full` directly to native RuntimeCtl commands (C# orchestration)
-  - forwards bound PowerShell options/args without script-side policy logic
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-sql -- -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4`
-- CLI-first preview (`Platform/Tools/HidBridge.RuntimeCtl`):
+- CLI-first entrypoint is `Platform/Tools/HidBridge.RuntimeCtl`:
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -StopOnFailure`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full -- -StopOnFailure`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- demo-flow -- -SkipIdentityReset`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- webrtc-stack -- -StopExisting -CommandExecutor uart`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- webrtc-acceptance -- -CommandExecutor uart -SkipRuntimeBootstrap -StopExisting -StopStackAfter`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- platform-runtime -- -Action up -Build`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task ops-slo-security-verify -- -BaseUrl http://127.0.0.1:18093`
-  - current mode is a compatibility bridge: `RuntimeCtl` invokes existing `run_*.ps1` entrypoints while we remove script orchestration step-by-step.
-- `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`, and `Platform/Scripts/run_ops_slo_security_verify.ps1` are compatibility wrappers that forward to native RuntimeCtl commands.
-- top-level `Platform/run_*.ps1` files are compatibility wrappers that forward to `Platform/Scripts/`.
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ops-verify -- -BaseUrl http://127.0.0.1:18093`
+- `Platform/run.ps1` remains a minimal compatibility shim (legacy task syntax -> RuntimeCtl).
+- `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`, `Platform/Scripts/run_ops_slo_security_verify.ps1`, `Platform/Scripts/run_demo_flow.ps1`, and `Platform/Scripts/run_webrtc_stack.ps1` are thin wrappers over RuntimeCtl.
+- top-level `Platform/run_*.ps1` files remain compatibility wrappers for existing operator habits.
 
 
 **Operational Helpers**
@@ -835,10 +826,10 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 - `Platform/run_ops_slo_security_verify.ps1` performs the SLO/security verify lane used by `ci-local`/`full`:
   - `ci-local` now includes `Ops SLO + Security Verify` by default.
   - emergency/local bypass only:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -ForwardArgs @('-SkipOpsSloSecurityVerify')`
+    - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -SkipOpsSloSecurityVerify`
 - unified launcher examples:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task clean-logs -- -KeepDays 5 -IncludeSmokeData`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task doctor -- -StartApiProbe -RequireApi`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task clean-logs -- -KeepDays 5 -IncludeSmokeData`
 
 - `Platform/run_doctor.ps1` now supports:
   - `-RequireApi` to fail if API is not running
@@ -852,7 +843,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `run_all_tests.ps1` includes hosted lease-orchestration integration coverage:
     - `HostedWebRtcFullStackIntegrationTests` (happy path + deterministic lease-conflict propagation)
   - mandatory WebRTC edge-agent acceptance lane (CI gate):
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local -WebRtcCommandExecutor uart`
+    - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -WebRtcCommandExecutor uart`
     - acceptance now uses dedicated `.NET` orchestration runner (`Platform/Tools/HidBridge.Acceptance.Runner`) via thin wrapper `run_webrtc_edge_agent_acceptance.ps1`: starts stack, waits for online relay peer, executes smoke command expecting `Applied`.
     - mandatory media E2E gate inside acceptance:
       - requires `mediaReady=true` and non-empty `mediaPlaybackUrl`/`playbackUrl` within bounded retries
@@ -863,12 +854,12 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`
 - `Platform/run_export_artifacts.ps1` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
 - additional unified launcher examples:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task export-artifacts -IncludeSmokeData -IncludeBackups`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task token-debug`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task export-artifacts -- -IncludeSmokeData -IncludeBackups`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task token-debug`
 Unified full run:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full
 ```
 
 Direct wrapper:
@@ -883,12 +874,12 @@ What it does:
 
 Recommended operator/dev workflow:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full
 ```
 
 Fast token inspection:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task token-debug
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task token-debug
 ```
 Bearer rollout:
 ```powershell

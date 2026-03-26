@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-26 (cli-first operational docs/ui defaults)
+
+Summary:
+
+- Switched operator-facing runbook guidance from `Platform/run.ps1` to direct `HidBridge.RuntimeCtl` usage for daily operations.
+- Updated Ops Status UI operational playbook commands to CLI-first (`dotnet run --project ... HidBridge.RuntimeCtl`).
+- Kept `run.ps1` explicitly documented as compatibility shim (not primary orchestration path).
+
+Detailed notes:
+
+- `Platform/README.md`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/OpsStatus.razor`
+
 ## 2026-03-26 (runtimectl native webrtc-stack + demo-flow, run.ps1 minimized)
 
 Summary:
