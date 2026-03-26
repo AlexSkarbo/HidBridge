@@ -800,15 +800,23 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
 
 **Script Layout**
 - CLI-first entrypoint is `Platform/Tools/HidBridge.RuntimeCtl`:
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local -- -StopOnFailure`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full -- -StopOnFailure`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- demo-flow -- -SkipIdentityReset`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- webrtc-stack -- -StopExisting -CommandExecutor uart`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- webrtc-acceptance -- -CommandExecutor uart -SkipRuntimeBootstrap -StopExisting -StopStackAfter`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ops-verify -- -BaseUrl http://127.0.0.1:18093`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local -StopOnFailure`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-stack -StopExisting -CommandExecutor uart`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-acceptance -CommandExecutor uart -SkipRuntimeBootstrap -StopExisting -StopStackAfter`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ops-verify -BaseUrl http://127.0.0.1:18093`
 - `Platform/run.ps1` remains a minimal compatibility shim (legacy task syntax -> RuntimeCtl).
 - `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`, `Platform/Scripts/run_ops_slo_security_verify.ps1`, `Platform/Scripts/run_demo_flow.ps1`, and `Platform/Scripts/run_webrtc_stack.ps1` are thin wrappers over RuntimeCtl.
 - top-level `Platform/run_*.ps1` wrappers were removed; use `Platform/run.ps1 -Task <name>` or direct RuntimeCtl commands.
+
+**Stability Baseline Profile (local)**
+- Goal: deterministic daily gate without realm-key churn.
+- Step 1 (once per day or when identity changed): run full sync once:
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure`
+- Step 2 (stability loop): run three consecutive iterations with realm sync disabled:
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local -StopOnFailure`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure -SkipRealmSync`
 
 
 **Operational Helpers**

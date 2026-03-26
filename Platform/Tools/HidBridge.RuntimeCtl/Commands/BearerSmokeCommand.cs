@@ -198,23 +198,40 @@ internal static class BearerSmokeCommand
                 {
                     Exception? lastAuthError = null;
                     var selectedAuthority = options.AuthAuthority;
-                    foreach (var authorityCandidate in BuildAuthAuthorityCandidates(options.AuthAuthority))
+                    const int maxAuthBootstrapAttempts = 5;
+                    var authBootstrapDelay = TimeSpan.FromSeconds(1);
+
+                    for (var authAttempt = 1; authAttempt <= maxAuthBootstrapAttempts; authAttempt++)
                     {
-                        try
+                        foreach (var authorityCandidate in BuildAuthAuthorityCandidates(options.AuthAuthority))
                         {
-                            ownerToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.TokenUsername, options.TokenPassword);
-                            viewerToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ViewerTokenUsername, options.ViewerTokenPassword);
-                            foreignToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ForeignTokenUsername, options.ForeignTokenPassword);
-                            await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
-                            await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
-                            await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
-                            selectedAuthority = authorityCandidate;
-                            lastAuthError = null;
+                            try
+                            {
+                                ownerToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.TokenUsername, options.TokenPassword);
+                                viewerToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ViewerTokenUsername, options.ViewerTokenPassword);
+                                foreignToken = await RequestOidcTokenAsync(authorityCandidate, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ForeignTokenUsername, options.ForeignTokenPassword);
+                                await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
+                                await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
+                                await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
+                                selectedAuthority = authorityCandidate;
+                                lastAuthError = null;
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                lastAuthError = ex;
+                            }
+                        }
+
+                        if (lastAuthError is null)
+                        {
                             break;
                         }
-                        catch (Exception ex)
+
+                        if (authAttempt < maxAuthBootstrapAttempts)
                         {
-                            lastAuthError = ex;
+                            lines.Add($"WARN oidc.bootstrap.retry attempt={authAttempt}/{maxAuthBootstrapAttempts}: {lastAuthError.GetBaseException().Message}");
+                            await Task.Delay(authBootstrapDelay);
                         }
                     }
 

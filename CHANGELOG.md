@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-03-26 (ci/full stability hardening: bearer bootstrap retries + baseline profile docs)
+
+Summary:
+
+- Hardened bearer bootstrap in native RuntimeCtl lanes:
+  - `bearer-smoke` now retries OIDC bootstrap/inventory bearer validation before failing.
+  - `checks` now retries the embedded `bearer-smoke` step (bounded attempts) to reduce transient auth startup flakes.
+- Updated runbook examples to canonical RuntimeCtl invocation form with explicit `--platform-root Platform`.
+- Added local stability-baseline profile guidance:
+  - one `full` sync run,
+  - then 3x `ci-local` + `full -SkipRealmSync` loop for deterministic daily smoke.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/BearerSmokeCommand.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/ChecksCommand.cs`
+- `Platform/README.md`
+
 ## 2026-03-26 (webrtc-acceptance: default output path fix)
 
 Summary:

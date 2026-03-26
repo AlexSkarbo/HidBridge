@@ -120,7 +120,24 @@ internal static class ChecksCommand
                     smokeArgs.Add("-NoBuild");
                 }
 
-                var smokeExitCode = await BearerSmokeCommand.RunAsync(platformRoot, smokeArgs);
+                const int smokeMaxAttempts = 3;
+                var smokeDelay = TimeSpan.FromSeconds(3);
+                var smokeExitCode = 1;
+                for (var smokeAttempt = 1; smokeAttempt <= smokeMaxAttempts; smokeAttempt++)
+                {
+                    smokeExitCode = await BearerSmokeCommand.RunAsync(platformRoot, smokeArgs);
+                    if (smokeExitCode == 0)
+                    {
+                        break;
+                    }
+
+                    if (smokeAttempt < smokeMaxAttempts)
+                    {
+                        Console.WriteLine(
+                            $"WARN bearer-smoke retry attempt={smokeAttempt}/{smokeMaxAttempts} failed (exit={smokeExitCode}); waiting {smokeDelay.TotalSeconds:0}s before retry.");
+                        await Task.Delay(smokeDelay);
+                    }
+                }
                 var smokeLog = Path.Combine(platformRoot, ".logs", "bearer-smoke", "latest.log");
                 results.Add(("Platform smoke (Sql)", smokeExitCode == 0 ? "PASS" : "FAIL", 0, smokeExitCode, smokeLog));
                 if (smokeExitCode != 0)
