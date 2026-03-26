@@ -82,6 +82,7 @@ switch ($task.ToLowerInvariant()) {
     "webrtc-edge-agent-smoke" { $arguments.Add("webrtc-edge-agent-smoke") | Out-Null }
     "ops-slo-security-verify" { $arguments.Add("ops-verify") | Out-Null }
     "demo-flow" { $arguments.Add("demo-flow") | Out-Null }
+    "demo-gate" { $arguments.Add("demo-gate") | Out-Null }
     "webrtc-stack" { $arguments.Add("webrtc-stack") | Out-Null }
     default {
         $arguments.Add("task") | Out-Null

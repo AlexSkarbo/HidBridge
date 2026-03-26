@@ -16,6 +16,7 @@ internal sealed class RuntimeCtlApp
             ["ci-local"] = new("ci-local", "Runs local CI gate lane (native C# orchestration).", CommandKind.CiLocal, null),
             ["full"] = new("full", "Runs full local gate lane (native C# orchestration).", CommandKind.Full, null),
             ["demo-flow"] = new("demo-flow", "Runs demo bootstrap flow (native C# orchestration).", CommandKind.DemoFlow, null),
+            ["demo-gate"] = new("demo-gate", "Runs demo runtime gate (native C# orchestration for WebRTC mode).", CommandKind.DemoGate, null),
             ["webrtc-stack"] = new("webrtc-stack", "Bootstraps WebRTC stack and edge adapter (native C# orchestration).", CommandKind.WebRtcStack, null),
             ["webrtc-edge-agent-smoke"] = new("webrtc-edge-agent-smoke", "Runs WebRTC edge-agent smoke (native C# orchestration).", CommandKind.WebRtcEdgeAgentSmoke, null),
             ["webrtc-acceptance"] = new("webrtc-acceptance", "Runs WebRTC edge-agent acceptance (native C# orchestration).", CommandKind.WebRtcAcceptance, null),
@@ -35,27 +36,26 @@ internal sealed class RuntimeCtlApp
             ["smoke-bearer"] = "run_api_bearer_smoke.ps1",
             ["doctor"] = "run_doctor.ps1",
             ["clean-logs"] = "run_clean_logs.ps1",
-            ["ci-local"] = "run_ci_local.ps1",
-            ["full"] = "run_full.ps1",
             ["export-artifacts"] = "run_export_artifacts.ps1",
             ["token-debug"] = "run_token_debug.ps1",
             ["bearer-rollout"] = "run_bearer_rollout_phase.ps1",
             ["identity-reset"] = "run_identity_reset.ps1",
             ["identity-onboard"] = "run_identity_onboard.ps1",
-            ["demo-flow"] = "run_demo_flow.ps1",
             ["demo-seed"] = "run_demo_seed.ps1",
-            ["demo-gate"] = "run_demo_gate.ps1",
             ["uart-diagnostics"] = "run_uart_diagnostics.ps1",
             ["webrtc-relay-smoke"] = "run_webrtc_relay_smoke.ps1",
             ["webrtc-peer-adapter"] = "run_webrtc_peer_adapter.ps1",
-            ["webrtc-stack"] = "run_webrtc_stack.ps1",
             ["webrtc-stack-terminal-b"] = "run_webrtc_stack_terminal_b.ps1",
-            ["webrtc-edge-agent-smoke"] = "run_webrtc_edge_agent_smoke.ps1",
-            ["webrtc-edge-agent-acceptance"] = "run_webrtc_edge_agent_acceptance.ps1",
-            ["ops-slo-security-verify"] = "run_ops_slo_security_verify.ps1",
             ["close-failed-rooms"] = "run_close_failed_rooms.ps1",
             ["close-stale-rooms"] = "run_close_stale_rooms.ps1",
             ["platform-runtime"] = "Scripts/run_platform_runtime_profile.ps1",
+        };
+
+    private static readonly IReadOnlyDictionary<string, string> NativeTaskRedirects =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["webrtc-edge-agent-acceptance"] = "webrtc-acceptance",
+            ["ops-slo-security-verify"] = "ops-verify",
         };
 
     private readonly string _platformRoot;
@@ -135,6 +135,15 @@ internal sealed class RuntimeCtlApp
 
             var taskName = remaining[0];
             remaining.RemoveAt(0);
+            if (NativeTaskRedirects.TryGetValue(taskName, out var redirectedTask))
+            {
+                taskName = redirectedTask;
+            }
+            if (CommandAliases.TryGetValue(taskName, out var nativeTask))
+            {
+                return new RuntimeCtlApp(platformRoot, nativeTask, NormalizeForwardArgs(remaining), showHelp: false, error: null);
+            }
+
             if (!TaskMap.TryGetValue(taskName, out var taskScript))
             {
                 return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: $"Unsupported task '{taskName}'.");
@@ -167,6 +176,7 @@ internal sealed class RuntimeCtlApp
             CommandKind.WebRtcAcceptance => await WebRtcAcceptanceCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.OpsVerify => await OpsVerifyCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.DemoFlow => await DemoFlowCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.DemoGate => await DemoGateCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.WebRtcStack => await WebRtcStackCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.WebRtcEdgeAgentSmoke => await WebRtcEdgeAgentSmokeCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.ScriptBridge => await RunScriptBridgeAsync(_platformRoot, _command.ScriptRelativePath!, _forwardArgs),
@@ -394,6 +404,7 @@ internal sealed class RuntimeCtlApp
         WebRtcAcceptance,
         OpsVerify,
         DemoFlow,
+        DemoGate,
         WebRtcStack,
         WebRtcEdgeAgentSmoke,
     }
@@ -2696,7 +2707,7 @@ internal static class DemoFlowCommand
                         }
                     }
 
-                    await RunScriptStepAsync(platformRoot, logRoot, results, "Demo Gate", "run_demo_gate.ps1", demoGateArgs);
+                    await RunRuntimeCtlStepAsync(platformRoot, logRoot, results, "Demo Gate", "demo-gate", demoGateArgs);
                 }
 
                 if (options.IncludeWebRtcEdgeAgentSmoke)
@@ -3442,6 +3453,330 @@ internal static class DemoFlowCommand
             {
                 return false;
             }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
+internal static class DemoGateCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        var provider = ResolveTransportProvider(args);
+        if (!string.Equals(provider, "webrtc-datachannel", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"WARNING: TransportProvider '{provider}' is delegated to legacy run_demo_gate.ps1 compatibility path.");
+            return await RuntimeCtlApp.RunScriptBridgeAsync(platformRoot, Path.Combine("Scripts", "run_demo_gate.ps1"), args);
+        }
+
+        if (!DemoGateOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"demo-gate options error: {parseError}");
+            return 1;
+        }
+
+        if (options.RequireDeviceAck)
+        {
+            Console.WriteLine("WARNING: RequireDeviceAck is ignored for TransportProvider=webrtc-datachannel.");
+        }
+
+        var smokeArgs = new List<string>
+        {
+            "-ApiBaseUrl", options.BaseUrl,
+            "-KeycloakBaseUrl", options.KeycloakBaseUrl,
+            "-RealmName", options.RealmName,
+            "-ControlHealthUrl", options.ControlHealthUrl,
+            "-ControlHealthAttempts", Math.Max(1, options.ControlHealthAttempts).ToString(),
+            "-RequestTimeoutSec", Math.Max(1, options.RequestTimeoutSec).ToString(),
+            "-TransportHealthAttempts", Math.Max(1, options.TransportHealthAttempts).ToString(),
+            "-TransportHealthDelayMs", Math.Max(100, options.TransportHealthDelayMs).ToString(),
+            "-TokenClientId", options.TokenClientId,
+            "-TokenUsername", options.TokenUsername,
+            "-TokenPassword", options.TokenPassword,
+            "-PrincipalId", options.PrincipalId,
+            "-TenantId", options.TenantId,
+            "-OrganizationId", options.OrganizationId,
+            "-TimeoutMs", Math.Max(8000, options.CommandTimeoutMs).ToString(),
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
+        {
+            smokeArgs.Add("-TokenClientSecret");
+            smokeArgs.Add(options.TokenClientSecret);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.TokenScope))
+        {
+            smokeArgs.Add("-TokenScope");
+            smokeArgs.Add(options.TokenScope);
+        }
+
+        if (options.SkipTransportHealthCheck)
+        {
+            smokeArgs.Add("-SkipTransportHealthCheck");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
+        {
+            smokeArgs.Add("-OutputJsonPath");
+            smokeArgs.Add(options.OutputJsonPath);
+        }
+
+        var exitCode = await WebRtcEdgeAgentSmokeCommand.RunAsync(platformRoot, smokeArgs);
+        if (exitCode != 0)
+        {
+            return exitCode;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("=== Demo Gate Summary ===");
+        Console.WriteLine($"BaseUrl: {options.BaseUrl}");
+        Console.WriteLine("Transport provider: webrtc-datachannel");
+        if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
+        {
+            Console.WriteLine($"Summary JSON: {options.OutputJsonPath}");
+        }
+
+        return 0;
+    }
+
+    private static string ResolveTransportProvider(IReadOnlyList<string> args)
+    {
+        const string defaultProvider = "uart";
+        for (var i = 0; i < args.Count; i++)
+        {
+            var token = args[i];
+            if (string.IsNullOrWhiteSpace(token) || !token.StartsWith("-", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var name = token.TrimStart('-');
+            if (!string.Equals(name, "transportprovider", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+            if (!hasValue || string.IsNullOrWhiteSpace(args[i + 1]))
+            {
+                return defaultProvider;
+            }
+
+            return args[i + 1];
+        }
+
+        return defaultProvider;
+    }
+
+    private sealed class DemoGateOptions
+    {
+        public string BaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string TransportProvider { get; set; } = "webrtc-datachannel";
+        public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
+        public string RealmName { get; set; } = "hidbridge-dev";
+        public string TokenClientId { get; set; } = "controlplane-smoke";
+        public string TokenClientSecret { get; set; } = string.Empty;
+        public string TokenScope { get; set; } = "openid profile email";
+        public string TokenUsername { get; set; } = "operator.smoke.admin";
+        public string TokenPassword { get; set; } = "ChangeMe123!";
+        public string PrincipalId { get; set; } = "demo-gate-admin";
+        public string TenantId { get; set; } = "local-tenant";
+        public string OrganizationId { get; set; } = "local-org";
+        public int CommandTimeoutMs { get; set; } = 500;
+        public bool RequireDeviceAck { get; set; }
+        public string ControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
+        public int RequestTimeoutSec { get; set; } = 15;
+        public int ControlHealthAttempts { get; set; } = 20;
+        public bool SkipTransportHealthCheck { get; set; }
+        public int TransportHealthAttempts { get; set; } = 20;
+        public int TransportHealthDelayMs { get; set; } = 500;
+        public string OutputJsonPath { get; set; } = string.Empty;
+
+        public static bool TryParse(IReadOnlyList<string> args, out DemoGateOptions options, out string? error)
+        {
+            options = new DemoGateOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                string? value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "baseurl":
+                    case "apibaseurl":
+                        options.BaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "transportprovider":
+                        options.TransportProvider = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "keycloakbaseurl":
+                        options.KeycloakBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "realmname":
+                        options.RealmName = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "tokenclientid":
+                        options.TokenClientId = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "tokenclientsecret":
+                        options.TokenClientSecret = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "tokenscope":
+                        options.TokenScope = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "tokenusername":
+                        options.TokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "tokenpassword":
+                        options.TokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "principalid":
+                        options.PrincipalId = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "tenantid":
+                        options.TenantId = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "organizationid":
+                        options.OrganizationId = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "commandtimeoutms":
+                        options.CommandTimeoutMs = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "requiredeviceack":
+                        options.RequireDeviceAck = ParseSwitch(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "controlhealthurl":
+                        options.ControlHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    case "requesttimeoutsec":
+                        options.RequestTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "controlhealthattempts":
+                        options.ControlHealthAttempts = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "skiptransporthealthcheck":
+                        options.SkipTransportHealthCheck = ParseSwitch(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "transporthealthattempts":
+                        options.TransportHealthAttempts = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "transporthealthdelayms":
+                        options.TransportHealthDelayMs = ParseInt(name, value, hasValue, ref i, ref error);
+                        break;
+                    case "outputjsonpath":
+                        options.OutputJsonPath = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        break;
+                    default:
+                        // Keep compatibility with legacy demo-gate parameters that are ignored
+                        // by the WebRTC branch (e.g. profile/device ack selectors).
+                        if (hasValue)
+                        {
+                            i++;
+                        }
+                        break;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            if (!string.Equals(options.TransportProvider, "webrtc-datachannel", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "TransportProvider must be 'webrtc-datachannel' for native demo-gate mode.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+
+            index++;
+            return value;
+        }
+
+        private static int ParseInt(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            var raw = RequireValue(name, value, ref index, ref hasValue, ref error);
+            if (error is not null)
+            {
+                return 0;
+            }
+
+            if (!int.TryParse(raw, out var parsed))
+            {
+                error = $"Option -{name} requires an integer value.";
+                return 0;
+            }
+
+            return parsed;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
             switch (value.Trim().ToLowerInvariant())
             {
                 case "1":

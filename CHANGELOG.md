@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (cli-first: native demo-gate + acceptance bootstrap via runtimectl)
+
+Summary:
+
+- Added native `demo-gate` command in `HidBridge.RuntimeCtl` for `webrtc-datachannel` gate flow.
+- Migrated `demo-flow` internal gate step from script bridge to native RuntimeCtl command invocation.
+- Replaced `HidBridge.Acceptance.Runner` stack bootstrap path from `run_webrtc_stack.ps1` to native `RuntimeCtl webrtc-stack`.
+- Reduced script bridge surface in RuntimeCtl task map and added native task redirects for compatibility.
+- Converted `Platform/run_demo_gate.ps1` into a thin RuntimeCtl shim; added direct `demo-gate` route in `Platform/run.ps1`.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+- `Platform/run_demo_gate.ps1`
+- `Platform/run.ps1`
+
 ## 2026-03-26 (cli-first: native webrtc-edge-agent-smoke)
 
 Summary:

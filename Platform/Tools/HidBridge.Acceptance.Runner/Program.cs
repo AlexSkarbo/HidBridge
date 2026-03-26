@@ -278,10 +278,10 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
     string stackSummaryPath,
     CancellationToken cancellationToken)
 {
-    var scriptPath = Path.Combine(platformRoot, "Scripts", "run_webrtc_stack.ps1");
-    if (!File.Exists(scriptPath))
+    var runtimeCtlProject = Path.Combine(platformRoot, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj");
+    if (!File.Exists(runtimeCtlProject))
     {
-        throw new FileNotFoundException($"WebRTC stack bootstrap script not found: {scriptPath}");
+        throw new FileNotFoundException($"RuntimeCtl project not found: {runtimeCtlProject}");
     }
 
     var logRoot = Path.GetDirectoryName(stackSummaryPath) ?? platformRoot;
@@ -289,27 +289,22 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
     var stdoutPath = Path.Combine(logRoot, "webrtc-stack.stdout.log");
     var stderrPath = Path.Combine(logRoot, "webrtc-stack.stderr.log");
 
-    var shell = OperatingSystem.IsWindows() ? "powershell.exe" : "pwsh";
     var startInfo = new ProcessStartInfo
     {
-        FileName = shell,
+        FileName = "dotnet",
+        WorkingDirectory = platformRoot,
         UseShellExecute = false,
-        RedirectStandardOutput = false,
-        RedirectStandardError = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
     };
 
-    if (OperatingSystem.IsWindows())
-    {
-        startInfo.ArgumentList.Add("-ExecutionPolicy");
-        startInfo.ArgumentList.Add("Bypass");
-    }
-    else
-    {
-        startInfo.ArgumentList.Add("-NoProfile");
-    }
-
-    startInfo.ArgumentList.Add("-File");
-    startInfo.ArgumentList.Add(scriptPath);
+    startInfo.ArgumentList.Add("run");
+    startInfo.ArgumentList.Add("--project");
+    startInfo.ArgumentList.Add(runtimeCtlProject);
+    startInfo.ArgumentList.Add("--");
+    startInfo.ArgumentList.Add("--platform-root");
+    startInfo.ArgumentList.Add(platformRoot);
+    startInfo.ArgumentList.Add("webrtc-stack");
     startInfo.ArgumentList.Add("-ApiBaseUrl");
     startInfo.ArgumentList.Add(options.ApiBaseUrl);
     startInfo.ArgumentList.Add("-CommandExecutor");
@@ -347,42 +342,15 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
 
     using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WebRTC stack bootstrap process.");
 
-    var stackReady = false;
-    var terminatedAfterSummary = false;
+    var stdOutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+    var stdErrTask = process.StandardError.ReadToEndAsync(cancellationToken);
     var bootstrapTimeout = TimeSpan.FromSeconds(Math.Max(30, options.RequestTimeoutSec * 6));
-    var bootstrapDeadline = DateTimeOffset.UtcNow.Add(bootstrapTimeout);
     Console.WriteLine($"Waiting for WebRTC stack summary ({bootstrapTimeout.TotalSeconds:0}s timeout)...");
-
-    while (!process.HasExited && DateTimeOffset.UtcNow < bootstrapDeadline)
+    try
     {
-        if (TryReadJson(stackSummaryPath) is not null)
-        {
-            stackReady = true;
-            Console.WriteLine("WebRTC stack summary detected.");
-            break;
-        }
-
-        await Task.Delay(250, cancellationToken);
+        await process.WaitForExitAsync(cancellationToken).WaitAsync(bootstrapTimeout, cancellationToken);
     }
-    Console.WriteLine($"WebRTC stack bootstrap state: stackReady={stackReady}, processExited={process.HasExited}.");
-
-    var timedOutWithoutSummary = !stackReady && !process.HasExited;
-
-    if (stackReady && !process.HasExited)
-    {
-        // `run_webrtc_stack.ps1` can stay alive in some host shells even after writing summary.
-        // Once summary exists, terminate only the script process and keep spawned adapter alive.
-        try
-        {
-            process.Kill(entireProcessTree: false);
-            terminatedAfterSummary = true;
-        }
-        catch
-        {
-            // best effort
-        }
-    }
-    else if (!stackReady && !process.HasExited)
+    catch (TimeoutException)
     {
         try
         {
@@ -391,44 +359,21 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
         catch
         {
             // best effort
-        }
-    }
-
-    if (!process.HasExited)
-    {
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-        }
-        catch (TimeoutException) when (stackReady)
-        {
-            // Summary exists; do not block acceptance on lingering bootstrap shell process.
-        }
-        catch (Exception) when (stackReady)
-        {
-            // Summary already exists; continue.
-        }
-    }
-
-    await File.WriteAllTextAsync(
-        stdoutPath,
-        "Bootstrap stdout is not redirected by the runner. See stack logs under Platform/.logs/webrtc-stack/<timestamp>/.",
-        cancellationToken);
-    await File.WriteAllTextAsync(
-        stderrPath,
-        "Bootstrap stderr is not redirected by the runner. See stack logs under Platform/.logs/webrtc-stack/<timestamp>/.",
-        cancellationToken);
-
-    if (!stackReady && process.ExitCode != 0)
-    {
-        if (timedOutWithoutSummary)
-        {
-            throw new InvalidOperationException(
-                $"WebRTC stack bootstrap timed out after {bootstrapTimeout.TotalSeconds:0}s without summary output: {stackSummaryPath}");
         }
 
         throw new InvalidOperationException(
-            $"WebRTC stack bootstrap failed with exit code {process.ExitCode}. Summary JSON was not produced: {stackSummaryPath}");
+            $"WebRTC stack bootstrap timed out after {bootstrapTimeout.TotalSeconds:0}s: {stackSummaryPath}");
+    }
+
+    var stdOut = await stdOutTask;
+    var stdErr = await stdErrTask;
+    await File.WriteAllTextAsync(stdoutPath, stdOut, cancellationToken);
+    await File.WriteAllTextAsync(stderrPath, stdErr, cancellationToken);
+
+    if (process.ExitCode != 0)
+    {
+        throw new InvalidOperationException(
+            $"WebRTC stack bootstrap failed with exit code {process.ExitCode}. See logs: {stdoutPath} / {stderrPath}");
     }
 
     var stackJson = TryReadJson(stackSummaryPath);
@@ -449,10 +394,6 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
         : (int?)null;
 
     Console.WriteLine($"PASS  WebRTC Stack (adapterPid={adapterPid?.ToString() ?? "n/a"})");
-    if (terminatedAfterSummary)
-    {
-        Console.WriteLine("Note: bootstrap script process was terminated after summary was produced.");
-    }
     Console.WriteLine($"Log:   {stdoutPath}");
 
     return new StackBootstrapRuntime(adapterPid, exp022Pid);
