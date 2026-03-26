@@ -7,10 +7,16 @@ param(
     [int]$KeyboardInterfaceSelector = -1,
     [int]$StaleAfterMinutes = -1,
     [switch]$IncludeWebRtcEdgeAgentSmoke,
+    [switch]$SkipDoctor,
+    [switch]$SkipChecks,
+    [switch]$SkipBearerSmoke,
+    [switch]$StopOnFailure,
     [switch]$IncludeWebRtcEdgeAgentAcceptance,
     [switch]$SkipWebRtcEdgeAgentAcceptance,
     [switch]$IncludeWebRtcMediaE2EGate,
     [switch]$SkipWebRtcMediaE2EGate,
+    [bool]$IncludeOpsSloSecurityVerify = $true,
+    [switch]$SkipOpsSloSecurityVerify,
     [string]$WebRtcCommandExecutor,
     [switch]$AllowLegacyControlWs,
     [string]$WebRtcControlHealthUrl,
@@ -64,458 +70,104 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Test-LegacyExp022Enabled {
-    $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::Process)
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::User)
-    }
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable("HIDBRIDGE_ENABLE_LEGACY_EXP022", [EnvironmentVariableTarget]::Machine)
+function Add-BoundParametersToArgumentList {
+    param(
+        [hashtable]$Bound,
+        [System.Collections.Generic.List[string]]$Target,
+        [string[]]$Excluded
+    )
+
+    $excludedLookup = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $Excluded) {
+        [void]$excludedLookup.Add($item)
     }
 
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        return $false
-    }
+    foreach ($entry in $Bound.GetEnumerator()) {
+        $name = [string]$entry.Key
+        if ($excludedLookup.Contains($name)) {
+            continue
+        }
 
-    switch ($value.Trim().ToLowerInvariant()) {
-        "1" { return $true }
-        "true" { return $true }
-        "yes" { return $true }
-        "on" { return $true }
-        default { return $false }
+        $value = $entry.Value
+        if ($null -eq $value) {
+            continue
+        }
+
+        if ($value -is [System.Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) {
+                $Target.Add("-$name") | Out-Null
+            }
+            continue
+        }
+
+        if ($value -is [bool]) {
+            $Target.Add("-$name") | Out-Null
+            $Target.Add($value.ToString().ToLowerInvariant()) | Out-Null
+            continue
+        }
+
+        if ($value -is [System.Array]) {
+            foreach ($element in $value) {
+                if ($null -eq $element) {
+                    continue
+                }
+
+                $text = [string]$element
+                if ([string]::IsNullOrWhiteSpace($text)) {
+                    continue
+                }
+
+                $Target.Add("-$name") | Out-Null
+                $Target.Add($text) | Out-Null
+            }
+            continue
+        }
+
+        $Target.Add("-$name") | Out-Null
+        $Target.Add([string]$value) | Out-Null
     }
 }
 
-$scriptMap = @{
-    "checks"       = "run_checks.ps1"
-    "tests"        = "run_all_tests.ps1"
-    "smoke"        = "run_smoke.ps1"
-    "smoke-file"   = "run_file_smoke.ps1"
-    "smoke-sql"    = "run_sql_smoke.ps1"
-    "smoke-bearer" = "run_api_bearer_smoke.ps1"
-    "doctor"       = "run_doctor.ps1"
-    "clean-logs"   = "run_clean_logs.ps1"
-    "ci-local"     = "run_ci_local.ps1"
-    "full"         = "run_full.ps1"
-    "export-artifacts" = "run_export_artifacts.ps1"
-    "token-debug"  = "run_token_debug.ps1"
-    "bearer-rollout" = "run_bearer_rollout_phase.ps1"
-    "identity-reset" = "..\\run_identity_reset.ps1"
-    "identity-onboard" = "..\\run_identity_onboard.ps1"
-    "demo-flow"    = "run_demo_flow.ps1"
-    "demo-seed"    = "run_demo_seed.ps1"
-    "demo-gate"    = "run_demo_gate.ps1"
-    "uart-diagnostics" = "run_uart_diagnostics.ps1"
-    "webrtc-relay-smoke" = "run_webrtc_relay_smoke.ps1"
-    "webrtc-peer-adapter" = "run_webrtc_peer_adapter.ps1"
-    "webrtc-stack" = "run_webrtc_stack.ps1"
-    "webrtc-stack-terminal-b" = "run_webrtc_stack_terminal_b.ps1"
-    "webrtc-edge-agent-smoke" = "run_webrtc_edge_agent_smoke.ps1"
-    "webrtc-edge-agent-acceptance" = "run_webrtc_edge_agent_acceptance.ps1"
-    "ops-slo-security-verify" = "run_ops_slo_security_verify.ps1"
-    "close-failed-rooms" = "run_close_failed_rooms.ps1"
-    "close-stale-rooms" = "run_close_stale_rooms.ps1"
-    "platform-runtime" = "run_platform_runtime_profile.ps1"
+$runtimeCtlProject = Join-Path $PSScriptRoot "Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj"
+if (-not (Test-Path $runtimeCtlProject)) {
+    throw "RuntimeCtl project not found: $runtimeCtlProject"
 }
 
-$scriptPath = Join-Path $PSScriptRoot (Join-Path "Scripts" $scriptMap[$Task])
-if (-not (Test-Path $scriptPath)) {
-    throw "Launcher target not found: $scriptPath"
+$dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($null -eq $dotnet) {
+    throw "dotnet CLI not found in PATH"
 }
 
-$pwsh = Get-Command powershell.exe -ErrorAction SilentlyContinue
-if ($null -eq $pwsh) {
-    throw "powershell.exe not found in PATH"
+$arguments = [System.Collections.Generic.List[string]]::new()
+$arguments.Add("run") | Out-Null
+$arguments.Add("--project") | Out-Null
+$arguments.Add($runtimeCtlProject) | Out-Null
+$arguments.Add("--") | Out-Null
+$arguments.Add("--platform-root") | Out-Null
+$arguments.Add($PSScriptRoot) | Out-Null
+
+if ([string]::Equals($Task, "ci-local", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $arguments.Add("ci-local") | Out-Null
+}
+else {
+    $arguments.Add("task") | Out-Null
+    $arguments.Add($Task) | Out-Null
 }
 
-$effectiveForwardArgs = [System.Collections.Generic.List[string]]::new()
+Add-BoundParametersToArgumentList -Bound $PSBoundParameters -Target $arguments -Excluded @("Task", "ForwardArgs")
+
 if ($null -ne $ForwardArgs) {
     foreach ($argument in $ForwardArgs) {
         if (-not [string]::IsNullOrWhiteSpace($argument)) {
-            $effectiveForwardArgs.Add($argument) | Out-Null
+            $arguments.Add($argument) | Out-Null
         }
     }
 }
 
-if ($PSBoundParameters.ContainsKey("BaseUrl") -and -not [string]::IsNullOrWhiteSpace($BaseUrl)) {
-    $tasksWithBaseUrl = @(
-        "demo-seed",
-        "demo-gate",
-        "uart-diagnostics",
-        "webrtc-relay-smoke",
-        "webrtc-peer-adapter",
-        "webrtc-edge-agent-acceptance",
-        "ops-slo-security-verify",
-        "close-failed-rooms",
-        "close-stale-rooms"
-    )
-
-    if ($tasksWithBaseUrl -contains $Task) {
-        $parsedBaseUrl = $null
-        if (-not [Uri]::TryCreate($BaseUrl, [UriKind]::Absolute, [ref]$parsedBaseUrl)) {
-            throw "BaseUrl must be an absolute URL for task '$Task'."
-        }
-
-        $baseUrlParameterName = if ($Task -eq "webrtc-edge-agent-acceptance") { "-ApiBaseUrl" } else { "-BaseUrl" }
-        $effectiveForwardArgs.Add($baseUrlParameterName) | Out-Null
-        $effectiveForwardArgs.Add($BaseUrl) | Out-Null
-    }
+& $dotnet.Source @arguments
+$exitCode = $LASTEXITCODE
+if ($null -eq $exitCode) {
+    $exitCode = 1
 }
 
-if ($RequireDeviceAck) {
-    $effectiveForwardArgs.Add("-RequireDeviceAck") | Out-Null
-}
-
-if ($PSBoundParameters.ContainsKey("TransportProvider") -and -not [string]::IsNullOrWhiteSpace($TransportProvider)) {
-    $effectiveForwardArgs.Add("-TransportProvider") | Out-Null
-    $effectiveForwardArgs.Add($TransportProvider) | Out-Null
-}
-
-if ($PSBoundParameters.ContainsKey("KeyboardInterfaceSelector") -and $KeyboardInterfaceSelector -ge 0) {
-    if ($KeyboardInterfaceSelector -lt 0 -or $KeyboardInterfaceSelector -gt 255) {
-        throw "KeyboardInterfaceSelector must be between 0 and 255."
-    }
-
-    $effectiveForwardArgs.Add("-KeyboardInterfaceSelector") | Out-Null
-    $effectiveForwardArgs.Add([string]$KeyboardInterfaceSelector) | Out-Null
-}
-
-if ($PSBoundParameters.ContainsKey("StaleAfterMinutes")) {
-    if ($StaleAfterMinutes -lt 1) {
-        throw "StaleAfterMinutes must be greater than 0."
-    }
-
-    $effectiveForwardArgs.Add("-StaleAfterMinutes") | Out-Null
-    $effectiveForwardArgs.Add([string]$StaleAfterMinutes) | Out-Null
-}
-
-if ($IncludeWebRtcEdgeAgentSmoke) {
-    $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentSmoke") | Out-Null
-}
-
-if ($IncludeWebRtcEdgeAgentAcceptance) {
-    $tasksWithWebRtcAcceptance = @("ci-local", "full")
-    if ($tasksWithWebRtcAcceptance -contains $Task) {
-        $effectiveForwardArgs.Add("-IncludeWebRtcEdgeAgentAcceptance") | Out-Null
-    }
-}
-
-if ($SkipWebRtcEdgeAgentAcceptance) {
-    $tasksWithWebRtcAcceptanceSkip = @("ci-local", "full")
-    if ($tasksWithWebRtcAcceptanceSkip -contains $Task) {
-        $effectiveForwardArgs.Add("-SkipWebRtcEdgeAgentAcceptance") | Out-Null
-    }
-}
-
-if ($IncludeWebRtcMediaE2EGate) {
-    $tasksWithWebRtcMediaGate = @("ci-local", "full")
-    if ($tasksWithWebRtcMediaGate -contains $Task) {
-        $effectiveForwardArgs.Add("-IncludeWebRtcMediaE2EGate") | Out-Null
-    }
-}
-
-if ($SkipWebRtcMediaE2EGate) {
-    $tasksWithWebRtcMediaGateSkip = @("ci-local", "full")
-    if ($tasksWithWebRtcMediaGateSkip -contains $Task) {
-        $effectiveForwardArgs.Add("-SkipWebRtcMediaE2EGate") | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("WebRtcCommandExecutor") -and -not [string]::IsNullOrWhiteSpace($WebRtcCommandExecutor)) {
-    $tasksWithWebRtcCommandExecutor = @("demo-flow", "ci-local", "full")
-    if ($tasksWithWebRtcCommandExecutor -contains $Task) {
-        $effectiveForwardArgs.Add("-WebRtcCommandExecutor") | Out-Null
-        $effectiveForwardArgs.Add($WebRtcCommandExecutor) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("WebRtcControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($WebRtcControlHealthUrl)) {
-    $tasksWithWebRtcControlHealthUrl = @("demo-flow", "ci-local", "full")
-    if ($tasksWithWebRtcControlHealthUrl -contains $Task) {
-        $effectiveForwardArgs.Add("-WebRtcControlHealthUrl") | Out-Null
-        $effectiveForwardArgs.Add($WebRtcControlHealthUrl) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("WebRtcRequestTimeoutSec") -and $WebRtcRequestTimeoutSec -gt 0) {
-    $effectiveForwardArgs.Add("-WebRtcRequestTimeoutSec") | Out-Null
-    $effectiveForwardArgs.Add([string]$WebRtcRequestTimeoutSec) | Out-Null
-}
-
-if ($PSBoundParameters.ContainsKey("WebRtcControlHealthAttempts") -and $WebRtcControlHealthAttempts -gt 0) {
-    $effectiveForwardArgs.Add("-WebRtcControlHealthAttempts") | Out-Null
-    $effectiveForwardArgs.Add([string]$WebRtcControlHealthAttempts) | Out-Null
-}
-
-if ($PSBoundParameters.ContainsKey("ControlHealthUrl") -and -not [string]::IsNullOrWhiteSpace($ControlHealthUrl)) {
-    $effectiveForwardArgs.Add("-ControlHealthUrl") | Out-Null
-    $effectiveForwardArgs.Add($ControlHealthUrl) | Out-Null
-}
-
-if ($SkipControlHealthCheck) {
-    $tasksWithControlHealthCheckSwitch = @("webrtc-edge-agent-smoke", "webrtc-stack-terminal-b")
-    if ($tasksWithControlHealthCheckSwitch -contains $Task) {
-        $effectiveForwardArgs.Add("-SkipControlHealthCheck") | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("RequestTimeoutSec") -and $RequestTimeoutSec -gt 0) {
-    $effectiveForwardArgs.Add("-RequestTimeoutSec") | Out-Null
-    $effectiveForwardArgs.Add([string]$RequestTimeoutSec) | Out-Null
-}
-
-if ($PSBoundParameters.ContainsKey("ControlHealthAttempts") -and $ControlHealthAttempts -gt 0) {
-    $effectiveForwardArgs.Add("-ControlHealthAttempts") | Out-Null
-    $effectiveForwardArgs.Add([string]$ControlHealthAttempts) | Out-Null
-}
-
-if ($SkipTransportHealthCheck) {
-    $tasksWithTransportHealthCheckSwitch = @("webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
-    if ($tasksWithTransportHealthCheckSwitch -contains $Task) {
-        $effectiveForwardArgs.Add("-SkipTransportHealthCheck") | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("TransportHealthAttempts") -and $TransportHealthAttempts -gt 0) {
-    $tasksWithTransportHealthAttempts = @("webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
-    if ($tasksWithTransportHealthAttempts -contains $Task) {
-        $effectiveForwardArgs.Add("-TransportHealthAttempts") | Out-Null
-        $effectiveForwardArgs.Add([string]$TransportHealthAttempts) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("TransportHealthDelayMs") -and $TransportHealthDelayMs -gt 0) {
-    $tasksWithTransportHealthDelay = @("webrtc-edge-agent-smoke", "webrtc-edge-agent-acceptance", "webrtc-stack-terminal-b", "demo-gate", "demo-flow")
-    if ($tasksWithTransportHealthDelay -contains $Task) {
-        $effectiveForwardArgs.Add("-TransportHealthDelayMs") | Out-Null
-        $effectiveForwardArgs.Add([string]$TransportHealthDelayMs) | Out-Null
-    }
-}
-
-if ($RequireMediaReady) {
-    $tasksWithMediaReadyGate = @("webrtc-edge-agent-acceptance")
-    if ($tasksWithMediaReadyGate -contains $Task) {
-        $effectiveForwardArgs.Add("-RequireMediaReady") | Out-Null
-    }
-}
-
-if ($RequireMediaPlaybackUrl) {
-    $tasksWithMediaPlaybackGate = @("webrtc-edge-agent-acceptance")
-    if ($tasksWithMediaPlaybackGate -contains $Task) {
-        $effectiveForwardArgs.Add("-RequireMediaPlaybackUrl") | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("MediaHealthAttempts") -and $MediaHealthAttempts -gt 0) {
-    $tasksWithMediaHealthAttempts = @("webrtc-edge-agent-acceptance", "ci-local", "full")
-    if ($tasksWithMediaHealthAttempts -contains $Task) {
-        $parameterName = if ($Task -eq "webrtc-edge-agent-acceptance") { "-MediaHealthAttempts" } else { "-WebRtcMediaHealthAttempts" }
-        $effectiveForwardArgs.Add($parameterName) | Out-Null
-        $effectiveForwardArgs.Add([string]$MediaHealthAttempts) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("MediaHealthDelayMs") -and $MediaHealthDelayMs -gt 0) {
-    $tasksWithMediaHealthDelay = @("webrtc-edge-agent-acceptance", "ci-local", "full")
-    if ($tasksWithMediaHealthDelay -contains $Task) {
-        $parameterName = if ($Task -eq "webrtc-edge-agent-acceptance") { "-MediaHealthDelayMs" } else { "-WebRtcMediaHealthDelayMs" }
-        $effectiveForwardArgs.Add($parameterName) | Out-Null
-        $effectiveForwardArgs.Add([string]$MediaHealthDelayMs) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("SloWindowMinutes") -and $SloWindowMinutes -gt 0) {
-    if ($Task -eq "ops-slo-security-verify") {
-        $effectiveForwardArgs.Add("-SloWindowMinutes") | Out-Null
-        $effectiveForwardArgs.Add([string]$SloWindowMinutes) | Out-Null
-    }
-}
-
-if ($AllowAuthDisabled) {
-    if ($Task -eq "ops-slo-security-verify") {
-        $effectiveForwardArgs.Add("-AllowAuthDisabled") | Out-Null
-    }
-}
-
-if ($FailOnSloWarning) {
-    if ($Task -eq "ops-slo-security-verify") {
-        $effectiveForwardArgs.Add("-FailOnSloWarning") | Out-Null
-    }
-}
-
-if ($FailOnSecurityWarning) {
-    if ($Task -eq "ops-slo-security-verify") {
-        $effectiveForwardArgs.Add("-FailOnSecurityWarning") | Out-Null
-    }
-}
-
-if ($RequireAuditTrailCategories) {
-    if ($Task -eq "ops-slo-security-verify") {
-        $effectiveForwardArgs.Add("-RequireAuditTrailCategories") | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("ControlWsUrl") -and -not [string]::IsNullOrWhiteSpace($ControlWsUrl)) {
-    $tasksWithControlWsUrl = @("webrtc-stack", "webrtc-peer-adapter", "webrtc-edge-agent-acceptance")
-    if ($tasksWithControlWsUrl -contains $Task) {
-        $effectiveForwardArgs.Add("-ControlWsUrl") | Out-Null
-        $effectiveForwardArgs.Add($ControlWsUrl) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("CommandExecutor") -and -not [string]::IsNullOrWhiteSpace($CommandExecutor)) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-CommandExecutor") | Out-Null
-        $effectiveForwardArgs.Add($CommandExecutor) | Out-Null
-    }
-}
-
-if ($AllowLegacyControlWs) {
-    $tasksWithLegacyControlWs = @("webrtc-stack", "webrtc-edge-agent-acceptance", "demo-flow", "ci-local", "full", "webrtc-peer-adapter")
-    if ($tasksWithLegacyControlWs -contains $Task) {
-        if (-not (Test-LegacyExp022Enabled)) {
-            throw "Legacy exp-022 compatibility mode is disabled. Set HIDBRIDGE_ENABLE_LEGACY_EXP022=true in your shell to run controlws/peer-adapter flows."
-        }
-
-        $effectiveForwardArgs.Add("-AllowLegacyControlWs") | Out-Null
-    }
-}
-
-if ($Task -eq "webrtc-peer-adapter" -and -not $AllowLegacyControlWs) {
-    throw "Task 'webrtc-peer-adapter' is legacy exp-022 compatibility tooling. Pass -AllowLegacyControlWs explicitly to run it."
-}
-
-if ($PSBoundParameters.ContainsKey("UartPort") -and -not [string]::IsNullOrWhiteSpace($UartPort)) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-UartPort") | Out-Null
-        $effectiveForwardArgs.Add($UartPort) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("UartBaud") -and $UartBaud -gt 0) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-UartBaud") | Out-Null
-        $effectiveForwardArgs.Add([string]$UartBaud) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("UartHmacKey") -and -not [string]::IsNullOrWhiteSpace($UartHmacKey)) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-UartHmacKey") | Out-Null
-        $effectiveForwardArgs.Add($UartHmacKey) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("Exp022DurationSec") -and $Exp022DurationSec -gt 0) {
-    if ($Task -eq "webrtc-stack") {
-        $effectiveForwardArgs.Add("-Exp022DurationSec") | Out-Null
-        $effectiveForwardArgs.Add([string]$Exp022DurationSec) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("AdapterDurationSec") -and $AdapterDurationSec -gt 0) {
-    if ($Task -eq "webrtc-stack") {
-        Write-Warning "AdapterDurationSec is deprecated for webrtc-stack and ignored."
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("PeerReadyTimeoutSec") -and $PeerReadyTimeoutSec -gt 0) {
-    if ($Task -eq "webrtc-stack") {
-        Write-Warning "PeerReadyTimeoutSec is deprecated for webrtc-stack and ignored."
-    }
-    elseif ($Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-PeerReadyTimeoutSec") | Out-Null
-        $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
-    }
-    elseif ($Task -eq "ci-local" -or $Task -eq "full") {
-        $effectiveForwardArgs.Add("-WebRtcPeerReadyTimeoutSec") | Out-Null
-        $effectiveForwardArgs.Add([string]$PeerReadyTimeoutSec) | Out-Null
-    }
-}
-
-if ($StopExisting) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-StopExisting") | Out-Null
-    }
-}
-
-if ($StopStackAfter) {
-    if ($Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-StopStackAfter") | Out-Null
-    }
-}
-
-if ($SkipRuntimeBootstrap) {
-    if ($Task -eq "webrtc-stack" -or $Task -eq "webrtc-edge-agent-acceptance") {
-        $effectiveForwardArgs.Add("-SkipRuntimeBootstrap") | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("EndpointId") -and -not [string]::IsNullOrWhiteSpace($EndpointId)) {
-    if ($Task -eq "webrtc-stack") {
-        $effectiveForwardArgs.Add("-EndpointId") | Out-Null
-        $effectiveForwardArgs.Add($EndpointId) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("PrincipalId") -and -not [string]::IsNullOrWhiteSpace($PrincipalId)) {
-    $tasksWithPrincipalId = @("webrtc-stack", "webrtc-edge-agent-acceptance", "webrtc-peer-adapter", "demo-gate")
-    if ($tasksWithPrincipalId -contains $Task) {
-        $effectiveForwardArgs.Add("-PrincipalId") | Out-Null
-        $effectiveForwardArgs.Add($PrincipalId) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("OutputJsonPath") -and -not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
-    $effectiveForwardArgs.Add("-OutputJsonPath") | Out-Null
-    $effectiveForwardArgs.Add($OutputJsonPath) | Out-Null
-}
-
-if ($Task -eq "platform-runtime") {
-    if ($PSBoundParameters.ContainsKey("Action") -and -not [string]::IsNullOrWhiteSpace($Action)) {
-        $effectiveForwardArgs.Add("-Action") | Out-Null
-        $effectiveForwardArgs.Add($Action) | Out-Null
-    }
-
-    if ($PSBoundParameters.ContainsKey("ComposeFile") -and -not [string]::IsNullOrWhiteSpace($ComposeFile)) {
-        $effectiveForwardArgs.Add("-ComposeFile") | Out-Null
-        $effectiveForwardArgs.Add($ComposeFile) | Out-Null
-    }
-
-    if ($Build) {
-        $effectiveForwardArgs.Add("-Build") | Out-Null
-    }
-
-    if ($Pull) {
-        $effectiveForwardArgs.Add("-Pull") | Out-Null
-    }
-
-    if ($RemoveVolumes) {
-        $effectiveForwardArgs.Add("-RemoveVolumes") | Out-Null
-    }
-
-    if ($RemoveOrphans) {
-        $effectiveForwardArgs.Add("-RemoveOrphans") | Out-Null
-    }
-
-    if ($Follow) {
-        $effectiveForwardArgs.Add("-Follow") | Out-Null
-    }
-
-    if ($SkipReadyWait) {
-        $effectiveForwardArgs.Add("-SkipReadyWait") | Out-Null
-    }
-
-    if ($PSBoundParameters.ContainsKey("ReadyTimeoutSec") -and $ReadyTimeoutSec -gt 0) {
-        $effectiveForwardArgs.Add("-ReadyTimeoutSec") | Out-Null
-        $effectiveForwardArgs.Add([string]$ReadyTimeoutSec) | Out-Null
-    }
-}
-
-if ($PSBoundParameters.ContainsKey("InterfaceSelectorsCsv") -and -not [string]::IsNullOrWhiteSpace($InterfaceSelectorsCsv)) {
-    $effectiveForwardArgs.Add("-InterfaceSelectorsCsv") | Out-Null
-    $effectiveForwardArgs.Add($InterfaceSelectorsCsv) | Out-Null
-}
-
-& $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath @($effectiveForwardArgs.ToArray())
-exit $LASTEXITCODE
+exit $exitCode
