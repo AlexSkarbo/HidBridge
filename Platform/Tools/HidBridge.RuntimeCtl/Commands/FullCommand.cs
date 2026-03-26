@@ -60,6 +60,12 @@ internal static class FullCommand
                     "Realm Sync",
                     "identity-reset",
                     identityResetArgs);
+
+                await RunApiAuthResyncStepAsync(
+                    platformRoot,
+                    logRoot,
+                    results,
+                    options);
             }
 
             if (!options.SkipCiLocal)
@@ -228,6 +234,107 @@ internal static class FullCommand
         }
     }
 
+    private static async Task RunApiAuthResyncStepAsync(
+        string platformRoot,
+        string logRoot,
+        List<FullStepResult> results,
+        FullOptions options)
+    {
+        const string stepName = "Auth/API Resync";
+        var logPath = Path.Combine(logRoot, "Auth-API-Resync.log");
+        var repoRoot = Directory.GetParent(platformRoot)?.FullName ?? platformRoot;
+        var composeFilePath = Path.IsPathRooted(options.ComposeFile)
+            ? options.ComposeFile
+            : Path.Combine(repoRoot, options.ComposeFile);
+
+        var stopwatch = Stopwatch.StartNew();
+        Console.WriteLine();
+        Console.WriteLine($"... {stepName} started");
+        Console.WriteLine($"Live log: {logPath}");
+
+        if (!File.Exists(composeFilePath))
+        {
+            throw new InvalidOperationException($"Compose file not found for auth/API resync: {composeFilePath}");
+        }
+
+        var restartInfo = new ProcessStartInfo
+        {
+            FileName = "docker",
+            WorkingDirectory = repoRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        restartInfo.ArgumentList.Add("compose");
+        restartInfo.ArgumentList.Add("-f");
+        restartInfo.ArgumentList.Add(composeFilePath);
+        restartInfo.ArgumentList.Add("restart");
+        restartInfo.ArgumentList.Add("hidbridge_api");
+
+        using var restartProcess = Process.Start(restartInfo);
+        if (restartProcess is null)
+        {
+            throw new InvalidOperationException("Failed to start docker compose restart for hidbridge_api.");
+        }
+
+        var restartStdOut = await restartProcess.StandardOutput.ReadToEndAsync();
+        var restartStdErr = await restartProcess.StandardError.ReadToEndAsync();
+        await restartProcess.WaitForExitAsync();
+        await File.WriteAllTextAsync(logPath, $"{restartStdOut}{Environment.NewLine}{restartStdErr}".Trim());
+
+        if (restartProcess.ExitCode != 0)
+        {
+            stopwatch.Stop();
+            results.Add(new FullStepResult(stepName, "FAIL", stopwatch.Elapsed.TotalSeconds, restartProcess.ExitCode, logPath));
+            Console.WriteLine();
+            Console.WriteLine($"=== {stepName} ===");
+            Console.WriteLine($"FAIL  {stepName}");
+            Console.WriteLine($"Log:   {logPath}");
+            throw new InvalidOperationException($"docker compose restart hidbridge_api failed with exit code {restartProcess.ExitCode}.");
+        }
+
+        var healthDeadline = DateTimeOffset.UtcNow.AddSeconds(Math.Max(15, options.ApiResyncHealthTimeoutSec));
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        var healthUrl = $"{options.ApiBaseUrl.TrimEnd('/')}/health";
+        var isHealthy = false;
+        while (DateTimeOffset.UtcNow < healthDeadline)
+        {
+            try
+            {
+                using var response = await http.GetAsync(healthUrl);
+                if (response.IsSuccessStatusCode)
+                {
+                    isHealthy = true;
+                    break;
+                }
+            }
+            catch
+            {
+                // best effort retry until deadline
+            }
+
+            await Task.Delay(1000);
+        }
+
+        stopwatch.Stop();
+        if (!isHealthy)
+        {
+            results.Add(new FullStepResult(stepName, "FAIL", stopwatch.Elapsed.TotalSeconds, 1, logPath));
+            Console.WriteLine();
+            Console.WriteLine($"=== {stepName} ===");
+            Console.WriteLine($"FAIL  {stepName}");
+            Console.WriteLine($"Log:   {logPath}");
+            throw new InvalidOperationException(
+                $"API health did not recover after identity reset within {Math.Max(15, options.ApiResyncHealthTimeoutSec)}s ({healthUrl}).");
+        }
+
+        results.Add(new FullStepResult(stepName, "PASS", stopwatch.Elapsed.TotalSeconds, 0, logPath));
+        Console.WriteLine();
+        Console.WriteLine($"=== {stepName} ===");
+        Console.WriteLine($"PASS  {stepName}");
+        Console.WriteLine($"Log:   {logPath}");
+    }
+
     private static (string KeycloakBaseUrl, string RealmName) ResolveKeycloakFromAuthority(string authAuthority)
     {
         var authority = string.IsNullOrWhiteSpace(authAuthority)
@@ -286,6 +393,9 @@ internal static class FullCommand
     private sealed class FullOptions
     {
         public string Configuration { get; set; } = "Debug";
+        public string ApiBaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string ComposeFile { get; set; } = "docker-compose.platform-runtime.yml";
+        public int ApiResyncHealthTimeoutSec { get; set; } = 90;
         public string ConnectionString { get; set; } = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge";
         public string Schema { get; set; } = "hidbridge";
         public string AuthAuthority { get; set; } = "http://host.docker.internal:18096/realms/hidbridge-dev";
@@ -341,6 +451,9 @@ internal static class FullCommand
                 switch (name.ToLowerInvariant())
                 {
                     case "configuration": options.Configuration = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "apibaseurl": options.ApiBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "composefile": options.ComposeFile = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "apiresynchealthtimeoutsec": options.ApiResyncHealthTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "connectionstring": options.ConnectionString = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "schema": options.Schema = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "authauthority": options.AuthAuthority = RequireValue(name, value, ref i, ref hasValue, ref error); break;

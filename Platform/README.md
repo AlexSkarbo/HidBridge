@@ -855,27 +855,28 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - automatically exports artifacts on failure into `Platform/Artifacts/ci-local-*`
 - `export-artifacts` exports `.logs` and, optionally, `.smoke-data` and `Keycloak` backups into one artifact folder.
 - additional unified launcher examples:
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- ci-local`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task export-artifacts -- -IncludeSmokeData -IncludeBackups`
-  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task token-debug`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform task export-artifacts -IncludeSmokeData -IncludeBackups`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform task token-debug`
 Unified full run:
 ```powershell
-dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
 ```
 
 What it does:
 - realm sync with backup
+- forced API auth resync after realm reset (`docker compose restart hidbridge_api` + `/health` wait)
 - local CI (`doctor`, `checks`, `bearer smoke`, mandatory WebRTC edge-agent acceptance lane)
 - artifact export on failure
 
 Recommended operator/dev workflow:
 ```powershell
-dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
 ```
 
 Fast token inspection:
 ```powershell
-dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- task token-debug
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform task token-debug
 ```
 Bearer rollout:
 ```powershell

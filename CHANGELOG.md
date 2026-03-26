@@ -7,6 +7,10 @@ Summary:
 - Hardened bearer bootstrap in native RuntimeCtl lanes:
   - `bearer-smoke` now retries OIDC bootstrap/inventory bearer validation before failing.
   - `checks` now retries the embedded `bearer-smoke` step (bounded attempts) to reduce transient auth startup flakes.
+- Added hard auth/API resync step in `full` after `identity-reset`:
+  - executes `docker compose restart hidbridge_api`,
+  - waits for API `/health` recovery,
+  - then continues into `ci-local`.
 - Updated runbook examples to canonical RuntimeCtl invocation form with explicit `--platform-root Platform`.
 - Added local stability-baseline profile guidance:
   - one `full` sync run,
@@ -16,6 +20,7 @@ Detailed notes:
 
 - `Platform/Tools/HidBridge.RuntimeCtl/Commands/BearerSmokeCommand.cs`
 - `Platform/Tools/HidBridge.RuntimeCtl/Commands/ChecksCommand.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/FullCommand.cs`
 - `Platform/README.md`
 
 ## 2026-03-26 (webrtc-acceptance: default output path fix)
