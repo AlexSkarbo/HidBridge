@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-03-26 (cli-first: native platform-runtime + script-step removal in full/demo-flow)
+
+Summary:
+
+- Migrated `platform-runtime` to native RuntimeCtl orchestration (no `run_platform_runtime_profile.ps1` bridge):
+  - `-Action up|down|restart|status|logs`
+  - `-ComposeFile`
+  - `-Build`, `-Pull`, `-RemoveVolumes`, `-RemoveOrphans`, `-Follow`, `-SkipReadyWait`
+  - `-ReadyTimeoutSec`
+  - readiness waits and runtime summary parity preserved.
+- Removed remaining script-step execution from core native flows:
+  - `demo-flow`: `Demo Seed` now calls native `demo-seed` command.
+  - `full`: `Realm Sync` now calls native `identity-reset` command.
+- Added explicit TODO note in RuntimeCtl about next refactor phase (split monolithic `Program.cs` into per-command files).
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+
 ## 2026-03-26 (cli-first smoke lanes: native sql/file stability + legacy smoke scripts removed)
 
 Summary:
