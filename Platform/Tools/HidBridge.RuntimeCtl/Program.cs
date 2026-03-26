@@ -15,6 +15,10 @@ internal sealed class RuntimeCtlApp
         {
             ["doctor"] = new("doctor", "Runs environment and API health checks (native C#).", CommandKind.Doctor, null),
             ["checks"] = new("checks", "Runs platform checks lane (native C#).", CommandKind.Checks, null),
+            ["tests"] = new("tests", "Runs restore/build/test lane (native C#).", CommandKind.Tests, null),
+            ["smoke"] = new("smoke", "Runs backend smoke lane.", CommandKind.Smoke, null),
+            ["smoke-file"] = new("smoke-file", "Runs file-provider backend smoke lane.", CommandKind.SmokeFile, null),
+            ["smoke-sql"] = new("smoke-sql", "Runs sql-provider backend smoke lane.", CommandKind.SmokeSql, null),
             ["bearer-smoke"] = new("bearer-smoke", "Runs API bearer smoke lane (native C#).", CommandKind.BearerSmoke, null),
             ["smoke-bearer"] = new("smoke-bearer", "Runs API bearer smoke lane (native C#).", CommandKind.BearerSmoke, null),
             ["export-artifacts"] = new("export-artifacts", "Exports runtime artifacts (native C#).", CommandKind.ExportArtifacts, null),
@@ -22,6 +26,7 @@ internal sealed class RuntimeCtlApp
             ["token-debug"] = new("token-debug", "Acquires/inspects OIDC token and dumps claims (native C#).", CommandKind.TokenDebug, null),
             ["close-failed-rooms"] = new("close-failed-rooms", "Closes failed sessions via API action endpoint (native C#).", CommandKind.CloseFailedRooms, null),
             ["close-stale-rooms"] = new("close-stale-rooms", "Closes stale sessions via API action endpoint (native C#).", CommandKind.CloseStaleRooms, null),
+            ["demo-seed"] = new("demo-seed", "Seeds demo runtime state (native C#).", CommandKind.DemoSeed, null),
             ["ci-local"] = new("ci-local", "Runs local CI gate lane (native C# orchestration).", CommandKind.CiLocal, null),
             ["full"] = new("full", "Runs full local gate lane (native C# orchestration).", CommandKind.Full, null),
             ["demo-flow"] = new("demo-flow", "Runs demo bootstrap flow (native C# orchestration).", CommandKind.DemoFlow, null),
@@ -40,13 +45,8 @@ internal sealed class RuntimeCtlApp
     private static readonly IReadOnlyDictionary<string, string> TaskMap =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["tests"] = "Scripts/run_all_tests.ps1",
-            ["smoke"] = "Scripts/run_smoke.ps1",
-            ["smoke-file"] = "Scripts/run_file_smoke.ps1",
-            ["smoke-sql"] = "Scripts/run_sql_smoke.ps1",
             ["bearer-rollout"] = "Scripts/run_bearer_rollout_phase.ps1",
             ["identity-onboard"] = "Identity/Keycloak/Onboard-HidBridgeOperator.ps1",
-            ["demo-seed"] = "Scripts/run_demo_seed.ps1",
             ["uart-diagnostics"] = "Scripts/run_uart_diagnostics.ps1",
             ["webrtc-relay-smoke"] = "Scripts/run_webrtc_relay_smoke.ps1",
             ["webrtc-peer-adapter"] = "Scripts/run_webrtc_peer_adapter.ps1",
@@ -175,12 +175,17 @@ internal sealed class RuntimeCtlApp
         {
             CommandKind.Doctor => await DoctorCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.Checks => await ChecksCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.Tests => await TestsCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.Smoke => await SmokeCommand.RunAsync(_platformRoot, _forwardArgs, SmokeCommand.SmokeMode.ProviderAuto),
+            CommandKind.SmokeFile => await SmokeCommand.RunAsync(_platformRoot, _forwardArgs, SmokeCommand.SmokeMode.ForceFile),
+            CommandKind.SmokeSql => await SmokeCommand.RunAsync(_platformRoot, _forwardArgs, SmokeCommand.SmokeMode.ForceSql),
             CommandKind.BearerSmoke => await BearerSmokeCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.ExportArtifacts => await ArtifactExportCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.CleanLogs => await CleanLogsCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.TokenDebug => await TokenDebugCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.CloseFailedRooms => await CloseFailedRoomsCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.CloseStaleRooms => await CloseStaleRoomsCommand.RunAsync(_platformRoot, _forwardArgs),
+            CommandKind.DemoSeed => await DemoSeedCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.CiLocal => await CiLocalCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.Full => await FullCommand.RunAsync(_platformRoot, _forwardArgs),
             CommandKind.WebRtcAcceptance => await WebRtcAcceptanceCommand.RunAsync(_platformRoot, _forwardArgs),
@@ -413,12 +418,17 @@ internal sealed class RuntimeCtlApp
         Doctor,
         IdentityReset,
         Checks,
+        Tests,
+        Smoke,
+        SmokeFile,
+        SmokeSql,
         BearerSmoke,
         ExportArtifacts,
         CleanLogs,
         TokenDebug,
         CloseFailedRooms,
         CloseStaleRooms,
+        DemoSeed,
         CiLocal,
         Full,
         WebRtcAcceptance,
@@ -1630,7 +1640,6 @@ internal static class ChecksCommand
                     "-Schema", options.Schema,
                     "-BaseUrl", options.BaseUrl,
                     "-AuthAuthority", options.AuthAuthority,
-                    "-AuthAudience", options.AuthAudience,
                     "-TokenClientId", options.TokenClientId,
                     "-TokenScope", options.TokenScope,
                     "-TokenUsername", options.TokenUsername,
@@ -1640,6 +1649,11 @@ internal static class ChecksCommand
                     "-ForeignTokenUsername", options.ForeignTokenUsername,
                     "-ForeignTokenPassword", options.ForeignTokenPassword,
                 };
+                if (!string.IsNullOrWhiteSpace(options.AuthAudience))
+                {
+                    smokeArgs.Add("-AuthAudience");
+                    smokeArgs.Add(options.AuthAudience);
+                }
                 if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
                 {
                     smokeArgs.Add("-TokenClientSecret");
@@ -1828,6 +1842,941 @@ internal static class ChecksCommand
     }
 }
 
+internal static class TestsCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!TestsOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"tests options error: {parseError}");
+            return 1;
+        }
+
+        var repoRoot = Directory.GetParent(platformRoot)?.FullName ?? platformRoot;
+        var logRoot = Path.Combine(platformRoot, ".logs", "tests", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(logRoot);
+        var results = new List<(string Name, string Status, double Seconds, int ExitCode, string LogPath)>();
+
+        async Task RunDotnetStep(string name, IReadOnlyList<string> dotnetArgs)
+        {
+            var logPath = Path.Combine(logRoot, $"{name.Replace(' ', '-').Replace("(", string.Empty).Replace(")", string.Empty)}.log");
+            var sw = Stopwatch.StartNew();
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                WorkingDirectory = repoRoot,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            foreach (var arg in dotnetArgs)
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                throw new InvalidOperationException($"Failed to start dotnet step '{name}'.");
+            }
+
+            var stdOut = await process.StandardOutput.ReadToEndAsync();
+            var stdErr = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            sw.Stop();
+            await File.WriteAllTextAsync(logPath, $"{stdOut}{Environment.NewLine}{stdErr}".Trim());
+
+            var status = process.ExitCode == 0 ? "PASS" : "FAIL";
+            results.Add((name, status, sw.Elapsed.TotalSeconds, process.ExitCode, logPath));
+            Console.WriteLine();
+            Console.WriteLine($"=== {name} ===");
+            Console.WriteLine($"{status}  {name}");
+            Console.WriteLine($"Log:   {logPath}");
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"{name} failed with exit code {process.ExitCode}");
+            }
+        }
+
+        try
+        {
+            if (ResolveDotnetPath() is null)
+            {
+                var logPath = Path.Combine(logRoot, "dotnet-availability.log");
+                await File.WriteAllTextAsync(logPath, "dotnet not found in PATH");
+                results.Add(("dotnet availability", "FAIL", 0, 127, logPath));
+                if (options.StopOnFailure)
+                {
+                    throw new InvalidOperationException("dotnet not found in PATH");
+                }
+            }
+            else
+            {
+                await RunDotnetStep("Platform restore", ["restore", "Platform/HidBridge.Platform.sln"]);
+                await RunDotnetStep("Platform build", ["build", "Platform/HidBridge.Platform.sln", "-c", options.Configuration, "-v", options.DotnetVerbosity, "-m:1", "-nodeReuse:false"]);
+                await RunDotnetStep("HidBridge.Platform.Tests", ["test", "Platform/Tests/HidBridge.Platform.Tests/HidBridge.Platform.Tests.csproj", "-c", options.Configuration, "-v", options.DotnetVerbosity, "-m:1", "-nodeReuse:false"]);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"Platform test runner aborted: {ex.Message}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("=== Tests Summary ===");
+        Console.WriteLine();
+        Console.WriteLine("Name                         Status Seconds ExitCode");
+        Console.WriteLine("----                         ------ ------- --------");
+        foreach (var step in results)
+        {
+            Console.WriteLine($"{step.Name,-28} {step.Status,-6} {step.Seconds,7:0.##} {step.ExitCode,8}");
+        }
+        Console.WriteLine();
+        Console.WriteLine($"Logs root: {logRoot}");
+        foreach (var step in results)
+        {
+            Console.WriteLine($"{step.Name}: {step.LogPath}");
+        }
+
+        return results.Any(static x => string.Equals(x.Status, "FAIL", StringComparison.OrdinalIgnoreCase)) ? 1 : 0;
+    }
+
+    private static string? ResolveDotnetPath()
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        var entries = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var entry in entries)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var candidateExe = Path.Combine(entry, "dotnet.exe");
+                if (File.Exists(candidateExe))
+                {
+                    return candidateExe;
+                }
+            }
+
+            var candidate = Path.Combine(entry, "dotnet");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private sealed class TestsOptions
+    {
+        public string Configuration { get; set; } = "Debug";
+        public string DotnetVerbosity { get; set; } = "minimal";
+        public bool StopOnFailure { get; set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out TestsOptions options, out string? error)
+        {
+            options = new TestsOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "configuration": options.Configuration = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "dotnetverbosity": options.DotnetVerbosity = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "stoponfailure": options.StopOnFailure = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    default:
+                        error = $"Unsupported tests option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+    }
+}
+
+internal static class SmokeCommand
+{
+    internal enum SmokeMode
+    {
+        ProviderAuto,
+        ForceFile,
+        ForceSql,
+    }
+
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args, SmokeMode mode)
+    {
+        if (!SmokeOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"smoke options error: {parseError}");
+            return 1;
+        }
+
+        var effectiveProvider = mode switch
+        {
+            SmokeMode.ForceFile => "File",
+            SmokeMode.ForceSql => "Sql",
+            _ => options.Provider,
+        };
+
+        var bearerArgs = new List<string>
+        {
+            "-Configuration", options.Configuration,
+            "-BaseUrl", options.BaseUrl,
+            "-EnableApiAuth", options.EnableApiAuth ? "true" : "false",
+            "-DisableHeaderFallback", options.DisableHeaderFallback ? "true" : "false",
+            "-BearerOnly", options.BearerOnly ? "true" : "false",
+            "-AuthAuthority", options.AuthAuthority,
+            "-TokenClientId", options.TokenClientId,
+            "-TokenScope", options.TokenScope,
+            "-TokenUsername", options.TokenUsername,
+            "-TokenPassword", options.TokenPassword,
+            "-ViewerTokenUsername", options.ViewerTokenUsername,
+            "-ViewerTokenPassword", options.ViewerTokenPassword,
+            "-ForeignTokenUsername", options.ForeignTokenUsername,
+            "-ForeignTokenPassword", options.ForeignTokenPassword,
+            "-Provider", effectiveProvider,
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.AuthAudience))
+        {
+            bearerArgs.Add("-AuthAudience");
+            bearerArgs.Add(options.AuthAudience);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
+        {
+            bearerArgs.Add("-TokenClientSecret");
+            bearerArgs.Add(options.TokenClientSecret);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.AccessToken))
+        {
+            bearerArgs.Add("-AccessToken");
+            bearerArgs.Add(options.AccessToken);
+        }
+
+        if (string.Equals(effectiveProvider, "Sql", StringComparison.OrdinalIgnoreCase))
+        {
+            bearerArgs.Add("-ConnectionString");
+            bearerArgs.Add(options.ConnectionString);
+            bearerArgs.Add("-Schema");
+            bearerArgs.Add(options.Schema);
+        }
+
+        if (options.NoBuild)
+        {
+            bearerArgs.Add("-NoBuild");
+        }
+
+        if (string.Equals(effectiveProvider, "File", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(options.DataRoot))
+        {
+            Console.WriteLine($"WARNING: -DataRoot is currently ignored by native smoke mode ({options.DataRoot}).");
+        }
+
+        return await BearerSmokeCommand.RunAsync(platformRoot, bearerArgs);
+    }
+
+    private sealed class SmokeOptions
+    {
+        public string Provider { get; set; } = "File";
+        public string Configuration { get; set; } = "Debug";
+        public string ConnectionString { get; set; } = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge";
+        public string Schema { get; set; } = "hidbridge";
+        public string BaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string DataRoot { get; set; } = string.Empty;
+        public string AccessToken { get; set; } = string.Empty;
+        public bool EnableApiAuth { get; set; }
+        public string AuthAuthority { get; set; } = "http://127.0.0.1:18096/realms/hidbridge-dev";
+        public string AuthAudience { get; set; } = string.Empty;
+        public string TokenClientId { get; set; } = "controlplane-smoke";
+        public string TokenClientSecret { get; set; } = string.Empty;
+        public string TokenScope { get; set; } = "openid profile email";
+        public string TokenUsername { get; set; } = "operator.smoke.admin";
+        public string TokenPassword { get; set; } = "ChangeMe123!";
+        public string ViewerTokenUsername { get; set; } = "operator.smoke.viewer";
+        public string ViewerTokenPassword { get; set; } = "ChangeMe123!";
+        public string ForeignTokenUsername { get; set; } = "operator.smoke.foreign";
+        public string ForeignTokenPassword { get; set; } = "ChangeMe123!";
+        public bool DisableHeaderFallback { get; set; }
+        public bool BearerOnly { get; set; }
+        public bool NoBuild { get; set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out SmokeOptions options, out string? error)
+        {
+            options = new SmokeOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+                switch (name.ToLowerInvariant())
+                {
+                    case "provider":
+                        options.Provider = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        if (!string.Equals(options.Provider, "File", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(options.Provider, "Sql", StringComparison.OrdinalIgnoreCase))
+                        {
+                            error = $"Option -{name} supports only 'File' or 'Sql'.";
+                        }
+                        break;
+                    case "configuration": options.Configuration = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "connectionstring": options.ConnectionString = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "schema": options.Schema = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "baseurl": options.BaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "dataroot": options.DataRoot = RequireValueAllowEmpty(name, value, ref i, ref hasValue, ref error); break;
+                    case "accesstoken": options.AccessToken = RequireValueAllowEmpty(name, value, ref i, ref hasValue, ref error); break;
+                    case "enableapiauth": options.EnableApiAuth = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "authauthority": options.AuthAuthority = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "authaudience": options.AuthAudience = RequireValueAllowEmpty(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenclientid": options.TokenClientId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenclientsecret": options.TokenClientSecret = RequireValueAllowEmpty(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenscope": options.TokenScope = RequireValueAllowEmpty(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenusername": options.TokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenpassword": options.TokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "viewertokenusername": options.ViewerTokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "viewertokenpassword": options.ViewerTokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "foreigntokenusername": options.ForeignTokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "foreigntokenpassword": options.ForeignTokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "disableheaderfallback": options.DisableHeaderFallback = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "beareronly": options.BearerOnly = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "nobuild": options.NoBuild = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    default:
+                        error = $"Unsupported smoke option '{token}'.";
+                        break;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static string RequireValueAllowEmpty(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue)
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value ?? string.Empty;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
+internal static class DemoSeedCommand
+{
+    public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
+    {
+        if (!DemoSeedOptions.TryParse(args, out var options, out var parseError))
+        {
+            Console.Error.WriteLine($"demo-seed options error: {parseError}");
+            return 1;
+        }
+
+        try
+        {
+            var accessToken = options.AccessToken;
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                accessToken = await RequestTokenAsync(options);
+            }
+
+            var callerHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Authorization"] = $"Bearer {accessToken}",
+                ["X-HidBridge-UserId"] = options.PrincipalId,
+                ["X-HidBridge-PrincipalId"] = options.PrincipalId,
+                ["X-HidBridge-TenantId"] = options.TenantId,
+                ["X-HidBridge-OrganizationId"] = options.OrganizationId,
+                ["X-HidBridge-Role"] = "operator.admin,operator.moderator,operator.viewer",
+            };
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var sessions = await InvokeJsonArrayAsync(http, HttpMethod.Get, $"{options.BaseUrl.TrimEnd('/')}/api/v1/sessions", callerHeaders, null);
+            var activeSessions = sessions.Where(IsActiveSession).ToArray();
+            var sessionsToClose = sessions.Where(IsClosableSession).ToArray();
+
+            var closedSessionIds = new List<string>();
+            if (!options.SkipCloseActiveSessions)
+            {
+                foreach (var session in sessionsToClose)
+                {
+                    var sessionId = GetSessionId(session);
+                    if (string.IsNullOrWhiteSpace(sessionId))
+                    {
+                        continue;
+                    }
+
+                    var closeBody = JsonSerializer.SerializeToElement(new
+                    {
+                        sessionId,
+                        reason = "demo-seed cleanup",
+                    });
+                    _ = await InvokeJsonElementAsync(
+                        http,
+                        HttpMethod.Post,
+                        $"{options.BaseUrl.TrimEnd('/')}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/close",
+                        callerHeaders,
+                        closeBody);
+                    closedSessionIds.Add(sessionId);
+                }
+            }
+
+            JsonElement inventory = default;
+            JsonElement[] endpoints = Array.Empty<JsonElement>();
+            JsonElement? readyEndpoint = null;
+            var timeoutSeconds = Math.Max(1, options.ReadyEndpointTimeoutSec);
+            var pollIntervalMs = Math.Max(100, options.ReadyEndpointPollIntervalMs);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
+
+            while (true)
+            {
+                inventory = await InvokeJsonElementAsync(http, HttpMethod.Get, $"{options.BaseUrl.TrimEnd('/')}/api/v1/dashboards/inventory", callerHeaders, null);
+                endpoints = GetArrayProperty(inventory, "endpoints");
+                readyEndpoint = endpoints.FirstOrDefault(endpoint => IsEndpointReady(endpoint, sessions));
+
+                if (readyEndpoint.HasValue)
+                {
+                    break;
+                }
+
+                if (DateTimeOffset.UtcNow >= deadline)
+                {
+                    break;
+                }
+
+                await Task.Delay(pollIntervalMs);
+            }
+
+            if (!readyEndpoint.HasValue)
+            {
+                var endpointSample = string.Join(", ", endpoints.Take(5).Select(endpoint =>
+                {
+                    var endpointId = GetStringProperty(endpoint, "endpointId");
+                    var activeSessionId = GetStringProperty(endpoint, "activeSessionId");
+                    if (string.IsNullOrWhiteSpace(activeSessionId))
+                    {
+                        return $"{endpointId}:idle";
+                    }
+                    var linkedSession = sessions.FirstOrDefault(x => string.Equals(GetSessionId(x), activeSessionId, StringComparison.Ordinal));
+                    var linkedState = linkedSession.ValueKind == JsonValueKind.Undefined ? "stale" : GetSessionState(linkedSession);
+                    return $"{endpointId}:busy({activeSessionId},state={linkedState})";
+                }));
+
+                throw new InvalidOperationException(
+                    $"Demo seed did not find any idle endpoint within {timeoutSeconds} second(s). " +
+                    $"Active sessions in scope: {activeSessions.Length}; non-terminal sessions in scope: {sessionsToClose.Length}; " +
+                    $"endpoints visible: {endpoints.Length}; endpoint sample: {endpointSample}.");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== Demo Seed Summary ===");
+            Console.WriteLine($"BaseUrl: {options.BaseUrl}");
+            Console.WriteLine($"Active sessions found: {activeSessions.Length}");
+            Console.WriteLine($"Non-terminal sessions found: {sessionsToClose.Length}");
+            Console.WriteLine($"Closed sessions: {closedSessionIds.Count}");
+            Console.WriteLine($"Endpoints visible: {endpoints.Length}");
+            if (closedSessionIds.Count > 0)
+            {
+                Console.WriteLine($"Closed session IDs: {string.Join(", ", closedSessionIds)}");
+            }
+            Console.WriteLine($"Ready endpoint: {GetStringProperty(readyEndpoint.Value, "endpointId")}");
+            Console.WriteLine($"Ready endpoint agent: {GetStringProperty(readyEndpoint.Value, "agentId")}");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+
+    private static bool IsActiveSession(JsonElement session) =>
+        string.Equals(GetSessionState(session), "Active", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsClosableSession(JsonElement session)
+    {
+        var sessionId = GetSessionId(session);
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return false;
+        }
+
+        var state = GetSessionState(session);
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return true;
+        }
+
+        return !string.Equals(state, "Ended", StringComparison.OrdinalIgnoreCase)
+               && !string.Equals(state, "Failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsEndpointReady(JsonElement endpoint, IReadOnlyList<JsonElement> sessions)
+    {
+        var activeSessionId = GetStringProperty(endpoint, "activeSessionId");
+        if (string.IsNullOrWhiteSpace(activeSessionId))
+        {
+            return true;
+        }
+
+        var linkedSession = sessions.FirstOrDefault(x => string.Equals(GetSessionId(x), activeSessionId, StringComparison.Ordinal));
+        if (linkedSession.ValueKind == JsonValueKind.Undefined)
+        {
+            return true;
+        }
+
+        var state = GetSessionState(linkedSession);
+        return string.Equals(state, "Ended", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(state, "Failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSessionId(JsonElement session)
+    {
+        var sessionId = GetStringProperty(session, "sessionId");
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            return sessionId;
+        }
+        return GetStringProperty(session, "SessionId");
+    }
+
+    private static string GetSessionState(JsonElement session)
+    {
+        if (session.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+        if (!session.TryGetProperty("state", out var state) || state.ValueKind == JsonValueKind.Null)
+        {
+            return string.Empty;
+        }
+        return state.ValueKind == JsonValueKind.String ? (state.GetString() ?? string.Empty) : state.GetRawText();
+    }
+
+    private static string GetStringProperty(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind == JsonValueKind.Null)
+        {
+            return string.Empty;
+        }
+        return property.ValueKind == JsonValueKind.String ? (property.GetString() ?? string.Empty) : property.GetRawText();
+    }
+
+    private static JsonElement[] GetArrayProperty(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<JsonElement>();
+        }
+        return property.EnumerateArray().ToArray();
+    }
+
+    private static async Task<JsonElement[]> InvokeJsonArrayAsync(
+        HttpClient http,
+        HttpMethod method,
+        string uri,
+        IReadOnlyDictionary<string, string> headers,
+        JsonElement? body)
+    {
+        var element = await InvokeJsonElementAsync(http, method, uri, headers, body);
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            return element.EnumerateArray().ToArray();
+        }
+        return Array.Empty<JsonElement>();
+    }
+
+    private static async Task<JsonElement> InvokeJsonElementAsync(
+        HttpClient http,
+        HttpMethod method,
+        string uri,
+        IReadOnlyDictionary<string, string> headers,
+        JsonElement? body)
+    {
+        using var request = new HttpRequestMessage(method, uri);
+        foreach (var header in headers)
+        {
+            if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content is not null)
+            {
+                request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
+        if (body.HasValue)
+        {
+            request.Content = new StringContent(body.Value.GetRawText(), Encoding.UTF8, "application/json");
+        }
+
+        using var response = await http.SendAsync(request);
+        var payload = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {method.Method} {uri} failed ({(int)response.StatusCode}): {payload}");
+        }
+        using var doc = JsonDocument.Parse(payload);
+        return doc.RootElement.Clone();
+    }
+
+    private static async Task<string> RequestTokenAsync(DemoSeedOptions options)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var scopeCandidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(options.TokenScope))
+        {
+            scopeCandidates.Add(options.TokenScope);
+        }
+        if (!scopeCandidates.Contains("openid", StringComparer.Ordinal))
+        {
+            scopeCandidates.Add("openid");
+        }
+        if (!scopeCandidates.Contains(string.Empty, StringComparer.Ordinal))
+        {
+            scopeCandidates.Add(string.Empty);
+        }
+
+        string? lastError = null;
+        foreach (var scope in scopeCandidates)
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["client_id"] = options.TokenClientId,
+                ["username"] = options.TokenUsername,
+                ["password"] = options.TokenPassword,
+            };
+            if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
+            {
+                form["client_secret"] = options.TokenClientSecret;
+            }
+            if (!string.IsNullOrWhiteSpace(scope))
+            {
+                form["scope"] = scope;
+            }
+
+            using var response = await client.PostAsync(
+                $"{options.KeycloakBaseUrl.TrimEnd('/')}/realms/{Uri.EscapeDataString(options.RealmName)}/protocol/openid-connect/token",
+                new FormUrlEncodedContent(form));
+            var payload = await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(payload);
+                if (!doc.RootElement.TryGetProperty("access_token", out var token))
+                {
+                    throw new InvalidOperationException("Demo seed token response did not contain access_token.");
+                }
+                return token.GetString() ?? string.Empty;
+            }
+
+            lastError = $"Demo seed could not acquire bearer token for '{options.TokenUsername}'. Token request failed ({(int)response.StatusCode}): {payload}";
+            var invalidScope = response.StatusCode == HttpStatusCode.BadRequest
+                               && payload.Contains("invalid_scope", StringComparison.OrdinalIgnoreCase);
+            var hasMore = !string.Equals(scope, scopeCandidates[^1], StringComparison.Ordinal);
+            if (invalidScope && hasMore)
+            {
+                continue;
+            }
+
+            throw new InvalidOperationException(lastError);
+        }
+
+        throw new InvalidOperationException(lastError ?? "Demo seed token request failed.");
+    }
+
+    private sealed class DemoSeedOptions
+    {
+        public string BaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string KeycloakBaseUrl { get; set; } = "http://127.0.0.1:18096";
+        public string RealmName { get; set; } = "hidbridge-dev";
+        public string TokenClientId { get; set; } = "controlplane-smoke";
+        public string TokenClientSecret { get; set; } = string.Empty;
+        public string TokenScope { get; set; } = "openid profile email";
+        public string TokenUsername { get; set; } = "operator.smoke.admin";
+        public string TokenPassword { get; set; } = "ChangeMe123!";
+        public string AccessToken { get; set; } = string.Empty;
+        public string PrincipalId { get; set; } = "demo-seed-admin";
+        public string TenantId { get; set; } = "local-tenant";
+        public string OrganizationId { get; set; } = "local-org";
+        public bool SkipCloseActiveSessions { get; set; }
+        public int ReadyEndpointTimeoutSec { get; set; } = 60;
+        public int ReadyEndpointPollIntervalMs { get; set; } = 500;
+
+        public static bool TryParse(IReadOnlyList<string> args, out DemoSeedOptions options, out string? error)
+        {
+            options = new DemoSeedOptions();
+            error = null;
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var token = args[i];
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (!token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = $"Unexpected token '{token}'. Expected PowerShell-style option.";
+                    return false;
+                }
+
+                var name = token.TrimStart('-');
+                var hasValue = i + 1 < args.Count && !args[i + 1].StartsWith("-", StringComparison.Ordinal);
+                var value = hasValue ? args[i + 1] : null;
+
+                switch (name.ToLowerInvariant())
+                {
+                    case "baseurl": options.BaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "keycloakbaseurl": options.KeycloakBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "realmname": options.RealmName = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenclientid": options.TokenClientId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenclientsecret": options.TokenClientSecret = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenscope": options.TokenScope = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenusername": options.TokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tokenpassword": options.TokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "accesstoken": options.AccessToken = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "principalid": options.PrincipalId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "tenantid": options.TenantId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "organizationid": options.OrganizationId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "skipcloseactivesessions": options.SkipCloseActiveSessions = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "readyendpointtimeoutsec": options.ReadyEndpointTimeoutSec = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "readyendpointpollintervalms": options.ReadyEndpointPollIntervalMs = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    default:
+                        error = $"Unsupported demo-seed option '{token}'.";
+                        return false;
+                }
+
+                if (error is not null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static int ParseInt(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            var raw = RequireValue(name, value, ref index, ref hasValue, ref error);
+            if (error is not null)
+            {
+                return 0;
+            }
+            if (!int.TryParse(raw, out var parsed))
+            {
+                error = $"Option -{name} requires an integer value.";
+                return 0;
+            }
+            return parsed;
+        }
+
+        private static string RequireValue(string name, string? value, ref int index, ref bool hasValue, ref string? error)
+        {
+            if (!hasValue || string.IsNullOrWhiteSpace(value))
+            {
+                error = $"Option -{name} requires a value.";
+                return string.Empty;
+            }
+            index++;
+            return value;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+}
+
 internal static class BearerSmokeCommand
 {
     public static async Task<int> RunAsync(string platformRoot, IReadOnlyList<string> args)
@@ -1855,9 +2804,42 @@ internal static class BearerSmokeCommand
 
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            if (!await TryHealthAsync(http, options.BaseUrl))
+            if (!options.NoBuild)
             {
+                var buildLogPath = Path.Combine(logRoot, "build.log");
+                var buildExitCode = await RunDotnetStepAsync(
+                    repoRoot,
+                    ["build", "Platform/HidBridge.Platform.sln", "-c", options.Configuration, "-v", "minimal", "-m:1", "-nodeReuse:false"],
+                    buildLogPath);
+                if (buildExitCode != 0)
+                {
+                    throw new InvalidOperationException($"Build failed with exit code {buildExitCode}. See {buildLogPath}.");
+                }
+                lines.Add("PASS build");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.DataRoot))
+            {
+                options.DataRoot = Path.Combine(platformRoot, ".smoke-data", options.Provider, DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
+            }
+            Directory.CreateDirectory(options.DataRoot);
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var apiHealthyAtRequestedUrl = await TryHealthAsync(http, options.BaseUrl);
+            var effectiveBaseUrl = options.BaseUrl.TrimEnd('/');
+            var shouldLaunchDedicatedApi = !apiHealthyAtRequestedUrl || options.ProviderExplicit;
+            if (shouldLaunchDedicatedApi)
+            {
+                var launchBaseUrl = options.BaseUrl.TrimEnd('/');
+                if (apiHealthyAtRequestedUrl)
+                {
+                    var requestedUri = new Uri(options.BaseUrl);
+                    var requestedPort = requestedUri.IsDefaultPort ? 80 : requestedUri.Port;
+                    var freePort = FindAvailablePort(requestedPort + 1);
+                    launchBaseUrl = $"{requestedUri.Scheme}://127.0.0.1:{freePort}";
+                    lines.Add($"INFO api.dedicated.url={launchBaseUrl}");
+                }
+
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = "dotnet",
@@ -1873,15 +2855,22 @@ internal static class BearerSmokeCommand
                 startInfo.ArgumentList.Add(options.Configuration);
                 startInfo.ArgumentList.Add("--no-build");
                 startInfo.ArgumentList.Add("--no-launch-profile");
-                startInfo.Environment["HIDBRIDGE_PERSISTENCE_PROVIDER"] = "Sql";
+                startInfo.Environment["ASPNETCORE_URLS"] = launchBaseUrl;
+                // API appsettings pins Kestrel endpoint to :18093; force dedicated smoke URL explicitly.
+                startInfo.Environment["Kestrel__Endpoints__Http__Url"] = launchBaseUrl;
+                startInfo.Environment["HIDBRIDGE_PERSISTENCE_PROVIDER"] = options.Provider;
+                startInfo.Environment["HIDBRIDGE_DATA_ROOT"] = options.DataRoot;
                 startInfo.Environment["HIDBRIDGE_SQL_CONNECTION"] = options.ConnectionString;
                 startInfo.Environment["HIDBRIDGE_SQL_SCHEMA"] = options.Schema;
                 startInfo.Environment["HIDBRIDGE_SQL_APPLY_MIGRATIONS"] = "true";
-                startInfo.Environment["HIDBRIDGE_AUTH_ENABLED"] = "true";
+                startInfo.Environment["HIDBRIDGE_TRANSPORT_PROVIDER"] = "webrtc-datachannel";
+                startInfo.Environment["HIDBRIDGE_AUTH_ENABLED"] = options.EnableApiAuth ? "true" : "false";
                 startInfo.Environment["HIDBRIDGE_AUTH_AUTHORITY"] = options.AuthAuthority;
                 startInfo.Environment["HIDBRIDGE_AUTH_AUDIENCE"] = options.AuthAudience;
-                startInfo.Environment["HIDBRIDGE_AUTH_REQUIRE_HTTPS_METADATA"] = options.AuthAuthority.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "false" : "true";
-                startInfo.Environment["HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK"] = "false";
+                startInfo.Environment["HIDBRIDGE_AUTH_REQUIRE_HTTPS_METADATA"] = options.EnableApiAuth && options.AuthAuthority.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "false" : "true";
+                startInfo.Environment["HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK"] = options.DisableHeaderFallback ? "false" : "true";
+                startInfo.Environment["HIDBRIDGE_UART_PASSIVE_HEALTH_MODE"] = "true";
+                startInfo.Environment["HIDBRIDGE_UART_RELEASE_PORT_AFTER_EXECUTE"] = "true";
 
                 apiProcess = WebRtcStackCommand.StartRedirectedProcess(startInfo, stdoutLog, stderrLog);
                 startedApi = true;
@@ -1890,7 +2879,7 @@ internal static class BearerSmokeCommand
                 for (var i = 0; i < 40; i++)
                 {
                     await Task.Delay(500);
-                    if (await TryHealthAsync(http, options.BaseUrl))
+                    if (await TryHealthAsync(http, launchBaseUrl))
                     {
                         healthReady = true;
                         break;
@@ -1903,37 +2892,122 @@ internal static class BearerSmokeCommand
 
                 if (!healthReady)
                 {
-                    throw new InvalidOperationException($"API did not become healthy at {options.BaseUrl}.");
+                    throw new InvalidOperationException($"API did not become healthy at {launchBaseUrl}.");
                 }
+
+                effectiveBaseUrl = launchBaseUrl;
+                options.BaseUrl = launchBaseUrl;
             }
 
             lines.Add("PASS api.health");
 
-            var ownerToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.TokenUsername, options.TokenPassword);
-            var viewerToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ViewerTokenUsername, options.ViewerTokenPassword);
-            var foreignToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ForeignTokenUsername, options.ForeignTokenPassword);
-            lines.Add("PASS oidc.tokens");
-
             var inventoryUri = $"{options.BaseUrl.TrimEnd('/')}/api/v1/dashboards/inventory";
-            var unauthorizedStatus = await GetStatusAsync(http, inventoryUri, null);
-            if (unauthorizedStatus is not HttpStatusCode.Unauthorized and not HttpStatusCode.Forbidden)
+            var ownerToken = string.Empty;
+            var viewerToken = string.Empty;
+            var foreignToken = string.Empty;
+            var bearerChecksRequested = options.EnableApiAuth || options.BearerOnly;
+            var effectiveBearerChecks = bearerChecksRequested;
+            var providedAccessToken = !string.IsNullOrWhiteSpace(options.AccessToken) && IsJwtTokenLike(options.AccessToken);
+            if (!effectiveBearerChecks)
             {
-                throw new InvalidOperationException($"Expected 401/403 without bearer token for inventory endpoint, got {(int)unauthorizedStatus}.");
+                var anonymousStatus = await GetStatusAsync(http, inventoryUri, null);
+                if (anonymousStatus is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                {
+                    effectiveBearerChecks = true;
+                    lines.Add("WARN inventory.anonymous.denied.auto-switch-bearer");
+                }
+                else if ((int)anonymousStatus >= 200 && (int)anonymousStatus < 300)
+                {
+                    lines.Add("PASS inventory.anonymous.access");
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unexpected anonymous status for inventory endpoint: {(int)anonymousStatus}.");
+                }
             }
-            lines.Add("PASS inventory.anonymous.denied");
 
-            await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
-            await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
-            await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
-            lines.Add("PASS inventory.bearer.access");
+            if (effectiveBearerChecks)
+            {
+                if (providedAccessToken)
+                {
+                    ownerToken = options.AccessToken;
+                    viewerToken = options.AccessToken;
+                    foreignToken = options.AccessToken;
+                    lines.Add("PASS oidc.tokens.provided");
+                }
+                else
+                {
+                    ownerToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.TokenUsername, options.TokenPassword);
+                    viewerToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ViewerTokenUsername, options.ViewerTokenPassword);
+                    foreignToken = await RequestOidcTokenAsync(options.AuthAuthority, options.TokenClientId, options.TokenClientSecret, options.TokenScope, options.ForeignTokenUsername, options.ForeignTokenPassword);
+                    lines.Add("PASS oidc.tokens");
+                }
+
+                var unauthorizedStatus = await GetStatusAsync(http, inventoryUri, null);
+                if (unauthorizedStatus is not HttpStatusCode.Unauthorized and not HttpStatusCode.Forbidden)
+                {
+                    throw new InvalidOperationException($"Expected 401/403 without bearer token for inventory endpoint, got {(int)unauthorizedStatus}.");
+                }
+                lines.Add("PASS inventory.anonymous.denied");
+
+                await EnsureSuccessAsync(http, inventoryUri, ownerToken, "owner");
+                await EnsureSuccessAsync(http, inventoryUri, viewerToken, "viewer");
+                await EnsureSuccessAsync(http, inventoryUri, foreignToken, "foreign");
+                lines.Add("PASS inventory.bearer.access");
+
+                var runtimeUri = $"{options.BaseUrl.TrimEnd('/')}/api/v1/runtime/uart";
+                using var runtimeRequest = new HttpRequestMessage(HttpMethod.Get, runtimeUri);
+                runtimeRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+                using var runtimeResponse = await http.SendAsync(runtimeRequest);
+                var runtimePayload = await runtimeResponse.Content.ReadAsStringAsync();
+                if (!runtimeResponse.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException($"Runtime probe failed ({(int)runtimeResponse.StatusCode}): {runtimePayload}");
+                }
+
+                using var runtimeDoc = JsonDocument.Parse(runtimePayload);
+                var provider = runtimeDoc.RootElement.TryGetProperty("persistenceProvider", out var providerProperty)
+                    ? (providerProperty.GetString() ?? string.Empty)
+                    : string.Empty;
+                if (!string.IsNullOrWhiteSpace(provider)
+                    && !string.Equals(provider, options.Provider, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"Runtime provider mismatch. Expected '{options.Provider}', got '{provider}'.");
+                }
+                lines.Add("PASS runtime.provider");
+            }
+
+            var multiActorBearerMode = effectiveBearerChecks && !providedAccessToken;
+            JsonElement? scenario = null;
+            var shouldRunScenario = effectiveBearerChecks || !options.DisableHeaderFallback;
+            if (shouldRunScenario)
+            {
+                scenario = await RunSessionScenarioAsync(
+                    http,
+                    options,
+                    effectiveBearerChecks,
+                    ownerToken,
+                    viewerToken,
+                    foreignToken,
+                    multiActorBearerMode);
+                lines.Add("PASS session.flow");
+            }
+            else
+            {
+                lines.Add("WARN session.flow.skipped");
+            }
 
             var summary = new
             {
                 generatedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
                 status = "PASS",
                 baseUrl = options.BaseUrl,
+                provider = options.Provider,
+                dataRoot = options.DataRoot,
                 authAuthority = options.AuthAuthority,
+                multiActorBearerMode,
                 checks = lines,
+                scenario,
             };
             await File.WriteAllTextAsync(summaryPath, JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
             await File.WriteAllLinesAsync(logPath, lines);
@@ -1982,6 +3056,60 @@ internal static class BearerSmokeCommand
             var body = await resp.Content.ReadAsStringAsync();
             throw new InvalidOperationException($"Expected success for {actor} bearer on {uri}, got {(int)resp.StatusCode} {resp.StatusCode}. {body}");
         }
+    }
+
+    private static async Task<int> RunDotnetStepAsync(string workingDirectory, IReadOnlyList<string> args, string logPath)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            await File.WriteAllTextAsync(logPath, "Failed to start dotnet process.");
+            return 1;
+        }
+
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? workingDirectory);
+        await File.WriteAllTextAsync(logPath, $"{stdout}{Environment.NewLine}{stderr}".Trim());
+        return process.ExitCode;
+    }
+
+    private static bool IsJwtTokenLike(string value) =>
+        value.Count(static c => c == '.') >= 2;
+
+    private static int FindAvailablePort(int startingPort)
+    {
+        var port = Math.Max(1025, startingPort);
+        for (var attempt = 0; attempt < 200; attempt++, port++)
+        {
+            try
+            {
+                using var listener = new TcpListener(IPAddress.Loopback, port);
+                listener.Start();
+                return port;
+            }
+            catch (SocketException)
+            {
+                // try next port
+            }
+        }
+
+        throw new InvalidOperationException($"Unable to find free TCP port starting from {startingPort}.");
     }
 
     private static async Task<HttpStatusCode> GetStatusAsync(HttpClient http, string uri, string? accessToken)
@@ -2087,12 +3215,721 @@ internal static class BearerSmokeCommand
         throw new InvalidOperationException(lastError ?? "Token request failed.");
     }
 
+    private static async Task<JsonElement> RunSessionScenarioAsync(
+        HttpClient http,
+        BearerSmokeOptions options,
+        bool requireBearer,
+        string ownerToken,
+        string viewerToken,
+        string foreignToken,
+        bool multiActorBearerMode)
+    {
+        static int Count(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.Array)
+            {
+                return value.GetArrayLength();
+            }
+            if (value.ValueKind == JsonValueKind.Null || value.ValueKind == JsonValueKind.Undefined)
+            {
+                return 0;
+            }
+            return 1;
+        }
+
+        static void Ensure(bool condition, string message)
+        {
+            if (!condition)
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var sessionId = $"smoke-{options.Provider.ToLowerInvariant()}-{runId}";
+        var participantId = $"participant-observer-{runId}";
+        var shareId = $"share-observer-{runId}";
+        var invitationShareId = $"invite-controller-{runId}";
+        var commandId = $"cmd-noop-{runId}";
+        var baseUrl = options.BaseUrl.TrimEnd('/');
+        var includeFallbackHeaders = !options.DisableHeaderFallback;
+
+        var ownerHeaders = BuildCallerHeaders(
+            subjectId: "user-smoke-owner",
+            principalId: "smoke-runner",
+            roles: "operator.admin",
+            tenantId: "local-tenant",
+            organizationId: "local-org",
+            includeFallbackHeaders: includeFallbackHeaders,
+            bearerToken: requireBearer ? ownerToken : null);
+        var controllerHeaders = BuildCallerHeaders(
+            subjectId: "user-smoke-controller",
+            principalId: "controller-user",
+            roles: "operator.viewer",
+            tenantId: "local-tenant",
+            organizationId: "local-org",
+            includeFallbackHeaders: includeFallbackHeaders,
+            bearerToken: requireBearer ? (multiActorBearerMode ? viewerToken : ownerToken) : null);
+        var foreignHeaders = BuildCallerHeaders(
+            subjectId: "user-foreign-viewer",
+            principalId: "foreign-user",
+            roles: "operator.viewer",
+            tenantId: "foreign-tenant",
+            organizationId: "foreign-org",
+            includeFallbackHeaders: includeFallbackHeaders,
+            bearerToken: requireBearer ? (multiActorBearerMode ? foreignToken : ownerToken) : null);
+
+        var agents = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/agents",
+            ownerHeaders,
+            null);
+        var endpoints = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/endpoints",
+            ownerHeaders,
+            null);
+        var auditBefore = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/events/audit",
+            ownerHeaders,
+            null);
+        Ensure(Count(agents) >= 1, "Expected at least one registered agent.");
+        Ensure(Count(endpoints) >= 1, "Expected at least one endpoint snapshot.");
+        Ensure(Count(auditBefore) >= 1, "Expected at least one audit event before smoke session.");
+
+        var session = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions",
+            ownerHeaders,
+            new
+            {
+                sessionId,
+                profile = "UltraLowLatency",
+                requestedBy = "smoke-runner",
+                targetAgentId = "agent_hidbridge_uart_local",
+                targetEndpointId = "endpoint_local_demo",
+                shareMode = "Owner",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+        Ensure(string.Equals(GetStringProperty(session, "sessionId"), sessionId, StringComparison.Ordinal), "Opened session id mismatch.");
+
+        _ = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/participants",
+            ownerHeaders,
+            new
+            {
+                participantId,
+                principalId = "observer-user",
+                role = "Observer",
+                addedBy = "smoke-runner",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+
+        _ = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/shares",
+            ownerHeaders,
+            new
+            {
+                shareId,
+                principalId = "observer-user",
+                grantedBy = "smoke-runner",
+                role = "Observer",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+
+        _ = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/invitations/requests",
+            controllerHeaders,
+            new
+            {
+                shareId = invitationShareId,
+                principalId = "controller-user",
+                requestedBy = "controller-user",
+                requestedRole = "Controller",
+                message = "Need temporary control",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+
+        JsonElement viewerDeniedApproval = default;
+        if (requireBearer && multiActorBearerMode)
+        {
+            viewerDeniedApproval = await InvokeExpectedFailureAsync(
+                http,
+                HttpMethod.Post,
+                $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/invitations/{Uri.EscapeDataString(invitationShareId)}/approve",
+                controllerHeaders,
+                new
+                {
+                    shareId = invitationShareId,
+                    actedBy = "controller-user",
+                    grantedRole = "Controller",
+                    reason = "viewer should be denied",
+                    tenantId = "local-tenant",
+                    organizationId = "local-org",
+                },
+                expectedStatusCode: HttpStatusCode.Forbidden);
+            var viewerDeniedCode = GetStringProperty(viewerDeniedApproval, "code");
+            Ensure(string.Equals(viewerDeniedCode, "moderation_access_required", StringComparison.OrdinalIgnoreCase),
+                $"Expected viewer denial code 'moderation_access_required', got '{viewerDeniedCode}'.");
+        }
+
+        _ = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/invitations/{Uri.EscapeDataString(invitationShareId)}/approve",
+            ownerHeaders,
+            new
+            {
+                shareId = invitationShareId,
+                actedBy = "smoke-runner",
+                grantedRole = "Controller",
+                reason = "approved by smoke runner",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+
+        _ = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/shares/{Uri.EscapeDataString(invitationShareId)}/accept",
+            controllerHeaders,
+            new
+            {
+                shareId = invitationShareId,
+                actedBy = "controller-user",
+                reason = "joining approved invitation",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+
+        var controllerParticipantId = $"share:{invitationShareId}";
+        var controlLease = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/request",
+            controllerHeaders,
+            new
+            {
+                participantId = controllerParticipantId,
+                requestedBy = "controller-user",
+                leaseSeconds = 30,
+                reason = "smoke control request",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+        Ensure(string.Equals(GetStringProperty(controlLease, "principalId"), "controller-user", StringComparison.OrdinalIgnoreCase),
+            "Expected controller-user to hold control lease.");
+
+        var requestControlConflict = await InvokeExpectedFailureAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/request",
+            ownerHeaders,
+            new
+            {
+                participantId = "owner:smoke-runner",
+                requestedBy = "smoke-runner",
+                leaseSeconds = 30,
+                reason = "owner should wait for active lease",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            },
+            expectedStatusCode: HttpStatusCode.Conflict);
+        Ensure(string.Equals(GetStringProperty(requestControlConflict, "code"), "E_CONTROL_LEASE_HELD_BY_OTHER", StringComparison.OrdinalIgnoreCase),
+            "Expected control request conflict code E_CONTROL_LEASE_HELD_BY_OTHER.");
+
+        var notEligibleControlConflict = await InvokeExpectedFailureAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/grant",
+            ownerHeaders,
+            new
+            {
+                participantId,
+                grantedBy = "smoke-runner",
+                leaseSeconds = 30,
+                reason = "observer should be ineligible",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            },
+            expectedStatusCode: HttpStatusCode.Conflict);
+        Ensure(string.Equals(GetStringProperty(notEligibleControlConflict, "code"), "E_CONTROL_NOT_ELIGIBLE", StringComparison.OrdinalIgnoreCase),
+            "Expected control grant conflict code E_CONTROL_NOT_ELIGIBLE.");
+
+        var releaseMismatchConflict = await InvokeExpectedFailureAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/release",
+            ownerHeaders,
+            new
+            {
+                participantId = "owner:smoke-runner",
+                actedBy = "smoke-runner",
+                reason = "release target mismatch",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            },
+            expectedStatusCode: HttpStatusCode.Conflict);
+        Ensure(string.Equals(GetStringProperty(releaseMismatchConflict, "code"), "E_CONTROL_PARTICIPANT_MISMATCH", StringComparison.OrdinalIgnoreCase),
+            "Expected control release conflict code E_CONTROL_PARTICIPANT_MISMATCH.");
+
+        var activeControl = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control",
+            controllerHeaders,
+            null);
+        Ensure(string.Equals(GetStringProperty(activeControl, "principalId"), "controller-user", StringComparison.OrdinalIgnoreCase),
+            "Expected controller-user in active control snapshot.");
+
+        var commandAck = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/commands",
+            controllerHeaders,
+            new
+            {
+                commandId,
+                sessionId,
+                channel = "Hid",
+                action = "noop",
+                args = new
+                {
+                    principalId = "controller-user",
+                    participantId = controllerParticipantId,
+                    shareId = invitationShareId,
+                },
+                timeoutMs = 250,
+                idempotencyKey = commandId,
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+        var commandStatus = GetStringProperty(commandAck, "status");
+        var commandErrorCode = string.Empty;
+        if (commandAck.ValueKind == JsonValueKind.Object
+            && commandAck.TryGetProperty("error", out var commandError)
+            && commandError.ValueKind == JsonValueKind.Object)
+        {
+            commandErrorCode = GetStringProperty(commandError, "code");
+        }
+
+        var commandTransportIssue =
+            string.Equals(commandStatus, "Timeout", StringComparison.OrdinalIgnoreCase)
+            || (string.Equals(commandStatus, "Rejected", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(commandErrorCode)
+                && (commandErrorCode.StartsWith("E_TRANSPORT_", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(commandErrorCode, "E_COMMAND_EXECUTION_FAILED", StringComparison.OrdinalIgnoreCase)));
+
+        if (!string.Equals(commandStatus, "Applied", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(commandStatus, "Accepted", StringComparison.OrdinalIgnoreCase)
+            && !commandTransportIssue)
+        {
+            throw new InvalidOperationException(
+                $"Expected command to be Applied/Accepted (or transport-level Timeout/Rejected), got '{commandStatus}' ({commandErrorCode}).");
+        }
+
+        var releasedControl = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/release",
+            controllerHeaders,
+            new
+            {
+                participantId = controllerParticipantId,
+                actedBy = "controller-user",
+                reason = "smoke release",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+        Ensure(string.Equals(GetStringProperty(releasedControl, "participantId"), controllerParticipantId, StringComparison.OrdinalIgnoreCase),
+            "Expected released control participant to match controller.");
+
+        var takeoverControl = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/control/force-takeover",
+            ownerHeaders,
+            new
+            {
+                participantId = "owner:smoke-runner",
+                grantedBy = "smoke-runner",
+                leaseSeconds = 30,
+                reason = "owner takeover",
+                tenantId = "local-tenant",
+                organizationId = "local-org",
+            });
+        Ensure(string.Equals(GetStringProperty(takeoverControl, "principalId"), "smoke-runner", StringComparison.OrdinalIgnoreCase),
+            "Expected owner takeover principal smoke-runner.");
+
+        JsonElement foreignDenied = default;
+        if (requireBearer && multiActorBearerMode)
+        {
+            foreignDenied = await InvokeExpectedFailureAsync(
+                http,
+                HttpMethod.Get,
+                $"{baseUrl}/api/v1/collaboration/sessions/{Uri.EscapeDataString(sessionId)}/summary",
+                foreignHeaders,
+                null,
+                expectedStatusCode: HttpStatusCode.Forbidden);
+            var denialCode = GetStringProperty(foreignDenied, "code");
+            if (!string.Equals(denialCode, "tenant_scope_mismatch", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Expected foreign denial code 'tenant_scope_mismatch', got '{denialCode}'.");
+            }
+        }
+
+        var sessions = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions",
+            ownerHeaders,
+            null);
+        var participants = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/participants",
+            ownerHeaders,
+            null);
+        var shares = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/shares",
+            ownerHeaders,
+            null);
+        var invitations = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/invitations",
+            ownerHeaders,
+            null);
+        var commandJournal = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/commands/journal",
+            ownerHeaders,
+            null);
+        var timeline = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/events/timeline/{Uri.EscapeDataString(sessionId)}?take=20",
+            ownerHeaders,
+            null);
+        var auditAfter = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/events/audit",
+            ownerHeaders,
+            null);
+        Ensure(Count(sessions) >= 1, "Expected at least one persisted session.");
+        Ensure(Count(participants) >= 2, "Expected at least two participants.");
+        Ensure(Count(shares) >= 2, "Expected at least two shares.");
+        Ensure(Count(invitations) >= 1, "Expected at least one invitation.");
+        Ensure(Count(commandJournal) >= 1, "Expected at least one command journal entry.");
+        Ensure(Count(timeline) >= 1, "Expected at least one timeline entry.");
+        Ensure(Count(auditAfter) > Count(auditBefore), "Expected audit stream growth after smoke actions.");
+
+        var inventoryDashboard = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/dashboards/inventory",
+            ownerHeaders,
+            null);
+        var auditDashboard = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/dashboards/audit?take=20",
+            ownerHeaders,
+            null);
+        var telemetryDashboard = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/dashboards/telemetry?take=20",
+            ownerHeaders,
+            null);
+        var sessionProjection = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/projections/sessions?principalId=smoke-runner&take=50",
+            ownerHeaders,
+            null);
+        var endpointProjection = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/projections/endpoints?take=50",
+            ownerHeaders,
+            null);
+        var auditProjection = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/projections/audit?sessionId={Uri.EscapeDataString(sessionId)}&take=20",
+            ownerHeaders,
+            null);
+        var telemetryProjection = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/projections/telemetry?sessionId={Uri.EscapeDataString(sessionId)}&scope=command&take=20",
+            ownerHeaders,
+            null);
+        var replayBundle = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/diagnostics/replay/sessions/{Uri.EscapeDataString(sessionId)}?take=20",
+            ownerHeaders,
+            null);
+        var archiveSummary = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/diagnostics/archive/summary?sessionId={Uri.EscapeDataString(sessionId)}",
+            ownerHeaders,
+            null);
+        var archiveAudit = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/diagnostics/archive/audit?sessionId={Uri.EscapeDataString(sessionId)}&take=20",
+            ownerHeaders,
+            null);
+        var archiveTelemetry = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/diagnostics/archive/telemetry?sessionId={Uri.EscapeDataString(sessionId)}&scope=command&take=20",
+            ownerHeaders,
+            null);
+        var archiveCommands = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/diagnostics/archive/commands?sessionId={Uri.EscapeDataString(sessionId)}&take=20",
+            ownerHeaders,
+            null);
+        Ensure(GetNumberProperty(inventoryDashboard, "totalAgents") >= 1, "Expected inventory dashboard totalAgents >= 1.");
+        Ensure(GetNumberProperty(auditDashboard, "totalEvents") >= 1, "Expected audit dashboard totalEvents >= 1.");
+        _ = telemetryDashboard;
+        Ensure(GetNumberProperty(auditProjection, "total") >= 1, "Expected audit projection total >= 1.");
+        Ensure(GetNumberProperty(telemetryProjection, "total") >= 1, "Expected telemetry projection total >= 1.");
+        Ensure(string.Equals(GetStringProperty(replayBundle, "sessionId"), sessionId, StringComparison.OrdinalIgnoreCase), "Replay bundle sessionId mismatch.");
+        Ensure(GetNumberProperty(archiveSummary, "commandCount") >= 1, "Expected archive summary commandCount >= 1.");
+        Ensure(GetNumberProperty(archiveAudit, "total") >= 1, "Expected archive audit total >= 1.");
+        Ensure(GetNumberProperty(archiveTelemetry, "total") >= 1, "Expected archive telemetry total >= 1.");
+        Ensure(GetNumberProperty(archiveCommands, "total") >= 1, "Expected archive commands total >= 1.");
+        _ = sessionProjection;
+        _ = endpointProjection;
+
+        _ = await InvokeJsonAsync(
+            http,
+            HttpMethod.Post,
+            $"{baseUrl}/api/v1/sessions/{Uri.EscapeDataString(sessionId)}/close",
+            ownerHeaders,
+            new
+            {
+                sessionId,
+                reason = "smoke teardown",
+            });
+
+        var sessionsAfterClose = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/sessions",
+            ownerHeaders,
+            null);
+        if (sessionsAfterClose.ValueKind == JsonValueKind.Array)
+        {
+            var stillVisible = sessionsAfterClose.EnumerateArray()
+                .Any(x => string.Equals(GetStringProperty(x, "sessionId"), sessionId, StringComparison.Ordinal));
+            if (stillVisible)
+            {
+                throw new InvalidOperationException("Expected closed smoke session to disappear from session list.");
+            }
+        }
+
+        var inventoryAfterClose = await InvokeJsonAsync(
+            http,
+            HttpMethod.Get,
+            $"{baseUrl}/api/v1/dashboards/inventory",
+            ownerHeaders,
+            null);
+
+        return JsonSerializer.SerializeToElement(new
+        {
+            sessionId,
+            commandId,
+            commandStatus,
+            commandErrorCode,
+            commandTransportIssue,
+            provider = options.Provider,
+            multiActorBearerMode,
+            sessionCount = Count(sessions),
+            participantCount = Count(participants),
+            shareCount = Count(shares),
+            invitationCount = Count(invitations),
+            commandJournalCount = Count(commandJournal),
+            timelineCount = Count(timeline),
+            auditCount = Count(auditAfter),
+            requestControlConflictCode = GetStringProperty(requestControlConflict, "code"),
+            notEligibleControlConflictCode = GetStringProperty(notEligibleControlConflict, "code"),
+            releaseMismatchConflictCode = GetStringProperty(releaseMismatchConflict, "code"),
+            foreignDeniedCode = GetStringProperty(foreignDenied, "code"),
+            viewerDeniedCode = GetStringProperty(viewerDeniedApproval, "code"),
+            inventoryAfterCloseTotalAgents = GetNumberProperty(inventoryAfterClose, "totalAgents"),
+        });
+    }
+
+    private static async Task<JsonElement> InvokeJsonAsync(
+        HttpClient http,
+        HttpMethod method,
+        string uri,
+        IReadOnlyDictionary<string, string> headers,
+        object? body)
+    {
+        using var request = new HttpRequestMessage(method, uri);
+        foreach (var header in headers)
+        {
+            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        if (body is not null)
+        {
+            request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        }
+
+        using var response = await http.SendAsync(request);
+        var payload = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {method.Method} {uri} failed ({(int)response.StatusCode}): {payload}");
+        }
+
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return JsonSerializer.SerializeToElement(new { });
+        }
+
+        using var doc = JsonDocument.Parse(payload);
+        return doc.RootElement.Clone();
+    }
+
+    private static async Task<JsonElement> InvokeExpectedFailureAsync(
+        HttpClient http,
+        HttpMethod method,
+        string uri,
+        IReadOnlyDictionary<string, string> headers,
+        object? body,
+        HttpStatusCode expectedStatusCode)
+    {
+        using var request = new HttpRequestMessage(method, uri);
+        foreach (var header in headers)
+        {
+            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        if (body is not null)
+        {
+            request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        }
+
+        using var response = await http.SendAsync(request);
+        var payload = await response.Content.ReadAsStringAsync();
+        if (response.StatusCode != expectedStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Expected {(int)expectedStatusCode} for {method.Method} {uri}, got {(int)response.StatusCode}: {payload}");
+        }
+
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return JsonSerializer.SerializeToElement(new { });
+        }
+
+        using var doc = JsonDocument.Parse(payload);
+        return doc.RootElement.Clone();
+    }
+
+    private static Dictionary<string, string> BuildCallerHeaders(
+        string subjectId,
+        string principalId,
+        string roles,
+        string tenantId,
+        string organizationId,
+        bool includeFallbackHeaders,
+        string? bearerToken)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (includeFallbackHeaders)
+        {
+            headers["X-HidBridge-UserId"] = subjectId;
+            headers["X-HidBridge-PrincipalId"] = principalId;
+            headers["X-HidBridge-TenantId"] = tenantId;
+            headers["X-HidBridge-OrganizationId"] = organizationId;
+            headers["X-HidBridge-Role"] = roles;
+        }
+
+        if (!string.IsNullOrWhiteSpace(bearerToken))
+        {
+            headers["Authorization"] = $"Bearer {bearerToken}";
+        }
+
+        return headers;
+    }
+
+    private static string GetStringProperty(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(name, out var property)
+            || property.ValueKind == JsonValueKind.Null)
+        {
+            return string.Empty;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? (property.GetString() ?? string.Empty)
+            : property.GetRawText();
+    }
+
+    private static int GetNumberProperty(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(name, out var property))
+        {
+            return 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var parsed))
+        {
+            return parsed;
+        }
+
+        if (property.ValueKind == JsonValueKind.String && int.TryParse(property.GetString(), out var fromString))
+        {
+            return fromString;
+        }
+
+        return 0;
+    }
+
     private sealed class BearerSmokeOptions
     {
+        public string Provider { get; set; } = "Sql";
+        public bool ProviderExplicit { get; set; }
         public string Configuration { get; set; } = "Debug";
         public string ConnectionString { get; set; } = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge";
         public string Schema { get; set; } = "hidbridge";
         public string BaseUrl { get; set; } = "http://127.0.0.1:18093";
+        public string DataRoot { get; set; } = string.Empty;
+        public string AccessToken { get; set; } = string.Empty;
+        public bool EnableApiAuth { get; set; } = true;
         public string AuthAuthority { get; set; } = "http://127.0.0.1:18096/realms/hidbridge-dev";
         public string AuthAudience { get; set; } = string.Empty;
         public string TokenClientId { get; set; } = "controlplane-smoke";
@@ -2104,6 +3941,9 @@ internal static class BearerSmokeCommand
         public string ViewerTokenPassword { get; set; } = "ChangeMe123!";
         public string ForeignTokenUsername { get; set; } = "operator.smoke.foreign";
         public string ForeignTokenPassword { get; set; } = "ChangeMe123!";
+        public bool DisableHeaderFallback { get; set; } = true;
+        public bool BearerOnly { get; set; } = true;
+        public bool NoBuild { get; set; }
 
         public static bool TryParse(IReadOnlyList<string> args, out BearerSmokeOptions options, out string? error)
         {
@@ -2127,10 +3967,22 @@ internal static class BearerSmokeCommand
                 var value = hasValue ? args[i + 1] : null;
                 switch (name.ToLowerInvariant())
                 {
+                    case "provider":
+                        options.Provider = RequireValue(name, value, ref i, ref hasValue, ref error);
+                        options.ProviderExplicit = true;
+                        if (!string.Equals(options.Provider, "File", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(options.Provider, "Sql", StringComparison.OrdinalIgnoreCase))
+                        {
+                            error = $"Option -{name} supports only 'File' or 'Sql'.";
+                        }
+                        break;
                     case "configuration": options.Configuration = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "connectionstring": options.ConnectionString = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "schema": options.Schema = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "baseurl": options.BaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "dataroot": options.DataRoot = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "accesstoken": options.AccessToken = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "enableapiauth": options.EnableApiAuth = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "authauthority": options.AuthAuthority = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "authaudience": options.AuthAudience = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "tokenclientid": options.TokenClientId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
@@ -2142,15 +3994,9 @@ internal static class BearerSmokeCommand
                     case "viewertokenpassword": options.ViewerTokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "foreigntokenusername": options.ForeignTokenUsername = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "foreigntokenpassword": options.ForeignTokenPassword = RequireValue(name, value, ref i, ref hasValue, ref error); break;
-                    // accepted for compatibility but not needed in native path
-                    case "accesstoken":
-                    case "enableapiauth":
-                    case "provider":
-                    case "nobuild":
-                    case "beareronly":
-                    case "disableheaderfallback":
-                        if (hasValue) { i++; }
-                        break;
+                    case "disableheaderfallback": options.DisableHeaderFallback = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "beareronly": options.BearerOnly = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "nobuild": options.NoBuild = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     default:
                         error = $"Unsupported bearer-smoke option '{token}'.";
                         return false;
@@ -2174,6 +4020,47 @@ internal static class BearerSmokeCommand
             }
             index++;
             return value;
+        }
+
+        private static bool ParseSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires a boolean value when explicitly provided (true/false).";
+                return false;
+            }
+            index++;
+            return parsed;
+        }
+
+        private static bool TryParseBool(string? value, out bool parsed)
+        {
+            parsed = false;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "1":
+                case "true":
+                case "yes":
+                case "on":
+                    parsed = true;
+                    return true;
+                case "0":
+                case "false":
+                case "no":
+                case "off":
+                    parsed = false;
+                    return true;
+                default:
+                    return false;
+            }
         }
     }
 }

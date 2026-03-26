@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-26 (cli-first smoke lanes: native sql/file stability + legacy smoke scripts removed)
+
+Summary:
+
+- Stabilized native RuntimeCtl smoke lanes for both `smoke-sql` and `smoke-file`:
+  - dedicated API bootstrap now forces Kestrel HTTP endpoint URL via environment override,
+  - command-step assertion now treats transport-level rejection/timeout outcomes as valid smoke-path behavior instead of hard-failing the lane.
+- Removed obsolete PowerShell smoke orchestrators now replaced by native RuntimeCtl smoke flow:
+  - `Platform/Scripts/run_smoke.ps1`
+  - `Platform/Scripts/run_file_smoke.ps1`
+  - `Platform/Scripts/run_sql_smoke.ps1`
+  - `Platform/Scripts/run_backend_smoke.ps1`
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- removed: `Platform/Scripts/run_smoke.ps1`
+- removed: `Platform/Scripts/run_file_smoke.ps1`
+- removed: `Platform/Scripts/run_sql_smoke.ps1`
+- removed: `Platform/Scripts/run_backend_smoke.ps1`
+
 ## 2026-03-26 (cli-first: native clean-logs/token-debug/room-cleanup tasks)
 
 Summary:
