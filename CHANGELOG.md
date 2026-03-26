@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (cli-first: ci-local native checks/bearer/ops lanes)
+
+Summary:
+
+- Removed remaining PowerShell orchestration from `ci-local` pass-path steps by switching them to native RuntimeCtl command invocations:
+  - `Checks (Sql)` -> `checks`
+  - `Bearer Smoke` -> `bearer-smoke`
+  - `WebRTC Edge Agent Acceptance` -> `webrtc-acceptance`
+  - `Ops SLO + Security Verify` -> `ops-verify`
+- Deleted script-step execution path inside `CiLocalCommand` for these lanes (`RunScriptToLogAsync` is no longer used there).
+- Added direct `run.ps1` task routing for `doctor` and `identity-reset` to native RuntimeCtl commands.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/run.ps1`
+
 ## 2026-03-26 (cli-first: native demo-gate + acceptance bootstrap via runtimectl)
 
 Summary:

@@ -76,6 +76,8 @@ $arguments.Add("--platform-root") | Out-Null
 $arguments.Add($platformRoot) | Out-Null
 
 switch ($task.ToLowerInvariant()) {
+    "doctor" { $arguments.Add("doctor") | Out-Null }
+    "identity-reset" { $arguments.Add("identity-reset") | Out-Null }
     "ci-local" { $arguments.Add("ci-local") | Out-Null }
     "full" { $arguments.Add("full") | Out-Null }
     "webrtc-edge-agent-acceptance" { $arguments.Add("webrtc-acceptance") | Out-Null }
