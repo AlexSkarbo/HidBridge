@@ -771,7 +771,34 @@ public sealed class WebRtcDataChannelRealtimeTransport : IRealtimeTransport
     private async Task<EndpointSnapshot?> TryResolveEndpointSnapshotAsync(string endpointId, CancellationToken cancellationToken)
     {
         var endpoints = await _endpointSnapshotStore.ListAsync(cancellationToken);
-        return endpoints.FirstOrDefault(x => string.Equals(x.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase));
+        var persisted = endpoints.FirstOrDefault(x => string.Equals(x.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase));
+        var connector = (await _connectorRegistry.ListAsync(cancellationToken))
+            .FirstOrDefault(x => string.Equals(x.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase));
+
+        if (persisted is null)
+        {
+            return connector is null
+                ? null
+                : new EndpointSnapshot(
+                    connector.EndpointId,
+                    connector.Capabilities,
+                    DateTimeOffset.UtcNow);
+        }
+
+        if (connector is null)
+        {
+            return persisted;
+        }
+
+        // Keep persisted snapshot timestamps/state but merge capabilities from active connector descriptor.
+        // This protects WebRTC capability checks when SQL snapshot was reset by test/setup workflows.
+        var mergedCapabilities = persisted.Capabilities
+            .Concat(connector.Capabilities)
+            .GroupBy(static capability => capability.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.First())
+            .ToArray();
+
+        return persisted with { Capabilities = mergedCapabilities };
     }
 
     private void EnsureEndpointSupportsWebRtc(RealtimeTransportRouteContext route, EndpointSnapshot endpoint)

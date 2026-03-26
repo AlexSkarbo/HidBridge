@@ -14,6 +14,7 @@ param(
     [string]$PrincipalId = "smoke-runner",
     [string]$TokenUsername = "operator.smoke.admin",
     [string]$TokenPassword = "ChangeMe123!",
+    [string]$KeycloakBaseUrl = "http://host.docker.internal:18096",
     [string]$TokenScope = "",
     [int]$PeerReadyTimeoutSec = 30,
     [string]$OutputJsonPath = "",
@@ -117,6 +118,23 @@ if (-not $SkipRuntimeBootstrap) {
         WebBaseUrl = $WebBaseUrl
         SkipDoctor = $true
         SkipDemoGate = $true
+        IncludeWebRtcEdgeAgentSmoke = $true
+        WebRtcCommandExecutor = $CommandExecutor
+    }
+
+    if ($AllowLegacyControlWs) {
+        $demoFlowParameters.AllowLegacyControlWs = $true
+    }
+
+    if ([string]::Equals($CommandExecutor, "controlws", [StringComparison]::OrdinalIgnoreCase)) {
+        $controlUri = [Uri]$ControlWsUrl
+        $controlHealthUrl = if ([string]::Equals($controlUri.Scheme, "wss", [StringComparison]::OrdinalIgnoreCase)) {
+            "https://$($controlUri.Host):$($controlUri.Port)/health"
+        }
+        else {
+            "http://$($controlUri.Host):$($controlUri.Port)/health"
+        }
+        $demoFlowParameters.WebRtcControlHealthUrl = $controlHealthUrl
     }
 
     if ($SkipIdentityReset) { $demoFlowParameters.SkipIdentityReset = $true }
@@ -186,6 +204,8 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_PRINCIPALID = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PRINCIPALID", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_TOKENSCOPE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENSCOPE", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", [EnvironmentVariableTarget]::Process)
@@ -196,6 +216,7 @@ $edgeEnvRestore = @{
     HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", [EnvironmentVariableTarget]::Process)
+    HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL", [EnvironmentVariableTarget]::Process)
     HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE = [Environment]::GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE", [EnvironmentVariableTarget]::Process)
 }
 
@@ -208,7 +229,9 @@ try {
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_PRINCIPALID", $PrincipalId, [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENUSERNAME", $TokenUsername, [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENPASSWORD", $TokenPassword, [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL", "http://127.0.0.1:18096", [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_TOKENSCOPE", "openid", [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_OPERATORROLESCSV", "operator.admin,operator.moderator,operator.viewer,operator.edge", [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL", $KeycloakBaseUrl, [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM", "hidbridge-dev", [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR", $CommandExecutor, [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTPORT", $UartPort, [EnvironmentVariableTarget]::Process)
@@ -217,6 +240,7 @@ try {
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTRELEASEPORTAFTEREXECUTE", "true", [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTMOUSEINTERFACESELECTOR", "255", [EnvironmentVariableTarget]::Process)
     [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_UARTKEYBOARDINTERFACESELECTOR", "254", [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL", "$WebBaseUrl/media/edge-main", [EnvironmentVariableTarget]::Process)
 
     if ([string]::Equals($CommandExecutor, "uart", [StringComparison]::OrdinalIgnoreCase)) {
         [Environment]::SetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL", "", [EnvironmentVariableTarget]::Process)

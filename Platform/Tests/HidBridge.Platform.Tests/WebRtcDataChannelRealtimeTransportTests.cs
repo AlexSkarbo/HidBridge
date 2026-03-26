@@ -125,6 +125,36 @@ public sealed class WebRtcDataChannelRealtimeTransportTests
     }
 
     [Fact]
+    public async Task ConnectAsync_UsesConnectorCapabilities_WhenPersistedEndpointSnapshotIsMissing()
+    {
+        var connector = new FakeConnector(
+            "agent-1",
+            "endpoint-1",
+            new ConnectorCommandResult("cmd-1", CommandStatus.Applied),
+            [
+                new CapabilityDescriptor(CapabilityNames.TransportWebRtcDataChannelV1, "1.0"),
+                new CapabilityDescriptor(CapabilityNames.HidKeyboardV1, "1.0"),
+            ]);
+        var transport = new WebRtcDataChannelRealtimeTransport(
+            new FakeConnectorRegistry(connector),
+            new FakeEndpointSnapshotStore(),
+            new WebRtcCommandRelayService(),
+            new FakeWebRtcSignalingStore(),
+            new WebRtcTransportRuntimeOptions
+            {
+                RequireDataChannelCapability = true,
+                EnableConnectorBridge = true,
+            });
+        var route = new RealtimeTransportRouteContext("agent-1", EndpointId: "endpoint-1", SessionId: "session-1");
+
+        await transport.ConnectAsync(route, TestContext.Current.CancellationToken);
+        var health = await transport.GetHealthAsync(route, TestContext.Current.CancellationToken);
+
+        Assert.True(health.IsConnected);
+        Assert.Equal(true, health.Metrics["endpointSupportsWebRtc"]);
+    }
+
+    [Fact]
     public async Task SendCommandAsync_UsesRelayAckPath_WhenPeerIsOnline()
     {
         var connector = new FakeConnector(
@@ -459,14 +489,18 @@ public sealed class WebRtcDataChannelRealtimeTransportTests
     {
         private readonly ConnectorCommandResult _result;
 
-        public FakeConnector(string agentId, string endpointId, ConnectorCommandResult result)
+        public FakeConnector(
+            string agentId,
+            string endpointId,
+            ConnectorCommandResult result,
+            IReadOnlyList<CapabilityDescriptor>? capabilities = null)
         {
             _result = result;
             Descriptor = new ConnectorDescriptor(
                 agentId,
                 endpointId,
                 ConnectorType.HidBridge,
-                [new CapabilityDescriptor(CapabilityNames.HidKeyboardV1, "1.0")]);
+                capabilities ?? [new CapabilityDescriptor(CapabilityNames.HidKeyboardV1, "1.0")]);
         }
 
         public ConnectorDescriptor Descriptor { get; }

@@ -5,11 +5,11 @@ param(
     [switch]$AllowLegacyControlWs,
     [string]$ControlHealthUrl = "http://127.0.0.1:28092/health",
     [string]$ControlWsUrl = "",
-    [string]$KeycloakBaseUrl = "http://127.0.0.1:18096",
+    [string]$KeycloakBaseUrl = "http://host.docker.internal:18096",
     [string]$RealmName = "hidbridge-dev",
     [string]$TokenClientId = "controlplane-smoke",
     [string]$TokenClientSecret = "",
-    [string]$TokenScope = "openid profile email",
+    [string]$TokenScope = "openid",
     [string]$TokenUsername = "operator.smoke.admin",
     [string]$TokenPassword = "ChangeMe123!",
     [int]$RequestTimeoutSec = 15,
@@ -55,8 +55,6 @@ $runnerArgs = @(
     "--keycloak-base-url", $KeycloakBaseUrl,
     "--realm-name", $RealmName,
     "--token-client-id", $TokenClientId,
-    "--token-client-secret", $TokenClientSecret,
-    "--token-scope", $TokenScope,
     "--token-username", $TokenUsername,
     "--token-password", $TokenPassword,
     "--request-timeout-sec", [string]$RequestTimeoutSec,
@@ -81,6 +79,14 @@ if ($AllowLegacyControlWs) { $runnerArgs += "--allow-legacy-controlws" }
 if ($SkipTransportHealthCheck) { $runnerArgs += "--skip-transport-health-check" }
 if ($RequireMediaReady) { $runnerArgs += "--require-media-ready" }
 if ($RequireMediaPlaybackUrl) { $runnerArgs += "--require-media-playback-url" }
+if (-not [string]::IsNullOrWhiteSpace($TokenClientSecret)) {
+    $runnerArgs += "--token-client-secret"
+    $runnerArgs += $TokenClientSecret
+}
+if (-not [string]::IsNullOrWhiteSpace($TokenScope)) {
+    $runnerArgs += "--token-scope"
+    $runnerArgs += $TokenScope
+}
 if ($SkipRuntimeBootstrap) { $runnerArgs += "--skip-runtime-bootstrap" }
 if ($StopExisting) { $runnerArgs += "--stop-existing" }
 if ($StopStackAfter) { $runnerArgs += "--stop-stack-after" }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -22,46 +23,63 @@ var result = new AcceptanceSummary
 Console.WriteLine("=== WebRTC Edge Agent Acceptance (.NET runner) ===");
 Console.WriteLine($"Platform root: {platformRoot}");
 Console.WriteLine($"Logs root:     {logsRoot}");
-var sessionRuntime = ResolveSessionRuntime(options, platformRoot);
-result.Stack = JsonSerializer.SerializeToElement(new
+StackBootstrapRuntime? bootstrapRuntime = null;
+try
 {
-    sessionId = sessionRuntime.SessionId,
-    peerId = sessionRuntime.PeerId,
-    endpointId = sessionRuntime.EndpointId,
-    runtimeBootstrapSkipped = true,
-    source = "dotnet-acceptance-runner",
-});
+    Console.WriteLine("\n=== WebRTC Stack ===");
+    bootstrapRuntime = await BootstrapWebRtcStackAsync(options, platformRoot, stackSummaryPath, CancellationToken.None);
 
-Console.WriteLine("\n=== WebRTC Edge Agent Smoke ===");
-var smokeSummary = await RunSmokeAsync(options, sessionRuntime, smokeSummaryPath, CancellationToken.None);
-await WriteJsonAsync(smokeSummaryPath, smokeSummary);
-result.Smoke = TryReadJson(smokeSummaryPath);
-var commandPass = string.Equals(smokeSummary.CommandStatus, "Applied", StringComparison.OrdinalIgnoreCase);
-var mediaPass = smokeSummary.MediaGatePass ?? true;
-result.Pass = commandPass && mediaPass;
-var smokeExitCode = result.Pass ? 0 : 1;
-
-await WriteSummaryAsync(options.OutputJsonPath, result, platformRoot);
-
-Console.WriteLine("\n=== Acceptance Summary ===");
-Console.WriteLine($"Result: {(result.Pass ? "PASS" : "FAIL")}");
-Console.WriteLine($"Session:       {sessionRuntime.SessionId}");
-Console.WriteLine($"Peer:          {sessionRuntime.PeerId}");
-if (smokeSummary.MediaGateRequired)
-{
-    Console.WriteLine($"Media gate:    {(smokeSummary.MediaGatePass == true ? "PASS" : "FAIL")}");
-    if (!string.IsNullOrWhiteSpace(smokeSummary.MediaGateFailureReason))
+    var sessionRuntime = ResolveSessionRuntime(options, platformRoot);
+    result.Stack = TryReadJson(stackSummaryPath) ?? JsonSerializer.SerializeToElement(new
     {
-        Console.WriteLine($"Media reason:  {smokeSummary.MediaGateFailureReason}");
+        sessionId = sessionRuntime.SessionId,
+        peerId = sessionRuntime.PeerId,
+        endpointId = sessionRuntime.EndpointId,
+        runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
+        source = "dotnet-acceptance-runner",
+    });
+    result.StackSummaryPath = stackSummaryPath;
+
+    Console.WriteLine("\n=== WebRTC Edge Agent Smoke ===");
+    var smokeSummary = await RunSmokeAsync(options, sessionRuntime, smokeSummaryPath, CancellationToken.None);
+    await WriteJsonAsync(smokeSummaryPath, smokeSummary);
+    result.Smoke = TryReadJson(smokeSummaryPath);
+    var commandPass = string.Equals(smokeSummary.CommandStatus, "Applied", StringComparison.OrdinalIgnoreCase);
+    var mediaPass = smokeSummary.MediaGatePass ?? true;
+    result.Pass = commandPass && mediaPass;
+    var smokeExitCode = result.Pass ? 0 : 1;
+
+    await WriteSummaryAsync(options.OutputJsonPath, result, platformRoot);
+
+    Console.WriteLine("\n=== Acceptance Summary ===");
+    Console.WriteLine($"Result: {(result.Pass ? "PASS" : "FAIL")}");
+    Console.WriteLine($"Session:       {sessionRuntime.SessionId}");
+    Console.WriteLine($"Peer:          {sessionRuntime.PeerId}");
+    if (smokeSummary.MediaGateRequired)
+    {
+        Console.WriteLine($"Media gate:    {(smokeSummary.MediaGatePass == true ? "PASS" : "FAIL")}");
+        if (!string.IsNullOrWhiteSpace(smokeSummary.MediaGateFailureReason))
+        {
+            Console.WriteLine($"Media reason:  {smokeSummary.MediaGateFailureReason}");
+        }
+    }
+
+    Console.WriteLine($"Smoke summary: {smokeSummaryPath}");
+    if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
+    {
+        Console.WriteLine($"Output JSON: {ResolveOutputPath(options.OutputJsonPath, platformRoot)}");
+    }
+
+    return smokeExitCode;
+}
+finally
+{
+    if (options.StopStackAfter && bootstrapRuntime is not null)
+    {
+        StopProcessById(bootstrapRuntime.AdapterPid, "edge-adapter");
+        StopProcessById(bootstrapRuntime.Exp022Pid, "exp-022");
     }
 }
-Console.WriteLine($"Smoke summary: {smokeSummaryPath}");
-if (!string.IsNullOrWhiteSpace(options.OutputJsonPath))
-{
-    Console.WriteLine($"Output JSON: {ResolveOutputPath(options.OutputJsonPath, platformRoot)}");
-}
-
-return smokeExitCode;
 
 static async Task<SmokeSummary> RunSmokeAsync(
     AcceptanceRunnerOptions options,
@@ -86,8 +104,8 @@ static async Task<SmokeSummary> RunSmokeAsync(
     apiClient.DefaultRequestHeaders.Add("X-HidBridge-OrganizationId", "local-org");
     apiClient.DefaultRequestHeaders.Add("X-HidBridge-Role", "operator.admin,operator.moderator,operator.viewer");
 
-    await MarkPeerOnlineAsync(options, apiClient, sessionRuntime, cancellationToken);
     sessionRuntime = await EnsureControlLeaseAsync(options, apiClient, sessionRuntime, cancellationToken);
+    await MarkPeerOnlineAsync(options, apiClient, sessionRuntime, cancellationToken);
     var readiness = options.SkipTransportHealthCheck
         ? null
         : await WaitRelayTransportReadyAsync(options, apiClient, sessionRuntime.SessionId, cancellationToken);
@@ -219,49 +237,338 @@ static SessionRuntime ResolveSessionRuntime(AcceptanceRunnerOptions options, str
         EndpointId: endpointId);
 }
 
-static async Task<string> AcquireAccessTokenAsync(AcceptanceRunnerOptions options, HttpClient client, CancellationToken cancellationToken)
+static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
+    AcceptanceRunnerOptions options,
+    string platformRoot,
+    string stackSummaryPath,
+    CancellationToken cancellationToken)
 {
-    var keycloak = options.KeycloakBaseUrl.TrimEnd('/');
-    var tokenEndpoint = $"{keycloak}/realms/{options.RealmName}/protocol/openid-connect/token";
-    var attempts = Math.Max(1, options.TokenRequestAttempts);
-    var delayMs = Math.Max(100, options.TokenRequestDelayMs);
-    Console.WriteLine($"Acquiring access token from {tokenEndpoint} (client_id={options.TokenClientId}, username={options.TokenUsername}).");
+    var scriptPath = Path.Combine(platformRoot, "Scripts", "run_webrtc_stack.ps1");
+    if (!File.Exists(scriptPath))
+    {
+        throw new FileNotFoundException($"WebRTC stack bootstrap script not found: {scriptPath}");
+    }
 
-    Exception? last = null;
-    for (var attempt = 1; attempt <= attempts; attempt++)
+    var logRoot = Path.GetDirectoryName(stackSummaryPath) ?? platformRoot;
+    Directory.CreateDirectory(logRoot);
+    var stdoutPath = Path.Combine(logRoot, "webrtc-stack.stdout.log");
+    var stderrPath = Path.Combine(logRoot, "webrtc-stack.stderr.log");
+
+    var shell = OperatingSystem.IsWindows() ? "powershell.exe" : "pwsh";
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = shell,
+        UseShellExecute = false,
+        RedirectStandardOutput = false,
+        RedirectStandardError = false,
+    };
+
+    if (OperatingSystem.IsWindows())
+    {
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+    }
+    else
+    {
+        startInfo.ArgumentList.Add("-NoProfile");
+    }
+
+    startInfo.ArgumentList.Add("-File");
+    startInfo.ArgumentList.Add(scriptPath);
+    startInfo.ArgumentList.Add("-ApiBaseUrl");
+    startInfo.ArgumentList.Add(options.ApiBaseUrl);
+    startInfo.ArgumentList.Add("-CommandExecutor");
+    startInfo.ArgumentList.Add(options.CommandExecutor);
+    startInfo.ArgumentList.Add("-OutputJsonPath");
+    startInfo.ArgumentList.Add(stackSummaryPath);
+    startInfo.ArgumentList.Add("-SkipIdentityReset");
+    startInfo.ArgumentList.Add("-SkipCiLocal");
+    startInfo.ArgumentList.Add("-TokenUsername");
+    startInfo.ArgumentList.Add(options.TokenUsername);
+    startInfo.ArgumentList.Add("-TokenPassword");
+    startInfo.ArgumentList.Add(options.TokenPassword);
+    startInfo.ArgumentList.Add("-KeycloakBaseUrl");
+    startInfo.ArgumentList.Add(options.KeycloakBaseUrl);
+    if (options.SkipRuntimeBootstrap)
+    {
+        startInfo.ArgumentList.Add("-SkipRuntimeBootstrap");
+    }
+
+    if (options.StopExisting)
+    {
+        startInfo.ArgumentList.Add("-StopExisting");
+    }
+
+    if (options.AllowLegacyControlWs)
+    {
+        startInfo.ArgumentList.Add("-AllowLegacyControlWs");
+    }
+
+    if (!string.IsNullOrWhiteSpace(options.ControlWsUrl))
+    {
+        startInfo.ArgumentList.Add("-ControlWsUrl");
+        startInfo.ArgumentList.Add(options.ControlWsUrl);
+    }
+
+    using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start WebRTC stack bootstrap process.");
+
+    var stackReady = false;
+    var terminatedAfterSummary = false;
+    var bootstrapTimeout = TimeSpan.FromSeconds(Math.Max(30, options.RequestTimeoutSec * 6));
+    var bootstrapDeadline = DateTimeOffset.UtcNow.Add(bootstrapTimeout);
+    Console.WriteLine($"Waiting for WebRTC stack summary ({bootstrapTimeout.TotalSeconds:0}s timeout)...");
+
+    while (!process.HasExited && DateTimeOffset.UtcNow < bootstrapDeadline)
+    {
+        if (TryReadJson(stackSummaryPath) is not null)
+        {
+            stackReady = true;
+            Console.WriteLine("WebRTC stack summary detected.");
+            break;
+        }
+
+        await Task.Delay(250, cancellationToken);
+    }
+    Console.WriteLine($"WebRTC stack bootstrap state: stackReady={stackReady}, processExited={process.HasExited}.");
+
+    var timedOutWithoutSummary = !stackReady && !process.HasExited;
+
+    if (stackReady && !process.HasExited)
+    {
+        // `run_webrtc_stack.ps1` can stay alive in some host shells even after writing summary.
+        // Once summary exists, terminate only the script process and keep spawned adapter alive.
+        try
+        {
+            process.Kill(entireProcessTree: false);
+            terminatedAfterSummary = true;
+        }
+        catch
+        {
+            // best effort
+        }
+    }
+    else if (!stackReady && !process.HasExited)
     {
         try
         {
-            using var body = new FormUrlEncodedContent(new[]
-            {
-                new KeyValuePair<string, string>("grant_type", "password"),
-                new KeyValuePair<string, string>("client_id", options.TokenClientId),
-                new KeyValuePair<string, string>("client_secret", options.TokenClientSecret),
-                new KeyValuePair<string, string>("username", options.TokenUsername),
-                new KeyValuePair<string, string>("password", options.TokenPassword),
-                new KeyValuePair<string, string>("scope", options.TokenScope),
-            }.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)));
-
-            using var response = await client.PostAsync(tokenEndpoint, body, cancellationToken);
-            response.EnsureSuccessStatusCode();
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            var token = doc.RootElement.GetProperty("access_token").GetString();
-            if (!string.IsNullOrWhiteSpace(token))
-            {
-                return token;
-            }
+            process.Kill(entireProcessTree: false);
         }
-        catch (Exception ex)
+        catch
         {
-            last = ex;
-            if (attempt < attempts)
+            // best effort
+        }
+    }
+
+    if (!process.HasExited)
+    {
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        }
+        catch (TimeoutException) when (stackReady)
+        {
+            // Summary exists; do not block acceptance on lingering bootstrap shell process.
+        }
+        catch (Exception) when (stackReady)
+        {
+            // Summary already exists; continue.
+        }
+    }
+
+    await File.WriteAllTextAsync(
+        stdoutPath,
+        "Bootstrap stdout is not redirected by the runner. See stack logs under Platform/.logs/webrtc-stack/<timestamp>/.",
+        cancellationToken);
+    await File.WriteAllTextAsync(
+        stderrPath,
+        "Bootstrap stderr is not redirected by the runner. See stack logs under Platform/.logs/webrtc-stack/<timestamp>/.",
+        cancellationToken);
+
+    if (!stackReady && process.ExitCode != 0)
+    {
+        if (timedOutWithoutSummary)
+        {
+            throw new InvalidOperationException(
+                $"WebRTC stack bootstrap timed out after {bootstrapTimeout.TotalSeconds:0}s without summary output: {stackSummaryPath}");
+        }
+
+        throw new InvalidOperationException(
+            $"WebRTC stack bootstrap failed with exit code {process.ExitCode}. Summary JSON was not produced: {stackSummaryPath}");
+    }
+
+    var stackJson = TryReadJson(stackSummaryPath);
+    if (stackJson is not { } stack)
+    {
+        throw new InvalidOperationException($"WebRTC stack bootstrap did not produce summary JSON: {stackSummaryPath}");
+    }
+
+    var adapterPid = stack.TryGetProperty("adapterPid", out var adapterPidElement)
+                     && adapterPidElement.ValueKind == JsonValueKind.Number
+                     && adapterPidElement.TryGetInt32(out var parsedAdapterPid)
+        ? parsedAdapterPid
+        : (int?)null;
+    var exp022Pid = stack.TryGetProperty("exp022Pid", out var exp022PidElement)
+                    && exp022PidElement.ValueKind == JsonValueKind.Number
+                    && exp022PidElement.TryGetInt32(out var parsedExp022Pid)
+        ? parsedExp022Pid
+        : (int?)null;
+
+    Console.WriteLine($"PASS  WebRTC Stack (adapterPid={adapterPid?.ToString() ?? "n/a"})");
+    if (terminatedAfterSummary)
+    {
+        Console.WriteLine("Note: bootstrap script process was terminated after summary was produced.");
+    }
+    Console.WriteLine($"Log:   {stdoutPath}");
+
+    return new StackBootstrapRuntime(adapterPid, exp022Pid);
+}
+
+static void StopProcessById(int? pid, string label)
+{
+    if (pid is null or <= 0)
+    {
+        return;
+    }
+
+    try
+    {
+        using var process = Process.GetProcessById(pid.Value);
+        if (!process.HasExited)
+        {
+            process.Kill(entireProcessTree: true);
+            Console.WriteLine($"Stopped {label} PID {pid.Value}");
+        }
+    }
+    catch
+    {
+        // best-effort cleanup
+    }
+}
+
+static async Task<string> AcquireAccessTokenAsync(AcceptanceRunnerOptions options, HttpClient client, CancellationToken cancellationToken)
+{
+    var baseUrlCandidates = BuildKeycloakBaseUrlCandidates(options.KeycloakBaseUrl);
+    var scopeCandidates = BuildScopeCandidates(options.TokenScope);
+    var attempts = Math.Max(1, options.TokenRequestAttempts);
+    var delayMs = Math.Max(100, options.TokenRequestDelayMs);
+    Console.WriteLine(
+        $"Acquiring access token (client_id={options.TokenClientId}, username={options.TokenUsername}, authorities={baseUrlCandidates.Count}, scopes={scopeCandidates.Count}).");
+
+    Exception? last = null;
+    foreach (var baseUrl in baseUrlCandidates)
+    {
+        var tokenEndpoint = $"{baseUrl.TrimEnd('/')}/realms/{options.RealmName}/protocol/openid-connect/token";
+        foreach (var scope in scopeCandidates)
+        {
+            for (var attempt = 1; attempt <= attempts; attempt++)
             {
-                await Task.Delay(delayMs, cancellationToken);
+                try
+                {
+                    using var body = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("grant_type", "password"),
+                        new KeyValuePair<string, string>("client_id", options.TokenClientId),
+                        new KeyValuePair<string, string>("client_secret", options.TokenClientSecret),
+                        new KeyValuePair<string, string>("username", options.TokenUsername),
+                        new KeyValuePair<string, string>("password", options.TokenPassword),
+                        new KeyValuePair<string, string>("scope", scope),
+                    }.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)));
+
+                    using var response = await client.PostAsync(tokenEndpoint, body, cancellationToken);
+                    var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        throw new InvalidOperationException(
+                            $"Token endpoint returned {(int)response.StatusCode} ({response.ReasonPhrase}) at {tokenEndpoint} (scope='{scope}'). Body: {payload}");
+                    }
+
+                    using var doc = JsonDocument.Parse(payload);
+                    var token = doc.RootElement.GetProperty("access_token").GetString();
+                    if (!string.IsNullOrWhiteSpace(token))
+                    {
+                        return token;
+                    }
+
+                    throw new InvalidOperationException(
+                        $"OIDC token response did not contain access_token at {tokenEndpoint} (scope='{scope}').");
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    Console.WriteLine(
+                        $"Token attempt {attempt}/{attempts} failed at {tokenEndpoint} (scope='{scope}'): {ex.GetBaseException().Message}");
+                    if (attempt < attempts)
+                    {
+                        await Task.Delay(delayMs, cancellationToken);
+                    }
+                }
             }
         }
     }
 
-    throw new InvalidOperationException($"Keycloak token request failed after {attempts} attempt(s).", last);
+    throw new InvalidOperationException(
+        $"Keycloak token request failed after {attempts} attempt(s) across {baseUrlCandidates.Count} authority candidate(s).",
+        last);
+}
+
+static IReadOnlyList<string> BuildKeycloakBaseUrlCandidates(string keycloakBaseUrl)
+{
+    var candidates = new List<string>();
+    void Add(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var normalized = value.TrimEnd('/');
+        if (!candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            candidates.Add(normalized);
+        }
+    }
+
+    Add(keycloakBaseUrl);
+    if (!Uri.TryCreate(keycloakBaseUrl, UriKind.Absolute, out var uri))
+    {
+        return candidates;
+    }
+
+    var portSuffix = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
+    if (string.Equals(uri.Host, "host.docker.internal", StringComparison.OrdinalIgnoreCase))
+    {
+        Add($"{uri.Scheme}://127.0.0.1{portSuffix}");
+        Add($"{uri.Scheme}://localhost{portSuffix}");
+    }
+    else if (string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+    {
+        Add($"{uri.Scheme}://host.docker.internal{portSuffix}");
+    }
+
+    return candidates;
+}
+
+static IReadOnlyList<string> BuildScopeCandidates(string tokenScope)
+{
+    var scopes = new List<string>();
+    void Add(string? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        if (!scopes.Contains(value, StringComparer.Ordinal))
+        {
+            scopes.Add(value);
+        }
+    }
+
+    Add(tokenScope);
+    Add("openid");
+    Add(string.Empty);
+    return scopes;
 }
 
 static async Task MarkPeerOnlineAsync(
@@ -311,7 +618,9 @@ static async Task<SessionRuntime> EnsureControlLeaseAsync(
         leaseSeconds = Math.Max(30, options.LeaseSeconds),
         reason = "webrtc edge-agent smoke (dotnet)",
         autoCreateSessionIfMissing = true,
-        preferLiveRelaySession = true,
+        // Keep smoke command-path bound to the stack-bootstrap session/peer and avoid
+        // session ID rebinds that can disconnect acceptance from the live edge adapter.
+        preferLiveRelaySession = false,
         tenantId = "local-tenant",
         organizationId = "local-org",
     };
@@ -609,7 +918,13 @@ static JsonElement? TryReadJson(string path)
 
     try
     {
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var content = File.ReadAllText(path);
+        if (!string.IsNullOrEmpty(content) && content[0] == '\uFEFF')
+        {
+            content = content[1..];
+        }
+
+        using var doc = JsonDocument.Parse(content);
         return doc.RootElement.Clone();
     }
     catch
@@ -663,11 +978,11 @@ internal sealed class AcceptanceRunnerOptions
     public bool AllowLegacyControlWs { get; private set; }
     public string ControlHealthUrl { get; private set; } = "http://127.0.0.1:28092/health";
     public string ControlWsUrl { get; private set; } = string.Empty;
-    public string KeycloakBaseUrl { get; private set; } = "http://127.0.0.1:18096";
+    public string KeycloakBaseUrl { get; private set; } = "http://host.docker.internal:18096";
     public string RealmName { get; private set; } = "hidbridge-dev";
     public string TokenClientId { get; private set; } = "controlplane-smoke";
     public string TokenClientSecret { get; private set; } = string.Empty;
-    public string TokenScope { get; private set; } = "openid profile email";
+    public string TokenScope { get; private set; } = "openid";
     public string TokenUsername { get; private set; } = "operator.smoke.admin";
     public string TokenPassword { get; private set; } = "ChangeMe123!";
     public int RequestTimeoutSec { get; private set; } = 15;
@@ -793,6 +1108,8 @@ internal sealed class AcceptanceSummary
     public JsonElement? Smoke { get; set; }
     public bool Pass { get; set; }
 }
+
+internal sealed record StackBootstrapRuntime(int? AdapterPid, int? Exp022Pid);
 
 internal sealed record SessionRuntime(string SessionId, string PeerId, string EndpointId);
 

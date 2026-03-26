@@ -2,7 +2,17 @@ param(
     [string]$Configuration = "Debug",
     [string]$ConnectionString = "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge",
     [string]$Schema = "hidbridge",
-    [string]$AuthAuthority = "http://127.0.0.1:18096/realms/hidbridge-dev",
+    [string]$AuthAuthority = "http://host.docker.internal:18096/realms/hidbridge-dev",
+    [string]$KeycloakBaseUrl = "http://host.docker.internal:18096",
+    [string]$TokenClientId = "controlplane-smoke",
+    [string]$TokenClientSecret = "",
+    [string]$TokenScope = "openid",
+    [string]$TokenUsername = "operator.smoke.admin",
+    [string]$TokenPassword = "ChangeMe123!",
+    [string]$ViewerTokenUsername = "operator.smoke.viewer",
+    [string]$ViewerTokenPassword = "ChangeMe123!",
+    [string]$ForeignTokenUsername = "operator.smoke.foreign",
+    [string]$ForeignTokenPassword = "ChangeMe123!",
     [switch]$SkipDoctor,
     [switch]$SkipChecks,
     [switch]$SkipBearerSmoke,
@@ -42,15 +52,58 @@ $artifactExportPath = ""
 
 try {
     if (-not $SkipDoctor) {
-        Invoke-LoggedScript -Results $results -Name "Doctor" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_doctor.ps1") -Parameters @{ StartApiProbe = $true; RequireApi = $true } -StopOnFailure:$StopOnFailure
+        Invoke-LoggedScript -Results $results -Name "Doctor" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_doctor.ps1") -Parameters @{
+            StartApiProbe = $true
+            RequireApi = $true
+            KeycloakBaseUrl = $KeycloakBaseUrl
+            SmokeClientId = $TokenClientId
+            SmokeAdminUser = $TokenUsername
+            SmokeAdminPassword = $TokenPassword
+            SmokeViewerUser = $ViewerTokenUsername
+            SmokeViewerPassword = $ViewerTokenPassword
+            SmokeForeignUser = $ForeignTokenUsername
+            SmokeForeignPassword = $ForeignTokenPassword
+        } -StopOnFailure:$StopOnFailure
     }
 
     if (-not $SkipChecks) {
-        Invoke-LoggedScript -Results $results -Name "Checks (Sql)" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_checks.ps1") -Parameters @{ Provider = "Sql"; Configuration = $Configuration; ConnectionString = $ConnectionString; Schema = $Schema } -StopOnFailure:$StopOnFailure
+        Invoke-LoggedScript -Results $results -Name "Checks (Sql)" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_checks.ps1") -Parameters @{
+            Provider = "Sql"
+            Configuration = $Configuration
+            ConnectionString = $ConnectionString
+            Schema = $Schema
+            EnableApiAuth = $true
+            AuthAuthority = $AuthAuthority
+            AuthAudience = ""
+            TokenClientId = $TokenClientId
+            TokenClientSecret = $TokenClientSecret
+            TokenUsername = $TokenUsername
+            TokenPassword = $TokenPassword
+            ViewerTokenUsername = $ViewerTokenUsername
+            ViewerTokenPassword = $ViewerTokenPassword
+            ForeignTokenUsername = $ForeignTokenUsername
+            ForeignTokenPassword = $ForeignTokenPassword
+            DisableHeaderFallback = $true
+            BearerOnly = $true
+        } -StopOnFailure:$StopOnFailure
     }
 
     if (-not $SkipBearerSmoke) {
-        Invoke-LoggedScript -Results $results -Name "Bearer Smoke" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_api_bearer_smoke.ps1") -Parameters @{ Configuration = $Configuration; ConnectionString = $ConnectionString; Schema = $Schema; AuthAuthority = $AuthAuthority } -StopOnFailure:$StopOnFailure
+        Invoke-LoggedScript -Results $results -Name "Bearer Smoke" -LogRoot $logRoot -ScriptPath (Join-Path $scriptsRoot "run_api_bearer_smoke.ps1") -Parameters @{
+            Configuration = $Configuration
+            ConnectionString = $ConnectionString
+            Schema = $Schema
+            AuthAuthority = $AuthAuthority
+            TokenClientId = $TokenClientId
+            TokenClientSecret = $TokenClientSecret
+            TokenScope = $TokenScope
+            TokenUsername = $TokenUsername
+            TokenPassword = $TokenPassword
+            ViewerTokenUsername = $ViewerTokenUsername
+            ViewerTokenPassword = $ViewerTokenPassword
+            ForeignTokenUsername = $ForeignTokenUsername
+            ForeignTokenPassword = $ForeignTokenPassword
+        } -StopOnFailure:$StopOnFailure
     }
 
     if (-not $IncludeWebRtcEdgeAgentAcceptance -and -not $SkipWebRtcEdgeAgentAcceptance) {
@@ -71,7 +124,14 @@ try {
             ApiBaseUrl = "http://127.0.0.1:18093"
             CommandExecutor = $WebRtcCommandExecutor
             ControlHealthUrl = $WebRtcControlHealthUrl
+            KeycloakBaseUrl = $KeycloakBaseUrl
+            TokenClientId = $TokenClientId
+            TokenClientSecret = $TokenClientSecret
+            TokenScope = $TokenScope
+            TokenUsername = $TokenUsername
+            TokenPassword = $TokenPassword
             PeerReadyTimeoutSec = [Math]::Max(5, $WebRtcPeerReadyTimeoutSec)
+            SkipRuntimeBootstrap = $true
         }
         if ($AllowLegacyControlWs) {
             $webrtcAcceptanceParameters.AllowLegacyControlWs = $true
@@ -101,10 +161,11 @@ try {
             BaseUrl = "http://127.0.0.1:18093"
             SloWindowMinutes = [Math]::Max(5, $OpsSloWindowMinutes)
             AuthAuthority = $AuthAuthority
-            TokenClientId = "controlplane-smoke"
-            TokenScope = "openid profile email"
-            TokenUsername = "operator.smoke.admin"
-            TokenPassword = "ChangeMe123!"
+            TokenClientId = $TokenClientId
+            TokenClientSecret = $TokenClientSecret
+            TokenScope = $TokenScope
+            TokenUsername = $TokenUsername
+            TokenPassword = $TokenPassword
             RequireAuditTrailCategories = ($IncludeWebRtcEdgeAgentAcceptance -and -not $SkipWebRtcEdgeAgentAcceptance)
         }
         if ($OpsFailOnSloWarning) {
