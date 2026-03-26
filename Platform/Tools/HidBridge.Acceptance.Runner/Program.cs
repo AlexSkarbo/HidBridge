@@ -6,7 +6,8 @@ using System.Text.Json;
 
 var options = AcceptanceRunnerOptions.Parse(args);
 var platformRoot = ResolvePlatformRoot(options.PlatformRoot);
-var logsRoot = Path.Combine(platformRoot, ".logs", "webrtc-edge-agent-acceptance", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+var logCategory = options.SmokeOnly ? "webrtc-edge-agent-smoke" : "webrtc-edge-agent-acceptance";
+var logsRoot = Path.Combine(platformRoot, ".logs", logCategory, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
 Directory.CreateDirectory(logsRoot);
 
 var stackSummaryPath = Path.Combine(logsRoot, "webrtc-stack.summary.json");
@@ -26,19 +27,33 @@ Console.WriteLine($"Logs root:     {logsRoot}");
 StackBootstrapRuntime? bootstrapRuntime = null;
 try
 {
-    Console.WriteLine("\n=== WebRTC Stack ===");
-    bootstrapRuntime = await BootstrapWebRtcStackAsync(options, platformRoot, stackSummaryPath, CancellationToken.None);
-
     var sessionRuntime = ResolveSessionRuntime(options, platformRoot);
-    result.Stack = TryReadJson(stackSummaryPath) ?? JsonSerializer.SerializeToElement(new
+    if (!options.SmokeOnly)
     {
-        sessionId = sessionRuntime.SessionId,
-        peerId = sessionRuntime.PeerId,
-        endpointId = sessionRuntime.EndpointId,
-        runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
-        source = "dotnet-acceptance-runner",
-    });
-    result.StackSummaryPath = stackSummaryPath;
+        Console.WriteLine("\n=== WebRTC Stack ===");
+        bootstrapRuntime = await BootstrapWebRtcStackAsync(options, platformRoot, stackSummaryPath, CancellationToken.None);
+        result.Stack = TryReadJson(stackSummaryPath) ?? JsonSerializer.SerializeToElement(new
+        {
+            sessionId = sessionRuntime.SessionId,
+            peerId = sessionRuntime.PeerId,
+            endpointId = sessionRuntime.EndpointId,
+            runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
+            source = "dotnet-acceptance-runner",
+        });
+        result.StackSummaryPath = stackSummaryPath;
+    }
+    else
+    {
+        result.StackSummaryPath = string.Empty;
+        result.Stack = JsonSerializer.SerializeToElement(new
+        {
+            sessionId = sessionRuntime.SessionId,
+            peerId = sessionRuntime.PeerId,
+            endpointId = sessionRuntime.EndpointId,
+            runtimeBootstrapSkipped = true,
+            source = "dotnet-smoke-runner",
+        });
+    }
 
     Console.WriteLine("\n=== WebRTC Edge Agent Smoke ===");
     var smokeSummary = await RunSmokeAsync(options, sessionRuntime, smokeSummaryPath, CancellationToken.None);
@@ -87,6 +102,24 @@ static async Task<SmokeSummary> RunSmokeAsync(
     string smokeSummaryPath,
     CancellationToken cancellationToken)
 {
+    var isUartExecutor = string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase);
+    if (!options.SkipControlHealthCheck && !isUartExecutor)
+    {
+        var ready = await WaitControlHealthAsync(
+            options.ControlHealthUrl,
+            Math.Max(1, options.ControlHealthAttempts),
+            Math.Max(100, options.ControlHealthDelayMs),
+            cancellationToken);
+        if (!ready)
+        {
+            throw new InvalidOperationException($"Control WS health endpoint is not ready: {options.ControlHealthUrl}");
+        }
+    }
+    else if (isUartExecutor)
+    {
+        Console.WriteLine("WARNING: Session executor is UART; skipping control-health precheck.");
+    }
+
     using var keycloakClient = new HttpClient
     {
         Timeout = TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSec)),
@@ -100,8 +133,8 @@ static async Task<SmokeSummary> RunSmokeAsync(
     apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     apiClient.DefaultRequestHeaders.Add("X-HidBridge-UserId", options.PrincipalId);
     apiClient.DefaultRequestHeaders.Add("X-HidBridge-PrincipalId", options.PrincipalId);
-    apiClient.DefaultRequestHeaders.Add("X-HidBridge-TenantId", "local-tenant");
-    apiClient.DefaultRequestHeaders.Add("X-HidBridge-OrganizationId", "local-org");
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-TenantId", options.TenantId);
+    apiClient.DefaultRequestHeaders.Add("X-HidBridge-OrganizationId", options.OrganizationId);
     apiClient.DefaultRequestHeaders.Add("X-HidBridge-Role", "operator.admin,operator.moderator,operator.viewer");
 
     sessionRuntime = await EnsureControlLeaseAsync(options, apiClient, sessionRuntime, cancellationToken);
@@ -111,7 +144,9 @@ static async Task<SmokeSummary> RunSmokeAsync(
         : await WaitRelayTransportReadyAsync(options, apiClient, sessionRuntime.SessionId, cancellationToken);
 
     var commandAttempts = new List<SmokeCommandAttempt>();
-    var effectiveText = $"hello webrtc {DateTimeOffset.UtcNow:HH:mm:ss}";
+    var effectiveText = string.IsNullOrWhiteSpace(options.CommandText)
+        ? $"hello webrtc {DateTimeOffset.UtcNow:HH:mm:ss}"
+        : options.CommandText;
     var maxAttempts = Math.Max(1, options.CommandAttempts);
     var retryDelay = Math.Max(100, options.CommandRetryDelayMs);
     CommandAck? finalAck = null;
@@ -571,6 +606,50 @@ static IReadOnlyList<string> BuildScopeCandidates(string tokenScope)
     return scopes;
 }
 
+static async Task<bool> WaitControlHealthAsync(
+    string url,
+    int attempts,
+    int delayMs,
+    CancellationToken cancellationToken)
+{
+    using var http = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(2),
+    };
+
+    for (var i = 0; i < attempts; i++)
+    {
+        try
+        {
+            using var response = await http.GetAsync(url, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                if (doc.RootElement.TryGetProperty("ok", out var ok))
+                {
+                    if (ok.ValueKind == JsonValueKind.True)
+                    {
+                        return true;
+                    }
+
+                    if (ok.ValueKind == JsonValueKind.String && bool.TryParse(ok.GetString(), out var parsed) && parsed)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // retry loop
+        }
+
+        await Task.Delay(delayMs, cancellationToken);
+    }
+
+    return false;
+}
+
 static async Task MarkPeerOnlineAsync(
     AcceptanceRunnerOptions options,
     HttpClient client,
@@ -621,8 +700,8 @@ static async Task<SessionRuntime> EnsureControlLeaseAsync(
         // Keep smoke command-path bound to the stack-bootstrap session/peer and avoid
         // session ID rebinds that can disconnect acceptance from the live edge adapter.
         preferLiveRelaySession = false,
-        tenantId = "local-tenant",
-        organizationId = "local-org",
+        tenantId = options.TenantId,
+        organizationId = options.OrganizationId,
     };
 
     using var response = await client.PostAsJsonAsync(uri, body, cancellationToken);
@@ -846,8 +925,8 @@ static async Task<CommandAck> DispatchCommandAsync(
         },
         timeoutMs = Math.Max(1000, options.TimeoutMs),
         idempotencyKey = $"idem-{commandId}",
-        tenantId = "local-tenant",
-        organizationId = "local-org",
+        tenantId = options.TenantId,
+        organizationId = options.OrganizationId,
     };
 
     using var response = await client.PostAsJsonAsync(uri, payload, cancellationToken);
@@ -994,16 +1073,21 @@ internal sealed class AcceptanceRunnerOptions
     public bool SkipTransportHealthCheck { get; private set; }
     public int TransportHealthAttempts { get; private set; } = 20;
     public int TransportHealthDelayMs { get; private set; } = 500;
+    public bool SkipControlHealthCheck { get; private set; }
+    public int ControlHealthDelayMs { get; private set; } = 500;
     public string UartPort { get; private set; } = "COM6";
     public int UartBaud { get; private set; } = 3_000_000;
     public string UartHmacKey { get; private set; } = "your-master-secret";
     public string PrincipalId { get; private set; } = "smoke-runner";
+    public string TenantId { get; private set; } = "local-tenant";
+    public string OrganizationId { get; private set; } = "local-org";
     public int PeerReadyTimeoutSec { get; private set; } = 45;
-    public string SessionEnvPath { get; private set; } = "Platform/.logs/webrtc-peer-adapter.session.env";
+    public string SessionEnvPath { get; private set; } = ".logs/webrtc-peer-adapter.session.env";
     public string SessionId { get; private set; } = string.Empty;
     public string PeerId { get; private set; } = string.Empty;
     public string EndpointId { get; private set; } = string.Empty;
     public string CommandAction { get; private set; } = "keyboard.text";
+    public string CommandText { get; private set; } = string.Empty;
     public int TimeoutMs { get; private set; } = 8000;
     public int CommandAttempts { get; private set; } = 3;
     public int CommandRetryDelayMs { get; private set; } = 750;
@@ -1016,6 +1100,7 @@ internal sealed class AcceptanceRunnerOptions
     public bool SkipRuntimeBootstrap { get; private set; }
     public bool StopExisting { get; private set; }
     public bool StopStackAfter { get; private set; }
+    public bool SmokeOnly { get; private set; }
     public string OutputJsonPath { get; private set; } = "Platform/.logs/webrtc-edge-agent-acceptance.result.json";
     public string PlatformRoot { get; private set; } = string.Empty;
 
@@ -1035,13 +1120,16 @@ internal sealed class AcceptanceRunnerOptions
             {
                 case "allow-legacy-controlws": options.AllowLegacyControlWs = true; break;
                 case "skip-transport-health-check": options.SkipTransportHealthCheck = true; break;
+                case "skip-control-health-check": options.SkipControlHealthCheck = true; break;
                 case "skip-runtime-bootstrap": options.SkipRuntimeBootstrap = true; break;
                 case "stop-existing": options.StopExisting = true; break;
                 case "stop-stack-after": options.StopStackAfter = true; break;
                 case "skip-control-lease-request": options.SkipControlLeaseRequest = true; break;
+                case "smoke-only": options.SmokeOnly = true; break;
                 case "api-base-url": options.ApiBaseUrl = RequireValue(args, ref i, arg); break;
                 case "command-executor": options.CommandExecutor = RequireValue(args, ref i, arg); break;
                 case "command-action": options.CommandAction = RequireValue(args, ref i, arg); break;
+                case "command-text": options.CommandText = RequireValue(args, ref i, arg); break;
                 case "timeout-ms": options.TimeoutMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "command-attempts": options.CommandAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "command-retry-delay-ms": options.CommandRetryDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
@@ -1061,6 +1149,7 @@ internal sealed class AcceptanceRunnerOptions
                 case "token-password": options.TokenPassword = RequireValue(args, ref i, arg); break;
                 case "request-timeout-sec": options.RequestTimeoutSec = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "control-health-attempts": options.ControlHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
+                case "control-health-delay-ms": options.ControlHealthDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "keycloak-health-attempts": options.KeycloakHealthAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "keycloak-health-delay-ms": options.KeycloakHealthDelayMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "token-request-attempts": options.TokenRequestAttempts = int.Parse(RequireValue(args, ref i, arg)); break;
@@ -1071,6 +1160,8 @@ internal sealed class AcceptanceRunnerOptions
                 case "uart-baud": options.UartBaud = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "uart-hmac-key": options.UartHmacKey = RequireValue(args, ref i, arg); break;
                 case "principal-id": options.PrincipalId = RequireValue(args, ref i, arg); break;
+                case "tenant-id": options.TenantId = RequireValue(args, ref i, arg); break;
+                case "organization-id": options.OrganizationId = RequireValue(args, ref i, arg); break;
                 case "peer-ready-timeout-sec": options.PeerReadyTimeoutSec = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "session-env-path": options.SessionEnvPath = RequireValue(args, ref i, arg); break;
                 case "session-id": options.SessionId = RequireValue(args, ref i, arg); break;

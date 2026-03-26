@@ -79,6 +79,7 @@ switch ($task.ToLowerInvariant()) {
     "ci-local" { $arguments.Add("ci-local") | Out-Null }
     "full" { $arguments.Add("full") | Out-Null }
     "webrtc-edge-agent-acceptance" { $arguments.Add("webrtc-acceptance") | Out-Null }
+    "webrtc-edge-agent-smoke" { $arguments.Add("webrtc-edge-agent-smoke") | Out-Null }
     "ops-slo-security-verify" { $arguments.Add("ops-verify") | Out-Null }
     "demo-flow" { $arguments.Add("demo-flow") | Out-Null }
     "webrtc-stack" { $arguments.Add("webrtc-stack") | Out-Null }

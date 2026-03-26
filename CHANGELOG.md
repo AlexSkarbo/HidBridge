@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-26 (cli-first: native webrtc-edge-agent-smoke)
+
+Summary:
+
+- Added native `webrtc-edge-agent-smoke` command in `HidBridge.RuntimeCtl` (C# orchestration path).
+- Added `--smoke-only` execution mode in `HidBridge.Acceptance.Runner` so smoke can run without stack bootstrap orchestration.
+- Migrated `Platform/Scripts/run_webrtc_edge_agent_smoke.ps1` to a thin RuntimeCtl wrapper.
+- Updated `Platform/run.ps1` direct routing so `-Task webrtc-edge-agent-smoke` executes native RuntimeCtl command.
+- Preserved smoke parity options (`tenantId`, `organizationId`, `commandText`, control-health skip/delay) in runner/runtime command plumbing.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+- `Platform/Scripts/run_webrtc_edge_agent_smoke.ps1`
+- `Platform/run.ps1`
+
 ## 2026-03-26 (cli-first operational docs/ui defaults)
 
 Summary:
