@@ -591,11 +591,17 @@ static async Task<StackBootstrapRuntime> BootstrapWebRtcStackAsync(
 
     if (!process.HasExited)
     {
-        // Summary is already produced; terminate lingering wrapper to avoid indefinite waits.
-        TryKillProcess(process, killTree: true);
+        // Summary is already produced. Do a short graceful wait for the wrapper to exit on its own.
+        await WaitForExitBestEffortAsync(process, TimeSpan.FromSeconds(5), cancellationToken);
+        if (!process.HasExited)
+        {
+            // IMPORTANT: never kill the whole tree here; adapter/media child processes must stay alive
+            // for the subsequent smoke phase.
+            TryKillProcess(process, killTree: false);
+            await WaitForExitBestEffortAsync(process, TimeSpan.FromSeconds(5), cancellationToken);
+        }
     }
 
-    await WaitForExitOrThrowAsync(process, TimeSpan.FromSeconds(20), cancellationToken);
     var stdOut = await AwaitOrFallbackAsync(stdOutTask, TimeSpan.FromSeconds(3), cancellationToken, "stdout capture timed out.");
     var stdErr = await AwaitOrFallbackAsync(stdErrTask, TimeSpan.FromSeconds(3), cancellationToken, "stderr capture timed out.");
     await File.WriteAllTextAsync(stdoutPath, stdOut, cancellationToken);
@@ -644,7 +650,7 @@ static void TryKillProcess(Process process, bool killTree)
     }
 }
 
-static async Task WaitForExitOrThrowAsync(Process process, TimeSpan timeout, CancellationToken cancellationToken)
+static async Task WaitForExitBestEffortAsync(Process process, TimeSpan timeout, CancellationToken cancellationToken)
 {
     try
     {
@@ -652,9 +658,7 @@ static async Task WaitForExitOrThrowAsync(Process process, TimeSpan timeout, Can
     }
     catch (TimeoutException)
     {
-        TryKillProcess(process, killTree: true);
-        throw new InvalidOperationException(
-            $"WebRTC stack bootstrap process did not exit within {timeout.TotalSeconds:0}s after summary detection.");
+        // best effort only
     }
 }
 
