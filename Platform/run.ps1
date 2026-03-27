@@ -75,8 +75,7 @@ $arguments.Add("--") | Out-Null
 $arguments.Add("--platform-root") | Out-Null
 $arguments.Add($platformRoot) | Out-Null
 # Minimal compatibility shim:
-# always pass through run.ps1 task syntax to RuntimeCtl native parser.
-$arguments.Add("task") | Out-Null
+# map run.ps1 `-Task <name>` to direct native RuntimeCtl command invocation.
 $arguments.Add($task) | Out-Null
 
 foreach ($arg in $forward) {

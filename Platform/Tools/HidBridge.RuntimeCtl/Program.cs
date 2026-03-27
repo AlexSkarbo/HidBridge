@@ -7,8 +7,8 @@ using System.Text.Json;
 using System.Text;
 
 // RuntimeCtl is the CLI-first orchestration entrypoint for local developer workflows.
-// All heavy command lanes live in `Commands/*.cs`; this file keeps only command routing,
-// compatibility bridges and shared process helpers used by multiple lanes.
+// All heavy command lanes live in `Commands/*.cs`; this file keeps only command routing
+// and shared process helpers used by multiple lanes.
 var app = RuntimeCtlApp.Parse(args);
 return await app.RunAsync();
 
@@ -56,19 +56,10 @@ internal sealed class RuntimeCtlApp
             ["webrtc-peer-adapter"] = new("webrtc-peer-adapter", "Runs deprecated exp-022 peer-adapter compatibility lane (native C#).", CommandKind.WebRtcPeerAdapter, null),
         };
 
-    // `run.ps1 -Task <name>` compatibility redirects to native commands where already migrated.
-    private static readonly IReadOnlyDictionary<string, string> NativeTaskRedirects =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["webrtc-edge-agent-acceptance"] = "webrtc-acceptance",
-            ["ops-slo-security-verify"] = "ops-verify",
-        };
-
     private readonly string _platformRoot;
     private readonly CommandSpec? _command;
     private readonly IReadOnlyList<string> _forwardArgs;
     private readonly bool _showHelp;
-    private readonly bool _invokedViaTask;
     private readonly string? _error;
 
     private RuntimeCtlApp(
@@ -76,14 +67,12 @@ internal sealed class RuntimeCtlApp
         CommandSpec? command,
         IReadOnlyList<string> forwardArgs,
         bool showHelp,
-        bool invokedViaTask,
         string? error)
     {
         _platformRoot = platformRoot;
         _command = command;
         _forwardArgs = forwardArgs;
         _showHelp = showHelp;
-        _invokedViaTask = invokedViaTask;
         _error = error;
     }
 
@@ -107,7 +96,6 @@ internal sealed class RuntimeCtlApp
                     command: null,
                     forwardArgs: Array.Empty<string>(),
                     showHelp: true,
-                    invokedViaTask: false,
                     error: "--platform-root requires a non-empty path value.");
             }
 
@@ -123,7 +111,6 @@ internal sealed class RuntimeCtlApp
                 command: null,
                 forwardArgs: Array.Empty<string>(),
                 showHelp: true,
-                invokedViaTask: false,
                 error: "Unable to resolve Platform root. Pass --platform-root <path-to-Platform>.\n");
         }
 
@@ -132,7 +119,7 @@ internal sealed class RuntimeCtlApp
             || string.Equals(remaining[0], "--help", StringComparison.OrdinalIgnoreCase)
             || string.Equals(remaining[0], "help", StringComparison.OrdinalIgnoreCase))
         {
-            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: false, error: null);
+            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: null);
         }
 
         var commandToken = remaining[0];
@@ -140,31 +127,20 @@ internal sealed class RuntimeCtlApp
 
         if (string.Equals(commandToken, "task", StringComparison.OrdinalIgnoreCase))
         {
-            if (remaining.Count == 0)
-            {
-                return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: true, error: "task requires <task-name>.");
-            }
-
-            var taskName = remaining[0];
-            remaining.RemoveAt(0);
-            if (NativeTaskRedirects.TryGetValue(taskName, out var redirectedTask))
-            {
-                taskName = redirectedTask;
-            }
-            if (CommandAliases.TryGetValue(taskName, out var nativeTask))
-            {
-                return new RuntimeCtlApp(platformRoot, nativeTask, NormalizeForwardArgs(remaining), showHelp: false, invokedViaTask: true, error: null);
-            }
-
-            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: true, error: $"Unsupported task '{taskName}'.");
+            return new RuntimeCtlApp(
+                platformRoot,
+                null,
+                Array.Empty<string>(),
+                showHelp: true,
+                error: "Legacy 'task <name>' routing was removed. Use native command syntax: runtimectl <command> [-- <args...>].");
         }
 
         if (!CommandAliases.TryGetValue(commandToken, out var commandSpec))
         {
-            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, invokedViaTask: false, error: $"Unsupported command '{commandToken}'.");
+            return new RuntimeCtlApp(platformRoot, null, Array.Empty<string>(), showHelp: true, error: $"Unsupported command '{commandToken}'.");
         }
 
-        return new RuntimeCtlApp(platformRoot, commandSpec, NormalizeForwardArgs(remaining), showHelp: false, invokedViaTask: false, error: null);
+        return new RuntimeCtlApp(platformRoot, commandSpec, NormalizeForwardArgs(remaining), showHelp: false, error: null);
     }
 
     public async Task<int> RunAsync()
@@ -173,19 +149,6 @@ internal sealed class RuntimeCtlApp
         {
             PrintHelp(_error);
             return string.IsNullOrWhiteSpace(_error) ? 0 : 1;
-        }
-
-        // CI strict mode forbids legacy task-style routing so pipelines can enforce
-        // direct native command usage and avoid accidental run.ps1 compatibility paths.
-        var strictCiNative = string.Equals(
-            Environment.GetEnvironmentVariable("HIDBRIDGE_CI_STRICT_NATIVE"),
-            "1",
-            StringComparison.Ordinal);
-        if (strictCiNative && _invokedViaTask)
-        {
-            Console.Error.WriteLine(
-                "CI strict mode is enabled (HIDBRIDGE_CI_STRICT_NATIVE=1). Use direct native command syntax instead of 'task <name>'.");
-            return 2;
         }
 
         return _command.Kind switch
@@ -432,19 +395,16 @@ internal sealed class RuntimeCtlApp
             Console.Error.WriteLine($"error: {error}\n");
         }
 
-        Console.WriteLine("HidBridge.RuntimeCtl - CLI-first entrypoint (PowerShell compatibility bridge)\n");
+        Console.WriteLine("HidBridge.RuntimeCtl - CLI-first entrypoint\n");
         Console.WriteLine("Usage:");
         Console.WriteLine("  runtimectl [--platform-root <path>] <command> [-- <command-args...>]");
-        Console.WriteLine("  runtimectl [--platform-root <path>] task <run.ps1-task> [-- <task-args...>]\n");
+        Console.WriteLine("  runtimectl [--platform-root <path>] <command> <command-args...>\n");
 
         Console.WriteLine("Commands:");
         foreach (var command in CommandAliases.Values.OrderBy(static x => x.Name, StringComparer.OrdinalIgnoreCase))
         {
             Console.WriteLine($"  {command.Name,-18} {command.Description}");
         }
-
-        Console.WriteLine("\nTask aliases:");
-        Console.WriteLine("  task <command-name>   (run.ps1 compatibility; same names as Commands)");
     }
 
     private sealed record CommandSpec(

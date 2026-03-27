@@ -8,7 +8,7 @@ using Xunit;
 public sealed class RuntimeCtlAppRoutingTests
 {
     [Fact]
-    public void Parse_TaskRedirectsLegacyAcceptanceAlias_ToNativeCommand()
+    public void Parse_LegacyTaskSyntax_IsRejected()
     {
         var platformRoot = ResolvePlatformRoot();
 
@@ -21,48 +21,46 @@ public sealed class RuntimeCtlAppRoutingTests
 
         var snapshot = app.GetDiagnosticsSnapshot();
 
-        Assert.False(snapshot.ShowHelp);
-        Assert.Null(snapshot.Error);
-        Assert.Equal("webrtc-acceptance", snapshot.CommandName);
-        Assert.Equal("WebRtcAcceptance", snapshot.CommandKind);
-        Assert.Equal(["-StopOnFailure"], snapshot.ForwardArgs);
+        Assert.True(snapshot.ShowHelp);
+        Assert.Contains("Legacy 'task <name>' routing was removed", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(snapshot.CommandName);
     }
 
     [Fact]
-    public void Parse_TaskRoutesBearerRollout_ToNativeCommand()
+    public void Parse_CommandAlias_RoutesAcceptanceAlias_ToNativeCommand()
     {
         var platformRoot = ResolvePlatformRoot();
 
         var app = RuntimeCtlApp.Parse(
         [
             "--platform-root", platformRoot,
-            "task", "bearer-rollout",
+            "webrtc-edge-agent-acceptance",
         ]);
 
         var snapshot = app.GetDiagnosticsSnapshot();
 
         Assert.False(snapshot.ShowHelp);
         Assert.Null(snapshot.Error);
-        Assert.Equal("bearer-rollout", snapshot.CommandName);
-        Assert.Equal("BearerRollout", snapshot.CommandKind);
+        Assert.Equal("webrtc-edge-agent-acceptance", snapshot.CommandName);
+        Assert.Equal("WebRtcAcceptance", snapshot.CommandKind);
         Assert.Null(snapshot.ScriptRelativePath);
     }
 
     [Fact]
-    public void Parse_UnsupportedTask_ReturnsHelpWithError()
+    public void Parse_UnsupportedCommand_ReturnsHelpWithError()
     {
         var platformRoot = ResolvePlatformRoot();
 
         var app = RuntimeCtlApp.Parse(
         [
             "--platform-root", platformRoot,
-            "task", "unknown-task",
+            "unknown-command",
         ]);
 
         var snapshot = app.GetDiagnosticsSnapshot();
 
         Assert.True(snapshot.ShowHelp);
-        Assert.Contains("Unsupported task", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Unsupported command", snapshot.Error, StringComparison.OrdinalIgnoreCase);
         Assert.Null(snapshot.CommandName);
     }
 
