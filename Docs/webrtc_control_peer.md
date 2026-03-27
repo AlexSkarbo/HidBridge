@@ -21,7 +21,7 @@ Start server first, then the peer:
 
 ```powershell
 cd Tools/WebRtcControlPeer
-.\run.ps1 -ServerUrl "http://127.0.0.1:8080" -Room "control"
+.\RuntimeCtl -ServerUrl "http://127.0.0.1:8080" -Room "control"
 ```
 
 Then in the browser demo use room `control` and click:

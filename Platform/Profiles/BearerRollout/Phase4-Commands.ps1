@@ -5,15 +5,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$runner = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "run.ps1"
+$platformRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$runtimeCtlProject = Join-Path $platformRoot "Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj"
 if ($PrintOnly) {
-    & $runner -Task bearer-rollout -Phase 4 -PrintOnly
+    dotnet run --project $runtimeCtlProject -- --platform-root $platformRoot bearer-rollout -Phase 4 -PrintOnly
     return
 }
 
-& $runner -Task bearer-rollout -Phase 4 -ApplyOnly
+dotnet run --project $runtimeCtlProject -- --platform-root $platformRoot bearer-rollout -Phase 4 -ApplyOnly
 Write-Host ""
 Write-Host "Recommended verification:"
-Write-Host "  powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor"
-Write-Host "  powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer"
-Write-Host "  powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full"
+Write-Host "  dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor"
+Write-Host "  dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-bearer"
+Write-Host "  dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full"

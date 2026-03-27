@@ -1,7 +1,7 @@
 # HidBridge Bearer Rollout Profile (UA)
 
 > Note (CLI-first): canonical launcher is direct `HidBridge.RuntimeCtl` commands.  
-> `Platform/run.ps1 -Task ...` in historical examples is compatibility-only.
+> `RuntimeCtl ...` in historical examples is compatibility-only.
 
 Оновлено: `2026-03-04`
 
@@ -126,7 +126,7 @@
 
 Нормальний спосіб запуску:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4
 ```
 
 Це:
@@ -139,7 +139,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -
 
 Для жорсткого режиму без rollback:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4 -NoAutoRollback
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4 -NoAutoRollback
 ```
 
 ### Фаза 4 — `commands`
@@ -175,17 +175,17 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Sync-HidBrid
 
 2. doctor
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor
 ```
 
 3. bearer smoke
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-bearer
 ```
 
 4. full pipeline
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
 ```
 
 ## Stop Conditions
@@ -213,7 +213,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
 Для контрольованого reset/reimport dev realm:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-reset
 ```
 
 Скрипт:

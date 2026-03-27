@@ -25,19 +25,60 @@ public sealed class EdgeProxyOptions
     public string CommandExecutor { get; set; } = "uart";
 
     /// <summary>
-    /// Selects edge control transport engine: <c>relay</c> (default) or preview <c>dcd</c> (direct signal commands + optional relay fallback).
+    /// Selects edge control transport engine: <c>dcd</c> (default, production path) or <c>relay</c> (compatibility fallback).
     /// </summary>
-    public string TransportEngine { get; set; } = "relay";
+    public string TransportEngine { get; set; } = "dcd";
 
     /// <summary>
-    /// Allows preview <c>TransportEngine=dcd</c> to fall back to relay command queue when no direct signal commands are available.
+    /// Allows <c>TransportEngine=dcd</c> to fall back to relay command queue when no direct signal commands are available.
     /// </summary>
     public bool DcdAllowRelayFallback { get; set; } = true;
 
     /// <summary>
-    /// Selects media runtime engine: <c>none</c> (default) or preview <c>ffmpeg-dcd</c>.
+    /// Selects media runtime engine: <c>ffmpeg-dcd</c> (default) or <c>none</c> (compatibility fallback).
     /// </summary>
-    public string MediaEngine { get; set; } = "none";
+    public string MediaEngine { get; set; } = "ffmpeg-dcd";
+
+    /// <summary>
+    /// Engine switch strategy:
+    /// <c>fixed</c>, <c>shadow</c>, <c>canary</c>, <c>default-switch</c>.
+    /// </summary>
+    public string EngineSwitchMode { get; set; } = "default-switch";
+
+    /// <summary>
+    /// Enables shadow mode execution semantics (DCD media/control with forced relay compatibility fallback).
+    /// </summary>
+    public bool EngineShadowMode { get; set; }
+
+    /// <summary>
+    /// Canary percentage (0..100) used when <see cref="EngineSwitchMode"/> is <c>canary</c>.
+    /// </summary>
+    public int EngineCanaryPercent { get; set; } = 100;
+
+    /// <summary>
+    /// Enforces SLO thresholds and forces relay/none fallback when exceeded.
+    /// </summary>
+    public bool EngineSloEnforce { get; set; } = true;
+
+    /// <summary>
+    /// Minimum command sample size before SLO enforcement is evaluated.
+    /// </summary>
+    public int EngineSloMinCommandSampleCount { get; set; } = 20;
+
+    /// <summary>
+    /// Maximum allowed timeout/reject rate (percent) before fallback.
+    /// </summary>
+    public double EngineSloAckTimeoutRateMaxPct { get; set; } = 5.0;
+
+    /// <summary>
+    /// Maximum allowed reconnect transitions per hour before fallback.
+    /// </summary>
+    public double EngineSloReconnectFrequencyMaxPerHour { get; set; } = 8.0;
+
+    /// <summary>
+    /// Maximum allowed p95 command roundtrip (ms) before fallback.
+    /// </summary>
+    public int EngineSloRoundtripP95MsMax { get; set; } = 2000;
 
     /// <summary>
     /// Optional ffmpeg executable path used by <c>MediaEngine=ffmpeg-dcd</c>.
@@ -210,9 +251,15 @@ public sealed class EdgeProxyOptions
         CommandExecutor = (CommandExecutor ?? string.Empty).Trim();
         TransportEngine = (TransportEngine ?? string.Empty).Trim();
         MediaEngine = (MediaEngine ?? string.Empty).Trim();
+        EngineSwitchMode = (EngineSwitchMode ?? string.Empty).Trim();
         FfmpegExecutablePath = (FfmpegExecutablePath ?? string.Empty).Trim();
         FfmpegArgumentsTemplate = (FfmpegArgumentsTemplate ?? string.Empty).Trim();
         FfmpegStopTimeoutMs = Math.Max(250, FfmpegStopTimeoutMs);
+        EngineCanaryPercent = Math.Clamp(EngineCanaryPercent, 0, 100);
+        EngineSloMinCommandSampleCount = Math.Max(1, EngineSloMinCommandSampleCount);
+        EngineSloAckTimeoutRateMaxPct = Math.Clamp(EngineSloAckTimeoutRateMaxPct, 0.0, 100.0);
+        EngineSloReconnectFrequencyMaxPerHour = Math.Max(0.0, EngineSloReconnectFrequencyMaxPerHour);
+        EngineSloRoundtripP95MsMax = Math.Max(100, EngineSloRoundtripP95MsMax);
         PollIntervalMs = Math.Max(100, PollIntervalMs);
         BatchLimit = Math.Clamp(BatchLimit, 1, 500);
         HeartbeatIntervalSec = Math.Max(3, HeartbeatIntervalSec);
@@ -290,6 +337,19 @@ public sealed class EdgeProxyOptions
     }
 
     /// <summary>
+    /// Resolves engine switch strategy mode.
+    /// </summary>
+    public EdgeProxyEngineSwitchMode GetEngineSwitchMode()
+    {
+        if (TryParseEngineSwitchMode(EngineSwitchMode, out var mode))
+        {
+            return mode;
+        }
+
+        return EdgeProxyEngineSwitchMode.DefaultSwitch;
+    }
+
+    /// <summary>
     /// Validates that required connection and identity settings are present.
     /// </summary>
     /// <param name="error">Validation error message.</param>
@@ -317,6 +377,12 @@ public sealed class EdgeProxyOptions
         if (!TryParseMediaEngineKind(MediaEngine, out _))
         {
             error = $"MediaEngine '{MediaEngine}' is not supported. Use 'none' or 'ffmpeg-dcd'.";
+            return false;
+        }
+
+        if (!TryParseEngineSwitchMode(EngineSwitchMode, out _))
+        {
+            error = $"EngineSwitchMode '{EngineSwitchMode}' is not supported. Use 'fixed', 'shadow', 'canary', or 'default-switch'.";
             return false;
         }
 
@@ -374,6 +440,40 @@ public sealed class EdgeProxyOptions
 
         error = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Parses engine switch strategy mode from aliases.
+    /// </summary>
+    private static bool TryParseEngineSwitchMode(string? value, out EdgeProxyEngineSwitchMode mode)
+    {
+        var normalized = (value ?? string.Empty)
+            .Trim()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+
+        switch (normalized)
+        {
+            case "":
+            case "default":
+            case "defaultswitch":
+            case "production":
+                mode = EdgeProxyEngineSwitchMode.DefaultSwitch;
+                return true;
+            case "fixed":
+                mode = EdgeProxyEngineSwitchMode.Fixed;
+                return true;
+            case "shadow":
+                mode = EdgeProxyEngineSwitchMode.Shadow;
+                return true;
+            case "canary":
+                mode = EdgeProxyEngineSwitchMode.Canary;
+                return true;
+            default:
+                mode = default;
+                return false;
+        }
     }
 
     /// <summary>

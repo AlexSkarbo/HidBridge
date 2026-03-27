@@ -745,7 +745,7 @@
   - робить backup realm і нормалізує `Keycloak` dev baseline під актуальний smoke/auth flow.
 
 
-- operational scripts consolidated under `Platform/Scripts/`; top-level `Platform/run_*.ps1` paths remain as compatibility wrappers, and unified entrypoint `Platform/run.ps1` was added.
+- operational scripts consolidated under `Platform/Scripts/`; unified operational entrypoint is `HidBridge.RuntimeCtl`.
 
 - operational helpers added: `Platform/run_doctor.ps1`, `Platform/run_clean_logs.ps1`, `Platform/run_ci_local.ps1`, `Platform/run_full.ps1`, `Platform/run_token_debug.ps1`, and shared script helpers in `Platform/Scripts/Common/ScriptCommon.ps1`, `Platform/Scripts/Common/KeycloakCommon.ps1`.
 - `micro meet` delivery baseline now includes a quick-launch card on `Fleet Overview` and a `Session Room` demo surface with room-link sharing plus a checklist for invite/control handoff demo flow.

@@ -1,7 +1,7 @@
 # Micro Meet Demo Runbook (Step-by-Step)
 
 > Note (CLI-first): canonical commands are direct `HidBridge.RuntimeCtl` invocations.  
-> `powershell -File Platform/run.ps1 -Task ...` in this file is kept as legacy compatibility syntax.
+> `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ...` in this file is kept as canonical command syntax.
 
 ## Мета
 Провести стабільне demo без ручного "лікування" інфраструктури:
@@ -28,19 +28,19 @@ Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object {
 
 3. Базова перевірка.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor -StartApiProbe -RequireApi
 ```
 
 ## 2) Базовий quality gate перед демо
 
 1. Локальний інтеграційний контур.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local
 ```
 
 2. Повний контур.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
 ```
 
 Очікування:
@@ -54,12 +54,12 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
 
 1. Стандартний сценарій (рекомендовано).
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset
 ```
 
 2. Якщо свідомо хочеш реюзати вже запущені API/Web процеси.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -ReuseRunningServices
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset -ReuseRunningServices
 ```
 
 Успішний результат:
@@ -97,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipI
 ## 5) Перевірка після демо
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-bearer
 ```
 
 Очікування:
@@ -128,7 +128,7 @@ Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object {
 - причина: Keycloak realm/client-scope не синхронізовані;
 - дія:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-reset
 ```
 
 4. Проблеми з зовнішнім Google provider після reset:
@@ -145,7 +145,7 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Sync-HidBrid
 $env:HIDBRIDGE_UART_MOUSE_SELECTOR="255"
 $env:HIDBRIDGE_UART_KEYBOARD_SELECTOR="254"
 
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform uart-diagnostics -BaseUrl http://127.0.0.1:18093
 ```
 
 ## 8) Де шукати логи

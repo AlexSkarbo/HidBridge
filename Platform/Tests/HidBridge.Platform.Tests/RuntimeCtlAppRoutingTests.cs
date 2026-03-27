@@ -85,11 +85,16 @@ public sealed class RuntimeCtlAppRoutingTests
 
     private static string ResolvePlatformRoot()
     {
+        static bool LooksLikePlatformRoot(string path)
+        {
+            return File.Exists(Path.Combine(path, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj"));
+        }
+
         var probe = new DirectoryInfo(AppContext.BaseDirectory);
         while (probe is not null)
         {
             var candidate = Path.Combine(probe.FullName, "Platform");
-            if (File.Exists(Path.Combine(candidate, "run.ps1")))
+            if (LooksLikePlatformRoot(candidate))
             {
                 return candidate;
             }

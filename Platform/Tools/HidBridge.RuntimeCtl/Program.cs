@@ -360,6 +360,11 @@ internal sealed class RuntimeCtlApp
 
     private static string ResolvePlatformRoot(string? explicitPlatformRoot)
     {
+        static bool LooksLikePlatformRoot(string path)
+        {
+            return File.Exists(Path.Combine(path, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj"));
+        }
+
         if (!string.IsNullOrWhiteSpace(explicitPlatformRoot))
         {
             var absolute = Path.GetFullPath(explicitPlatformRoot);
@@ -371,12 +376,12 @@ internal sealed class RuntimeCtlApp
         while (probe is not null)
         {
             var directPlatform = Path.Combine(probe.FullName, "Platform");
-            if (File.Exists(Path.Combine(directPlatform, "run.ps1")))
+            if (LooksLikePlatformRoot(directPlatform))
             {
                 return directPlatform;
             }
 
-            if (File.Exists(Path.Combine(probe.FullName, "run.ps1"))
+            if (LooksLikePlatformRoot(probe.FullName)
                 && string.Equals(probe.Name, "Platform", StringComparison.OrdinalIgnoreCase))
             {
                 return probe.FullName;

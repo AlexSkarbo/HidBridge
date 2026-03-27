@@ -12,7 +12,7 @@
 
 - production/runtime шлях іде через `Platform/` (API/Web/Identity/Persistence + Edge Agent),
 - canonical orchestration — через `Platform/Tools/HidBridge.RuntimeCtl` (CLI-first),
-- PowerShell `Platform/run.ps1 -Task ...` лишається лише compatibility shim,
+- PowerShell `RuntimeCtl ...` лишається лише native RuntimeCtl entrypoint,
 - `WebRtcTests/exp-022-datachanneldotnet` зафіксовано як **lab-only** стенд.
 
 ---
@@ -125,7 +125,7 @@ Transport SLO summary включає:
 
 Operational verification lane (step 22):
 
-1. `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
+1. `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
 2. Скрипт читає `GET /api/v1/diagnostics/transport/slo` і класифікує:
    - `PASS` для healthy,
    - `WARN` для warning (або `FAIL` з `-FailOnSloWarning`),

@@ -247,7 +247,7 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Reset-HidBri
 
 Рекомендований запуск (через launcher):
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-TenantId','local-tenant',
   '-OrganizationId','local-org'
@@ -256,7 +256,7 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Reset-HidBri
 
 Dry-run preview (без змін):
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-PrintOnly'
 )
@@ -264,7 +264,7 @@ Dry-run preview (без змін):
 
 PowerShell `-WhatIf` preview:
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-WhatIf'
 )
@@ -272,7 +272,7 @@ PowerShell `-WhatIf` preview:
 
 JSON summary:
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-OutputJsonPath','Platform/.logs/identity-onboard/result.json'
 )

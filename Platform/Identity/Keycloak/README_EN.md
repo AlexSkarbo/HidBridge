@@ -109,7 +109,7 @@ Note:
 
 Run via launcher:
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-TenantId','local-tenant',
   '-OrganizationId','local-org'
@@ -118,7 +118,7 @@ Run via launcher:
 
 Dry-run preview (no writes):
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-PrintOnly'
 )
@@ -126,7 +126,7 @@ Dry-run preview (no writes):
 
 `WhatIf` preview:
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-WhatIf'
 )
@@ -134,7 +134,7 @@ Dry-run preview (no writes):
 
 JSON summary:
 ```powershell
-& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @(
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @(
   '-Email','alexandr.skarbo@gmail.com',
   '-OutputJsonPath','Platform/.logs/identity-onboard/result.json'
 )

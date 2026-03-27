@@ -1,7 +1,7 @@
 # Micro Meet Test Matrix (Demo/Sales)
 
 > Note (CLI-first): use direct `HidBridge.RuntimeCtl` commands.  
-> `Platform/run.ps1 -Task ...` references below are legacy compatibility form.
+> `RuntimeCtl ...` references below are canonical command form.
 
 Дата фіксації базового стану: 12 березня 2026
 
@@ -34,10 +34,10 @@ dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.cs
 
 | ID | Сценарій | Команда | Очікування |
 |---|---|---|---|
-| AUTH-01 | Claims readiness | `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task token-debug` | Є `preferred_username`, `tenant_id`, `org_id`, `operator.* roles` |
-| AUTH-02 | Doctor auth checks | `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor` | `smoke-client PASS`, `smoke-claims PASS` |
-| AUTH-03 | Bearer smoke | `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer` | `PASS` |
-| AUTH-04 | Rollout phase verify | `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4` | `Doctor/Bearer Smoke/Full = PASS` |
+| AUTH-01 | Claims readiness | `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform token-debug` | Є `preferred_username`, `tenant_id`, `org_id`, `operator.* roles` |
+| AUTH-02 | Doctor auth checks | `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor` | `smoke-client PASS`, `smoke-claims PASS` |
+| AUTH-03 | Bearer smoke | `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-bearer` | `PASS` |
+| AUTH-04 | Rollout phase verify | `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4` | `Doctor/Bearer Smoke/Full = PASS` |
 
 ## 4) Regression safety matrix
 
@@ -45,7 +45,7 @@ dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.cs
 |---|---|---|---|
 | REG-01 | Build | `dotnet build Platform/HidBridge.Platform.sln -c Debug -v minimal -m:1 -nodeReuse:false` | `Build succeeded` |
 | REG-02 | Tests | `dotnet test Platform/Tests/HidBridge.Platform.Tests/HidBridge.Platform.Tests.csproj -c Debug -v minimal -m:1 -nodeReuse:false` | Усі тести PASS |
-| REG-03 | Full contour | `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full` | `Realm Sync PASS`, `CI Local PASS` |
+| REG-03 | Full contour | `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full` | `Realm Sync PASS`, `CI Local PASS` |
 
 ## 5) Demo stop conditions
 

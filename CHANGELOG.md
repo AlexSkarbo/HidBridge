@@ -1,11 +1,42 @@
 # Changelog
 
+## 2026-03-27 (pr-b completion: production DCD+FFmpeg switch policy + remove legacy PowerShell shim)
+
+Summary:
+
+- Promoted edge runtime defaults to production path: `TransportEngine=dcd`, `MediaEngine=ffmpeg-dcd`.
+- Implemented switch strategy in agent code (`fixed` / `shadow` / `canary` / `default-switch`) with deterministic canary bucketing.
+- Added in-process SLO enforcement and automatic relay fallback based on timeout rate, reconnect frequency, and p95 roundtrip thresholds.
+- Exposed engine-policy diagnostics in peer metadata (`engineSwitchMode`, fallback state, SLO metrics/reason).
+- Removed legacy PowerShell launcher file from `Platform/` root and removed code-level platform-root detection dependency on it.
+- Migrated profile scripts and documentation to direct `HidBridge.RuntimeCtl` commands only.
+
+Detailed notes:
+
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyOptions.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyEngineSwitchMode.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyWorker.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyTransportEngineKind.cs`
+- `Platform/Edge/HidBridge.EdgeProxy.Agent/EdgeProxyMediaEngineKind.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/RuntimeCtlAppRoutingTests.cs`
+- `Platform/Profiles/BearerRollout/Phase1-Control.ps1`
+- `Platform/Profiles/BearerRollout/Phase2-Invitations.ps1`
+- `Platform/Profiles/BearerRollout/Phase3-SharesParticipants.ps1`
+- `Platform/Profiles/BearerRollout/Phase4-Commands.ps1`
+- `Platform/Scripts/run_demo_gate.ps1`
+- `Platform/README.md`
+- `Platform/RELEASE_NOTES.md`
+- `Docs/**` (CLI-first updates; removed RuntimeCtl shim references)
+- `.github/workflows/platform-runtimectl-ci.yml`
+
 ## 2026-03-27 (docs cleanup: CLI-first canonical runbook + legacy PS marking)
 
 Summary:
 
 - Marked RuntimeCtl direct command syntax as canonical across architecture/go-to-market docs.
-- Added explicit legacy note for historical `Platform/run.ps1 -Task ...` examples.
+- Added explicit legacy note for historical `RuntimeCtl -Task ...` examples.
 - Updated publish/test checklist command blocks to direct RuntimeCtl invocations.
 - Linked canonical on-call runbook in system-architecture index.
 
@@ -58,7 +89,7 @@ Summary:
 - Updated CI workflow `.github/workflows/platform-runtimectl-ci.yml` to publish `HidBridge.RuntimeCtl` once (`dotnet publish -c Release`) and run gates via the published DLL.
 - Replaced workflow lane invocations from `dotnet run --project ...` to:
   - `dotnet $env:RUNTIMECTL_DLL --platform-root Platform ...`
-- Kept native-only guard to prevent `run.ps1` invocation in CI workflow.
+- Kept native-only guard to prevent `RuntimeCtl` invocation in CI workflow.
 - Reduced workflow coupling to per-step compile/restore behavior for improved gate stability.
 
 Detailed notes:
@@ -72,7 +103,7 @@ Summary:
 - Removed legacy `task <name>` top-level routing in `HidBridge.RuntimeCtl`.
 - RuntimeCtl now accepts only direct native command syntax:
   - `runtimectl <command> [args...]`
-- Kept `Platform/run.ps1` as compatibility shim, but it now translates `-Task` directly into native RuntimeCtl command invocation (without `task` bridge).
+- Kept `RuntimeCtl` as compatibility shim, but it now translates `-Task` directly into native RuntimeCtl command invocation (without `task` bridge).
 - Updated routing regression tests to assert:
   - legacy `task` syntax is rejected with a clear error,
   - command aliases still route correctly.
@@ -81,7 +112,7 @@ Summary:
 Detailed notes:
 
 - `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
-- `Platform/run.ps1`
+- `RuntimeCtl`
 - `Platform/Tests/HidBridge.Platform.Tests/RuntimeCtlAppRoutingTests.cs`
 - `Platform/README.md`
 
@@ -114,7 +145,7 @@ Summary:
   - `platform-runtime down -RemoveOrphans` (always)
 - Added strict CI guard in RuntimeCtl:
   - when `HIDBRIDGE_CI_STRICT_NATIVE=1`, `task <name>` compatibility routing is rejected.
-- Added workflow-level guard that fails if `run.ps1` invocation appears in CI workflow.
+- Added workflow-level guard that fails if `RuntimeCtl` invocation appears in CI workflow.
 - Updated `Platform/README.md` with CI strict-native policy and canonical workflow reference.
 
 Detailed notes:
@@ -256,7 +287,7 @@ Detailed notes:
 
 Summary:
 
-- Removed obsolete top-level `Platform/run_*.ps1` wrapper scripts; `Platform/run.ps1` is now the single compatibility entrypoint.
+- Removed obsolete top-level `Platform/run_*.ps1` wrapper scripts; `RuntimeCtl` is now the single compatibility entrypoint.
 - Moved script-bridge task paths to direct targets under `Platform/Scripts/*` (and `Identity/Keycloak/*` where applicable), so runtime task bridging no longer depends on deleted root wrappers.
 - Updated RuntimeCtl orchestration call sites to avoid deleted wrappers (`demo-flow` now calls native `ci-local`/`full`/`webrtc-edge-agent-smoke` commands directly).
 - Updated doctor smoke-script probe checks to validate `Platform/Scripts/run_api_bearer_smoke.ps1`.
@@ -269,11 +300,11 @@ Detailed notes:
 - `Platform/README.md`
 - removed: `Platform/run_*.ps1` wrapper set
 
-## 2026-03-26 (cli-first: run.ps1 minimized + native task alias completion)
+## 2026-03-26 (cli-first: RuntimeCtl minimized + native task alias completion)
 
 Summary:
 
-- Minimized `Platform/run.ps1` to a true compatibility shim: it now always forwards to `RuntimeCtl` via `task <name>` and no longer maintains local task switch/mapping logic.
+- Minimized `RuntimeCtl` to a true compatibility shim: it now always forwards to `RuntimeCtl` via `task <name>` and no longer maintains local task switch/mapping logic.
 - Added direct native RuntimeCtl compatibility aliases for remaining legacy task names:
   - `webrtc-stack-terminal-b` -> native `WebRtcEdgeAgentSmokeCommand`
   - `webrtc-edge-agent-acceptance` -> native `WebRtcAcceptanceCommand`
@@ -282,7 +313,7 @@ Summary:
 
 Detailed notes:
 
-- `Platform/run.ps1`
+- `RuntimeCtl`
 - `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
 
 ## 2026-03-26 (cli-first: native artifact export + full ci-local bridge)
@@ -308,12 +339,12 @@ Summary:
   - `WebRTC Edge Agent Acceptance` -> `webrtc-acceptance`
   - `Ops SLO + Security Verify` -> `ops-verify`
 - Deleted script-step execution path inside `CiLocalCommand` for these lanes (`RunScriptToLogAsync` is no longer used there).
-- Added direct `run.ps1` task routing for `doctor` and `identity-reset` to native RuntimeCtl commands.
+- Added direct `RuntimeCtl` task routing for `doctor` and `identity-reset` to native RuntimeCtl commands.
 
 Detailed notes:
 
 - `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
-- `Platform/run.ps1`
+- `RuntimeCtl`
 
 ## 2026-03-26 (cli-first: native demo-gate + acceptance bootstrap via runtimectl)
 
@@ -323,14 +354,14 @@ Summary:
 - Migrated `demo-flow` internal gate step from script bridge to native RuntimeCtl command invocation.
 - Replaced `HidBridge.Acceptance.Runner` stack bootstrap path from `run_webrtc_stack.ps1` to native `RuntimeCtl webrtc-stack`.
 - Reduced script bridge surface in RuntimeCtl task map and added native task redirects for compatibility.
-- Converted `Platform/run_demo_gate.ps1` into a thin RuntimeCtl shim; added direct `demo-gate` route in `Platform/run.ps1`.
+- Converted `Platform/run_demo_gate.ps1` into a thin RuntimeCtl shim; added direct `demo-gate` route in `RuntimeCtl`.
 
 Detailed notes:
 
 - `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
 - `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
 - `Platform/run_demo_gate.ps1`
-- `Platform/run.ps1`
+- `RuntimeCtl`
 
 ## 2026-03-26 (cli-first: native webrtc-edge-agent-smoke)
 
@@ -339,7 +370,7 @@ Summary:
 - Added native `webrtc-edge-agent-smoke` command in `HidBridge.RuntimeCtl` (C# orchestration path).
 - Added `--smoke-only` execution mode in `HidBridge.Acceptance.Runner` so smoke can run without stack bootstrap orchestration.
 - Migrated `Platform/Scripts/run_webrtc_edge_agent_smoke.ps1` to a thin RuntimeCtl wrapper.
-- Updated `Platform/run.ps1` direct routing so `-Task webrtc-edge-agent-smoke` executes native RuntimeCtl command.
+- Updated `RuntimeCtl` direct routing so `-Task webrtc-edge-agent-smoke` executes native RuntimeCtl command.
 - Preserved smoke parity options (`tenantId`, `organizationId`, `commandText`, control-health skip/delay) in runner/runtime command plumbing.
 
 Detailed notes:
@@ -347,22 +378,22 @@ Detailed notes:
 - `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
 - `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
 - `Platform/Scripts/run_webrtc_edge_agent_smoke.ps1`
-- `Platform/run.ps1`
+- `RuntimeCtl`
 
 ## 2026-03-26 (cli-first operational docs/ui defaults)
 
 Summary:
 
-- Switched operator-facing runbook guidance from `Platform/run.ps1` to direct `HidBridge.RuntimeCtl` usage for daily operations.
+- Switched operator-facing runbook guidance from `RuntimeCtl` to direct `HidBridge.RuntimeCtl` usage for daily operations.
 - Updated Ops Status UI operational playbook commands to CLI-first (`dotnet run --project ... HidBridge.RuntimeCtl`).
-- Kept `run.ps1` explicitly documented as compatibility shim (not primary orchestration path).
+- Kept `RuntimeCtl` explicitly documented as compatibility shim (not primary orchestration path).
 
 Detailed notes:
 
 - `Platform/README.md`
 - `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/OpsStatus.razor`
 
-## 2026-03-26 (runtimectl native webrtc-stack + demo-flow, run.ps1 minimized)
+## 2026-03-26 (runtimectl native webrtc-stack + demo-flow, RuntimeCtl minimized)
 
 Summary:
 
@@ -370,7 +401,7 @@ Summary:
   - `webrtc-stack` is now native in `HidBridge.RuntimeCtl`.
   - `demo-flow` is now native in `HidBridge.RuntimeCtl`.
 - `run_webrtc_stack.ps1` and `run_demo_flow.ps1` are reduced to thin compatibility wrappers that only delegate to RuntimeCtl.
-- `Platform/run.ps1` is reduced to a minimal compatibility shim with direct routing to native RuntimeCtl commands (`demo-flow`, `webrtc-stack`, plus previously migrated native commands).
+- `RuntimeCtl` is reduced to a minimal compatibility shim with direct routing to native RuntimeCtl commands (`demo-flow`, `webrtc-stack`, plus previously migrated native commands).
 - Legacy `controlws/exp-022` mode remains explicitly gated (`HIDBRIDGE_ENABLE_LEGACY_EXP022`) without reintroducing script-side policy logic.
 
 Detailed notes:
@@ -378,7 +409,7 @@ Detailed notes:
 - `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
 - `Platform/Scripts/run_webrtc_stack.ps1`
 - `Platform/Scripts/run_demo_flow.ps1`
-- `Platform/run.ps1`
+- `RuntimeCtl`
 
 ## 2026-03-25 (pr-b.2 regression tests: session media panel)
 
@@ -433,7 +464,7 @@ Detailed notes:
 - `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`
 - `Platform/Scripts/run_ci_local.ps1`
 - `Platform/Scripts/run_full.ps1`
-- `Platform/run.ps1`
+- `RuntimeCtl`
 - `Platform/README.md`
 
 ## 2026-03-23 (pr-2 integration gate finalization: hosted full-stack lease coverage)
@@ -499,7 +530,7 @@ Summary:
 
 - Added `Platform/Tools/HidBridge.Acceptance.Runner` into both platform solution files so acceptance tooling is a first-class project in IDE/CLI workflows.
 - Moved `webrtc-edge-agent-acceptance` orchestration from script-composed stack/smoke flow to dedicated `.NET` runner logic.
-- Kept PowerShell task entrypoint as a thin wrapper that forwards arguments to the `.NET` runner and preserves `run.ps1` task compatibility.
+- Kept PowerShell task entrypoint as a thin wrapper that forwards arguments to the `.NET` runner and preserves `RuntimeCtl` task compatibility.
 - Updated platform docs to describe `.NET` acceptance orchestration path and current wrapper behavior.
 
 Detailed notes:

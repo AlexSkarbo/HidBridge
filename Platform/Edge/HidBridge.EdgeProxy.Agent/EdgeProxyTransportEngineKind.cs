@@ -6,12 +6,12 @@ namespace HidBridge.EdgeProxy.Agent;
 public enum EdgeProxyTransportEngineKind
 {
     /// <summary>
-    /// Existing relay queue polling engine (default, production path).
+    /// Relay queue polling engine kept as compatibility fallback path.
     /// </summary>
     RelayCompat,
 
     /// <summary>
-    /// Preview DataChannelDotNet-oriented control engine (currently relay-compatible).
+    /// DataChannelDotNet control engine (production path).
     /// </summary>
     DataChannelDotNet,
 }

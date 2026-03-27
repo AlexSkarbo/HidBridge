@@ -1,7 +1,7 @@
 # Micro Meet Demo Runbook (Step-by-Step)
 
 > Note (CLI-first): canonical commands are direct `HidBridge.RuntimeCtl` invocations.  
-> `powershell -File Platform/run.ps1 -Task ...` in this file is kept as legacy compatibility syntax.
+> `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ...` in this file is kept as canonical command syntax.
 
 ## Goal
 Run a stable product-style demo without manual infrastructure recovery:
@@ -28,19 +28,19 @@ Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object {
 
 3. Baseline stack check.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor -StartApiProbe -RequireApi
 ```
 
 ## 2) Quality gate before demo
 
 1. Local integration contour.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local
 ```
 
 2. Full contour.
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
 ```
 
 Expected:
@@ -54,12 +54,12 @@ Expected:
 
 1. Standard mode (recommended).
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset
 ```
 
 2. Reuse currently running API/Web services (only if intentional).
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -ReuseRunningServices
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset -ReuseRunningServices
 ```
 
 Expected:
@@ -97,7 +97,7 @@ Expected:
 ## 5) Post-demo check
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-bearer
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-bearer
 ```
 
 Expected:
@@ -128,7 +128,7 @@ Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object {
 - Cause: Keycloak realm/client scopes not synchronized.
 - Action:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-reset
 ```
 
 4. External Google provider missing after reset:
@@ -145,7 +145,7 @@ powershell -ExecutionPolicy Bypass -File Platform/Identity/Keycloak/Sync-HidBrid
 $env:HIDBRIDGE_UART_MOUSE_SELECTOR="255"
 $env:HIDBRIDGE_UART_KEYBOARD_SELECTOR="254"
 
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform uart-diagnostics -BaseUrl http://127.0.0.1:18093
 ```
 
 ## 8) Where to read logs

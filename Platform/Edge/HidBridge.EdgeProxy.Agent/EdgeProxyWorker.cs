@@ -33,10 +33,13 @@ public sealed class EdgeProxyWorker : BackgroundService
     private readonly ICaptureAdapter _captureAdapter;
     private readonly EdgeProxyOptions _options;
     private readonly ILogger<EdgeProxyWorker> _logger;
-    private readonly IEdgeControlTransportEngine _controlTransportEngine;
+    private readonly RelayCompatControlEngine _relayCompatControlEngine;
+    private readonly IEdgeControlTransportEngine _selectedControlTransportEngine;
     private readonly IEdgeMediaRuntimeEngine _mediaRuntimeEngine;
+    private readonly ResolvedEnginePlan _enginePlan;
     private readonly Dictionary<string, string> _callerHeaders;
     private readonly SemaphoreSlim _tokenRefreshGate = new(1, 1);
+    private readonly List<double> _recentRoundtripMs = [];
     private DateTimeOffset _lastHeartbeatAtUtc = DateTimeOffset.MinValue;
     private int? _lastCommandSequence;
     private int? _lastSignalSequence;
@@ -48,6 +51,13 @@ public sealed class EdgeProxyWorker : BackgroundService
     private EdgeProxyLifecycleState _lifecycleState = EdgeProxyLifecycleState.Starting;
     private DateTimeOffset _lifecycleStateChangedAtUtc = DateTimeOffset.UtcNow;
     private string? _lifecycleStateReason;
+    private readonly DateTimeOffset _workerStartedAtUtc = DateTimeOffset.UtcNow;
+    private int _reconnectTransitions;
+    private int _processedCommandCount;
+    private int _timeoutOrRejectedCommandCount;
+    private bool _forceRelayFallback;
+    private string _enginePolicyState = "healthy";
+    private string? _enginePolicyReason;
 
     /// <summary>
     /// Initializes a new <see cref="EdgeProxyWorker"/> instance.
@@ -64,8 +74,15 @@ public sealed class EdgeProxyWorker : BackgroundService
         _captureAdapter = captureAdapter;
         _options = options.Value;
         _logger = logger;
-        _controlTransportEngine = CreateControlTransportEngine(_options.GetTransportEngineKind(), _options, logger);
-        _mediaRuntimeEngine = CreateMediaRuntimeEngine(_options.GetMediaEngineKind(), _options, logger);
+        _enginePlan = ResolveEnginePlan(_options);
+        _relayCompatControlEngine = new RelayCompatControlEngine(logger);
+        _selectedControlTransportEngine = CreateControlTransportEngine(
+            _enginePlan.TransportEngineKind,
+            _options,
+            logger,
+            _enginePlan.ForceRelayFallback ? true : _options.DcdAllowRelayFallback);
+        _mediaRuntimeEngine = CreateMediaRuntimeEngine(_enginePlan.MediaEngineKind, _options, logger);
+        _forceRelayFallback = _enginePlan.ForceRelayFallback;
         _accessToken = _options.AccessToken;
         _refreshToken = _options.TokenRefreshToken;
         _effectiveSessionId = _options.SessionId;
@@ -109,15 +126,18 @@ public sealed class EdgeProxyWorker : BackgroundService
         }
 
         _logger.LogInformation(
-            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}, TransportEngine={TransportEngine}, MediaEngine={MediaEngine}",
+            "Edge proxy started. RequestedSession={RequestedSessionId}, EffectiveSession={EffectiveSessionId}, Peer={PeerId}, Endpoint={EndpointId}, Executor={ExecutorKind}, ControlWs={ControlWsUrl}, TransportEngine={TransportEngine}, MediaEngine={MediaEngine}, SwitchMode={SwitchMode}, CanaryBucket={CanaryBucket}, ForceRelayFallback={ForceRelayFallback}",
             _options.SessionId,
             _effectiveSessionId,
             _options.PeerId,
             _options.EndpointId,
             _options.GetCommandExecutorKind(),
             _options.ControlWsUrl,
-            _options.GetTransportEngineKind(),
-            _options.GetMediaEngineKind());
+            _enginePlan.TransportEngineKind,
+            _enginePlan.MediaEngineKind,
+            _enginePlan.SwitchMode,
+            _enginePlan.CanaryBucket,
+            _forceRelayFallback);
 
         var consecutiveFailures = 0;
         while (!stoppingToken.IsCancellationRequested)
@@ -300,14 +320,41 @@ public sealed class EdgeProxyWorker : BackgroundService
             BatchLimit: _options.BatchLimit,
             QueryCommandsAsync: GetCollectionAsync<WebRtcCommandEnvelopeBody>,
             QuerySignalsAsync: GetCollectionAsync<WebRtcSignalMessageBody>,
-            ExecuteCommandAsync: ExecuteCommandAsync,
+            ExecuteCommandAsync: ExecuteCommandTrackedAsync,
             PublishAckAsync: PublishCommandAckAsync,
             PublishSignalAsync: PublishSignalAsync);
 
-        _lastCommandSequence = await _controlTransportEngine.PollAndProcessCommandsAsync(
+        var controlEngine = _forceRelayFallback ? _relayCompatControlEngine : _selectedControlTransportEngine;
+        _lastCommandSequence = await controlEngine.PollAndProcessCommandsAsync(
             context,
             _lastCommandSequence,
             cancellationToken);
+        EvaluateEngineSloPolicy();
+    }
+
+    /// <summary>
+    /// Executes one command and updates switch-policy SLO counters.
+    /// </summary>
+    private async Task<TransportAckMessageBody> ExecuteCommandTrackedAsync(CommandRequestBody command, CancellationToken cancellationToken)
+    {
+        var ack = await ExecuteCommandAsync(command, cancellationToken);
+        _processedCommandCount++;
+        if (ack.Status is CommandStatus.Timeout or CommandStatus.Rejected)
+        {
+            _timeoutOrRejectedCommandCount++;
+        }
+        if (ack.Metrics is not null &&
+            ack.Metrics.TryGetValue("relayAdapterWsRoundtripMs", out var roundtripMs) &&
+            roundtripMs > 0)
+        {
+            _recentRoundtripMs.Add(roundtripMs);
+            if (_recentRoundtripMs.Count > 128)
+            {
+                _recentRoundtripMs.RemoveRange(0, _recentRoundtripMs.Count - 128);
+            }
+        }
+
+        return ack;
     }
 
     /// <summary>
@@ -494,8 +541,42 @@ public sealed class EdgeProxyWorker : BackgroundService
         {
             metadata[pair.Key] = pair.Value;
         }
+        foreach (var pair in BuildEnginePolicyMetadata())
+        {
+            metadata[pair.Key] = pair.Value;
+        }
 
         await MarkPeerOnlineAsync(metadata, cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds transport-engine switch metadata for diagnostics/readiness projections.
+    /// </summary>
+    private IReadOnlyDictionary<string, string> BuildEnginePolicyMetadata()
+    {
+        var timeoutRatePct = _processedCommandCount == 0
+            ? 0.0
+            : (_timeoutOrRejectedCommandCount * 100.0) / _processedCommandCount;
+        var uptimeHours = Math.Max(1.0 / 3600.0, (DateTimeOffset.UtcNow - _workerStartedAtUtc).TotalHours);
+        var reconnectPerHour = _reconnectTransitions / uptimeHours;
+        var roundtripP95 = ComputeP95(_recentRoundtripMs);
+
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["engineSwitchMode"] = _enginePlan.SwitchMode.ToString(),
+            ["engineTransport"] = _enginePlan.TransportEngineKind.ToString(),
+            ["engineMedia"] = _enginePlan.MediaEngineKind.ToString(),
+            ["engineCanaryBucket"] = _enginePlan.CanaryBucket?.ToString(CultureInfo.InvariantCulture) ?? "n/a",
+            ["engineForceRelayFallback"] = _forceRelayFallback ? "true" : "false",
+            ["enginePolicyState"] = _enginePolicyState,
+            ["enginePolicyReason"] = _enginePolicyReason ?? "none",
+            ["engineSloTimeoutRatePct"] = timeoutRatePct.ToString("F2", CultureInfo.InvariantCulture),
+            ["engineSloReconnectPerHour"] = reconnectPerHour.ToString("F2", CultureInfo.InvariantCulture),
+            ["engineSloRoundtripP95Ms"] = roundtripP95.ToString("F2", CultureInfo.InvariantCulture),
+            ["engineSloSampleCount"] = _processedCommandCount.ToString(CultureInfo.InvariantCulture),
+        };
+
+        return metadata;
     }
 
     /// <summary>
@@ -508,9 +589,70 @@ public sealed class EdgeProxyWorker : BackgroundService
             return;
         }
 
+        if (nextState == EdgeProxyLifecycleState.Reconnecting)
+        {
+            _reconnectTransitions++;
+        }
+
         _lifecycleState = nextState;
         _lifecycleStateReason = reason;
         _lifecycleStateChangedAtUtc = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Evaluates SLO thresholds and forces relay fallback in default-switch mode when thresholds are exceeded.
+    /// </summary>
+    private void EvaluateEngineSloPolicy()
+    {
+        if (!_options.EngineSloEnforce || _enginePlan.SwitchMode != EdgeProxyEngineSwitchMode.DefaultSwitch)
+        {
+            return;
+        }
+
+        if (_processedCommandCount < _options.EngineSloMinCommandSampleCount)
+        {
+            return;
+        }
+
+        var timeoutRatePct = _processedCommandCount == 0
+            ? 0.0
+            : (_timeoutOrRejectedCommandCount * 100.0) / _processedCommandCount;
+        var roundtripP95 = ComputeP95(_recentRoundtripMs);
+        var uptimeHours = Math.Max(1.0 / 3600.0, (DateTimeOffset.UtcNow - _workerStartedAtUtc).TotalHours);
+        var reconnectPerHour = _reconnectTransitions / uptimeHours;
+
+        var timeoutExceeded = timeoutRatePct > _options.EngineSloAckTimeoutRateMaxPct;
+        var reconnectExceeded = reconnectPerHour > _options.EngineSloReconnectFrequencyMaxPerHour;
+        var roundtripExceeded = roundtripP95 > _options.EngineSloRoundtripP95MsMax;
+        if (!timeoutExceeded && !reconnectExceeded && !roundtripExceeded)
+        {
+            _enginePolicyState = "healthy";
+            _enginePolicyReason = null;
+            return;
+        }
+
+        _enginePolicyState = "degraded";
+        _enginePolicyReason = $"timeoutRatePct={timeoutRatePct:F2}, reconnectPerHour={reconnectPerHour:F2}, roundtripP95Ms={roundtripP95:F2}";
+        if (!_forceRelayFallback)
+        {
+            _forceRelayFallback = true;
+            _logger.LogWarning(
+                "Engine SLO fallback activated. Switching control to relay compatibility path. Details: {Reason}",
+                _enginePolicyReason);
+        }
+    }
+
+    private static double ComputeP95(IReadOnlyList<double> samples)
+    {
+        if (samples.Count == 0)
+        {
+            return 0;
+        }
+
+        var ordered = samples.OrderBy(static x => x).ToArray();
+        var index = (int)Math.Ceiling(0.95 * ordered.Length) - 1;
+        index = Math.Clamp(index, 0, ordered.Length - 1);
+        return ordered[index];
     }
 
     /// <summary>
@@ -756,17 +898,92 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     /// <summary>
+    /// Resolves effective transport/media engines according to switch strategy mode.
+    /// </summary>
+    private static ResolvedEnginePlan ResolveEnginePlan(EdgeProxyOptions options)
+    {
+        var configuredTransport = options.GetTransportEngineKind();
+        var configuredMedia = options.GetMediaEngineKind();
+        var mode = options.GetEngineSwitchMode();
+
+        var transport = configuredTransport;
+        var media = configuredMedia;
+        var forceRelayFallback = options.EngineShadowMode;
+        int? canaryBucket = null;
+
+        switch (mode)
+        {
+            case EdgeProxyEngineSwitchMode.Fixed:
+                break;
+
+            case EdgeProxyEngineSwitchMode.Shadow:
+                transport = EdgeProxyTransportEngineKind.DataChannelDotNet;
+                media = EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet;
+                forceRelayFallback = true;
+                break;
+
+            case EdgeProxyEngineSwitchMode.Canary:
+            {
+                var key = $"{options.SessionId}|{options.EndpointId}|{options.PeerId}";
+                canaryBucket = ComputeDeterministicBucket(key);
+                if (canaryBucket.Value >= options.EngineCanaryPercent)
+                {
+                    transport = EdgeProxyTransportEngineKind.RelayCompat;
+                    media = EdgeProxyMediaEngineKind.None;
+                    forceRelayFallback = true;
+                }
+                else
+                {
+                    transport = EdgeProxyTransportEngineKind.DataChannelDotNet;
+                    media = EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet;
+                }
+
+                break;
+            }
+
+            case EdgeProxyEngineSwitchMode.DefaultSwitch:
+                transport = configuredTransport == EdgeProxyTransportEngineKind.RelayCompat
+                    ? EdgeProxyTransportEngineKind.DataChannelDotNet
+                    : configuredTransport;
+                media = configuredMedia == EdgeProxyMediaEngineKind.None
+                    ? EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet
+                    : configuredMedia;
+                break;
+        }
+
+        return new ResolvedEnginePlan(mode, transport, media, forceRelayFallback, canaryBucket);
+    }
+
+    private static int ComputeDeterministicBucket(string value)
+    {
+        unchecked
+        {
+            const int fnvOffset = unchecked((int)2166136261);
+            const int fnvPrime = 16777619;
+            var hash = fnvOffset;
+            foreach (var ch in value)
+            {
+                hash ^= ch;
+                hash *= fnvPrime;
+            }
+
+            return Math.Abs(hash % 100);
+        }
+    }
+
+    /// <summary>
     /// Creates concrete control transport engine according to configured mode.
     /// </summary>
     private static IEdgeControlTransportEngine CreateControlTransportEngine(
         EdgeProxyTransportEngineKind transportEngineKind,
         EdgeProxyOptions options,
-        ILogger<EdgeProxyWorker> logger)
+        ILogger<EdgeProxyWorker> logger,
+        bool allowRelayFallback)
     {
         return transportEngineKind switch
         {
             EdgeProxyTransportEngineKind.RelayCompat => new RelayCompatControlEngine(logger),
-            EdgeProxyTransportEngineKind.DataChannelDotNet => new DataChannelDotNetControlEngine(logger, options.DcdAllowRelayFallback),
+            EdgeProxyTransportEngineKind.DataChannelDotNet => new DataChannelDotNetControlEngine(logger, allowRelayFallback),
             _ => throw new InvalidOperationException($"Unsupported transport engine kind '{transportEngineKind}'."),
         };
     }
@@ -1418,6 +1635,13 @@ public sealed class EdgeProxyWorker : BackgroundService
             ? "operator.edge"
             : string.Join(",", normalized);
     }
+
+    private sealed record ResolvedEnginePlan(
+        EdgeProxyEngineSwitchMode SwitchMode,
+        EdgeProxyTransportEngineKind TransportEngineKind,
+        EdgeProxyMediaEngineKind MediaEngineKind,
+        bool ForceRelayFallback,
+        int? CanaryBucket);
 
     private sealed class CollectionEnvelope<T>
     {

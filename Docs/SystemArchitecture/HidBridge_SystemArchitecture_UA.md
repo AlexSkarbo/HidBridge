@@ -15,7 +15,7 @@
 Ключова зміна:
 
 1. runtime path канонізовано на `Platform/` стеку (core containers + external edge agents);
-2. canonical launcher: `HidBridge.RuntimeCtl` (CLI-first); PowerShell `run.ps1 -Task ...` — compatibility only;
+2. canonical launcher: `HidBridge.RuntimeCtl` (CLI-first); PowerShell `RuntimeCtl ...` — compatibility only;
 3. `WebRtcTests/exp-022-datachanneldotnet` зафіксовано як lab-only.
 
 ---

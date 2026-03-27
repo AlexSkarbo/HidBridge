@@ -6,12 +6,12 @@ namespace HidBridge.EdgeProxy.Agent;
 public enum EdgeProxyMediaEngineKind
 {
     /// <summary>
-    /// No dedicated media runtime process management.
+    /// No dedicated media runtime process management (compatibility fallback).
     /// </summary>
     None,
 
     /// <summary>
-    /// Preview ffmpeg + DataChannelDotNet media runtime with process orchestration.
+    /// ffmpeg + DataChannelDotNet media runtime with process orchestration.
     /// </summary>
     FfmpegDataChannelDotNet,
 }

@@ -247,8 +247,8 @@ Test entrypoint:
 - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-smoke`
 - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local`
 - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full`
-- compatibility shim: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task <command-name>`
-- docs policy: direct RuntimeCtl commands are canonical; `run.ps1 -Task ...` examples are legacy compatibility only.
+- native RuntimeCtl entrypoint: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform <command-name>`
+- docs policy: direct RuntimeCtl commands are canonical; `RuntimeCtl ...` examples are legacy compatibility only.
 - The runner restores the solution, builds it, and then runs `HidBridge.Platform.Tests`.
 - `checks` runs the unit-test pipeline first and then runs the selected smoke profile.
 - `demo-gate` runs the deterministic demo gate (`open session -> request control -> dispatch command -> verify journal -> close session`).
@@ -300,20 +300,20 @@ Local PostgreSQL for Platform:
 - Default connection string for that container:
   - `Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge`
 - Example unified smoke-run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke -Provider File`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke -Provider File`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 - Example full checks run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks -Provider File`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform checks -Provider File`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform checks -Provider Sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 - Example file smoke-run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-file`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-file`
 - Example smoke-run:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task smoke-sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform smoke-sql -ConnectionString "Host=127.0.0.1;Port=5434;Database=hidbridge;Username=hidbridge;Password=hidbridge"`
 
 Docker runtime profile (step `21`):
 - unified container profile:
   - `docker compose -f docker-compose.platform-runtime.yml up -d --build`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action up -Build`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action up -Build`
 - included containers:
   - `hidbridge_api` (`http://127.0.0.1:18093`)
   - `hidbridge_web` (`http://127.0.0.1:18110`)
@@ -322,12 +322,12 @@ Docker runtime profile (step `21`):
   - `hidbridge_identity_db` (`127.0.0.1:5435`)
 - stop and cleanup:
   - `docker compose -f docker-compose.platform-runtime.yml down`
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action down`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action down`
 - cleanup with orphan removal (useful when old compose services like `hid_postgis` are still attached):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action down -RemoveOrphans`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action down -RemoveOrphans`
 - quick management commands:
-  - status: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action status`
-  - logs: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task platform-runtime -Action logs -Follow`
+  - status: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action status`
+  - logs: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action logs -Follow`
 - runtime policy in this profile:
   - API/Web/Keycloak/Postgres are containerized.
   - edge-agent remains a separate process/host (not container-coupled).
@@ -384,7 +384,7 @@ Final runtime flow (no script policy dependency):
 - scripts are test harnesses only (bootstrap/smoke/acceptance), not runtime policy owners.
 
 One-command demo flow:
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow`
 - Step-by-step runbooks:
   - `Docs/GoToMarket/MicroMeet_Demo_Runbook_UA.md`
   - `Docs/GoToMarket/MicroMeet_Demo_Runbook_EN.md`
@@ -425,25 +425,25 @@ One-command demo flow:
   - `-ShowServiceWindows` (default is hidden service windows)
 
 Manual demo seed only:
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-seed -BaseUrl http://127.0.0.1:18093`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-seed -BaseUrl http://127.0.0.1:18093`
 - by default `demo-seed` gets bearer token via `controlplane-smoke / operator.smoke.admin`
 
 Manual demo gate only:
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-gate -BaseUrl http://127.0.0.1:18093`
 - WebRTC relay gate mode (requires active `webrtc-stack` session env):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -TransportProvider webrtc-datachannel -ControlHealthUrl http://127.0.0.1:28092/health -OutputJsonPath Platform/.logs/demo-gate-webrtc.result.json`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-gate -BaseUrl http://127.0.0.1:18093 -TransportProvider webrtc-datachannel -ControlHealthUrl http://127.0.0.1:28092/health -OutputJsonPath Platform/.logs/demo-gate-webrtc.result.json`
 - optional report output:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/demo-gate.result.json`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-gate -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/demo-gate.result.json`
 - strict UART ack mode:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -BaseUrl http://127.0.0.1:18093 -RequireDeviceAck -KeyboardInterfaceSelector 1`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-gate -BaseUrl http://127.0.0.1:18093 -RequireDeviceAck -KeyboardInterfaceSelector 1`
   - equivalent forward-args form:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-gate -ForwardArgs @('-RequireDeviceAck','-KeyboardInterfaceSelector','1')`
-  - note: do not use `--` argument separator with `run.ps1`; use direct args or `-ForwardArgs`.
+    - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-gate -ForwardArgs @('-RequireDeviceAck','-KeyboardInterfaceSelector','1')`
+  - note: keep `--` separator between `dotnet run` and RuntimeCtl command arguments.
 
 Manual WebRTC relay smoke (peer queue + ack + transport health):
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-relay-smoke -BaseUrl http://127.0.0.1:18093`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-relay-smoke -BaseUrl http://127.0.0.1:18093`
 - optional JSON summary output:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-relay-smoke -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/webrtc-relay-smoke.result.json`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-relay-smoke -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/webrtc-relay-smoke.result.json`
 - this scenario force-routes command dispatch through `transportProvider=webrtc`, simulates peer polling (`/transport/webrtc/commands`), publishes ack (`/transport/webrtc/commands/{commandId}/ack`), checks transport health, then cleans up session + peer presence.
 - if relay smoke reports `endpointSupportsWebRtc=false`, restart API with endpoint capability override:
   - `setx HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES "transport.webrtc.datachannel.v1@1.0"` (new terminal required), or
@@ -457,22 +457,22 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - to explicitly enable lab mode for one shell:
     - `$env:HIDBRIDGE_ENABLE_LEGACY_EXP022="true"`
 - preferred stack launcher (starts API/Web + service-based edge proxy agent in direct UART mode):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','uart','-UartPort','COM6','-UartHmacKey','your-master-secret')`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','uart','-UartPort','COM6','-UartHmacKey','your-master-secret')`
 - compatibility launcher (starts API/Web + exp-022 + edge proxy agent via control websocket):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','controlws','-AllowLegacyControlWs','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-stack -ForwardArgs @('-StopExisting','-CommandExecutor','controlws','-AllowLegacyControlWs','-ControlWsUrl','ws://127.0.0.1:28092/ws/control','-UartPort','COM6','-UartHmacKey','your-master-secret')`
   - stack launcher is now a thin runtime bootstrapper (start/stop only): no script-side control/lease/readiness policy.
   - to reuse already-running Docker runtime, pass `-SkipRuntimeBootstrap`.
   - session/lease/readiness checks are executed by server-side API policy and smoke/acceptance tasks.
   - deprecated and ignored for `webrtc-stack`: `-PeerReadyTimeoutSec`, `-AdapterDurationSec`, `-TokenScope`.
 - one-command smoke for the running stack (expects `Applied`):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-smoke -ForwardArgs @('-ControlHealthUrl','http://127.0.0.1:28092/health','-OutputJsonPath','Platform/.logs/webrtc-edge-agent-smoke.result.json')`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-edge-agent-smoke -ForwardArgs @('-ControlHealthUrl','http://127.0.0.1:28092/health','-OutputJsonPath','Platform/.logs/webrtc-edge-agent-smoke.result.json')`
   - for direct UART mode you can skip control-health precheck: add `-SkipControlHealthCheck`
   - smoke now waits for WebRTC transport readiness by typed `/transport/health` fields before dispatching command; disable this check only for compatibility troubleshooting via `-SkipTransportHealthCheck`.
   - readiness polling knobs: `-TransportHealthAttempts`, `-TransportHealthDelayMs`.
 - `webrtc-stack-terminal-b` is now a thin compatibility wrapper over `webrtc-edge-agent-smoke` (no session auto-create/fallback policy in script layer).
   - deprecated/no-op parameters in this wrapper: `-AutoCreateSessionIfMissing`, `-AllowMissingControlRequestEndpoint`, `-EndpointId`, `-Profile`.
 - one-command acceptance for CI/local automation (thin wrapper to `.NET` runner; stack/runtime can be reused):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-edge-agent-acceptance -CommandExecutor uart -PeerReadyTimeoutSec 45 -OutputJsonPath Platform/.logs/webrtc-edge-agent-acceptance.result.json`
   - orchestration now runs through `.NET` runner project `Platform/Tools/HidBridge.Acceptance.Runner` (PowerShell entrypoint is a thin wrapper only).
   - in controlws mode add `-AllowLegacyControlWs -ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
@@ -482,7 +482,7 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - new batch command endpoint for high-frequency input dispatch: `POST /api/v1/sessions/{sessionId}/commands/batch`
   - `Session Details` now includes live HID capture controls (`Live Control`, `Pointer Lock`, `Panic Reset`) in addition to demo scenarios.
 - operational SLO + security verification (step 22/23):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ops-slo-security-verify -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/ops-slo-security-verify.result.json`
   - this script validates:
     - transport SLO status + threshold breaches (`ackTimeoutRate`, `relayReadyLatencyP95`, `reconnectFrequencyPerHour`)
     - runtime auth posture (`auth enabled`, bearer/caller-context coverage, fallback posture)
@@ -492,9 +492,9 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - local/dev override when auth is intentionally disabled:
     - `-AllowAuthDisabled`
 - include the WebRTC smoke as part of `demo-flow`:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor uart`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor uart`
   - exp-022 compatibility mode:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor controlws -AllowLegacyControlWs -WebRtcControlHealthUrl "http://127.0.0.1:28092/health"`
+    - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset -IncludeWebRtcEdgeAgentSmoke -WebRtcCommandExecutor controlws -AllowLegacyControlWs -WebRtcControlHealthUrl "http://127.0.0.1:28092/health"`
   - optional relay-readiness tuning for `demo-flow`/`demo-gate`/`webrtc-edge-agent-smoke`/`webrtc-stack-terminal-b`: `-TransportHealthAttempts`, `-TransportHealthDelayMs`, `-SkipTransportHealthCheck`.
 - the stack now launches `Platform/Edge/HidBridge.EdgeProxy.Agent` (dotnet worker) instead of the legacy PowerShell adapter runtime.
 - manual direct run of service-based edge proxy agent:
@@ -513,10 +513,10 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
       - `HIDBRIDGE_EDGE_PROXY_TOKENREFRESHTOKEN=<refresh-token>`
       - `HIDBRIDGE_EDGE_PROXY_ALLOWPASSWORDGRANTFALLBACK=false`
 - legacy script adapter is kept only as compatibility harness during migration.
-- run.ps1 compatibility entry:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`
+- RuntimeCtl compatibility entry:
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-peer-adapter -AllowLegacyControlWs -ForwardArgs @('-SessionId','room-...','-PeerId','peer-local-exp022','-StartExp022')`
 - direct wrapper:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task webrtc-peer-adapter -AllowLegacyControlWs -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-peer-adapter -AllowLegacyControlWs -SessionId room-... -PeerId peer-local-exp022 -StartExp022`
 - behavior:
   - auto-creates session when `-SessionId` is missing (reuses ready endpoint; provider=`webrtc-datachannel`)
   - marks peer online via `/transport/webrtc/peers/{peerId}/online`
@@ -534,9 +534,9 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - this mode is deprecated for runtime use and should be treated as lab-only tooling.
 
 Manual UART diagnostics (selector sweep):
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform uart-diagnostics -BaseUrl http://127.0.0.1:18093`
 - custom selector set + json report:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task uart-diagnostics -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/uart-diagnostics.result.json -InterfaceSelectorsCsv "0,1,2,3"`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform uart-diagnostics -BaseUrl http://127.0.0.1:18093 -OutputJsonPath Platform/.logs/uart-diagnostics.result.json -InterfaceSelectorsCsv "0,1,2,3"`
 - notes:
   - diagnostics preflight automatically attempts to close non-terminal visible sessions before endpoint selection.
   - if no successful probe exists, script exits with code `1` and keeps a full matrix in console/JSON output.
@@ -547,13 +547,13 @@ Manual UART diagnostics (selector sweep):
 
 Bulk room cleanup actions:
 - close failed rooms:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-failed-rooms -BaseUrl http://127.0.0.1:18093`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform close-failed-rooms -BaseUrl http://127.0.0.1:18093`
   - dry run:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-failed-rooms -BaseUrl http://127.0.0.1:18093 -ForwardArgs @('-DryRun')`
+    - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform close-failed-rooms -BaseUrl http://127.0.0.1:18093 -ForwardArgs @('-DryRun')`
 - close stale rooms (non-active sessions older than threshold):
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-stale-rooms -BaseUrl http://127.0.0.1:18093 -StaleAfterMinutes 30`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform close-stale-rooms -BaseUrl http://127.0.0.1:18093 -StaleAfterMinutes 30`
   - dry run:
-    - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task close-stale-rooms -BaseUrl http://127.0.0.1:18093 -StaleAfterMinutes 30 -ForwardArgs @('-DryRun')`
+    - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform close-stale-rooms -BaseUrl http://127.0.0.1:18093 -StaleAfterMinutes 30 -ForwardArgs @('-DryRun')`
 
 Thin operator UI shell:
 - open design backlog:
@@ -672,7 +672,7 @@ Keycloak dev realm sync:
 
 
 Protected non-web API smoke:
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-smoke`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-smoke`
 - або direct: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-smoke`
 - if `-AccessToken "<token>"`, `-AccessToken "auto"` or empty token mode is used, the script acquires dev JWTs from Keycloak automatically
 - if `-AccessToken` contains a real JWT, the script uses that token as-is
@@ -743,9 +743,9 @@ Policy governance diagnostics:
 - safe staged profile для `HIDBRIDGE_AUTH_HEADER_FALLBACK_DISABLED_PATTERNS` описано в:
   - `Docs/SystemArchitecture/HidBridge_Bearer_Rollout_Profile_UA.md`
 - для контрольованого reset/reimport dev realm додано:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-reset`
 - для idempotent onboarding нового OIDC оператора додано:
-  - `& .\Platform\run.ps1 -Task identity-onboard -ForwardArgs @('-Email','<user@email>')`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-onboard -ForwardArgs @('-Email','<user@email>')`
 - готовий runtime preset для першої safe rollout фази:
   - `Platform/Profiles/BearerRollout/Phase1-Control.ps1`
   - `Platform/Profiles/BearerRollout/Phase1-Control.env.example`
@@ -795,7 +795,7 @@ powershell -ExecutionPolicy Bypass -File Platform/Profiles/BearerRollout/Phase4-
 - `Phase 4` (`commands`) стала поточним effective rollout state
 - для вирівнювання dev identity contour використовуй:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-reset
 ```
 
 
@@ -807,9 +807,9 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-stack -StopExisting -CommandExecutor uart`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-acceptance -CommandExecutor uart -SkipRuntimeBootstrap -StopExisting -StopStackAfter`
   - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ops-verify -BaseUrl http://127.0.0.1:18093`
-- `Platform/run.ps1` remains a minimal compatibility shim (`-Task`/`-task:` -> direct RuntimeCtl command invocation).
+- `HidBridge.RuntimeCtl` is the only supported operational entrypoint.
 - `Platform/Scripts/run_ci_local.ps1`, `Platform/Scripts/run_full.ps1`, `Platform/Scripts/run_webrtc_edge_agent_acceptance.ps1`, `Platform/Scripts/run_ops_slo_security_verify.ps1`, `Platform/Scripts/run_demo_flow.ps1`, and `Platform/Scripts/run_webrtc_stack.ps1` are thin wrappers over RuntimeCtl.
-- top-level `Platform/run_*.ps1` wrappers were removed; use `Platform/run.ps1 -Task <command-name>` or direct RuntimeCtl commands.
+- top-level `Platform/run_*.ps1` wrappers were removed; use `RuntimeCtl <command-name>` or direct RuntimeCtl commands.
 - CI policy: use direct RuntimeCtl commands only.
   - canonical CI workflow is `.github/workflows/platform-runtimectl-ci.yml` and publishes:
     - `Platform/.logs/**`
@@ -887,22 +887,22 @@ dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.cs
 ```
 Bearer rollout:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4
 ```
 
 If the requested phase is not yet bearer-safe, the runner automatically rolls back through lower phases down to `Phase 0` (current baseline) and reports the effective state that stayed green.
 
 Print the exact PowerShell env assignment without applying it:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4 -PrintOnly
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4 -PrintOnly
 ```
 
 Apply only in the current shell:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4 -ApplyOnly
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4 -ApplyOnly
 ```
 
 Disable auto-rollback and fail hard:
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task bearer-rollout -Phase 4 -NoAutoRollback
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform bearer-rollout -Phase 4 -NoAutoRollback
 ```

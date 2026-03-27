@@ -1032,19 +1032,24 @@ static bool IsRetryable(CommandAck ack)
 
 static string ResolvePlatformRoot(string? overridePath)
 {
+    static bool LooksLikePlatformRoot(string path)
+    {
+        return File.Exists(Path.Combine(path, "Tools", "HidBridge.RuntimeCtl", "HidBridge.RuntimeCtl.csproj"));
+    }
+
     if (!string.IsNullOrWhiteSpace(overridePath))
     {
         return Path.GetFullPath(overridePath);
     }
 
     var current = Directory.GetCurrentDirectory();
-    if (File.Exists(Path.Combine(current, "run.ps1")))
+    if (LooksLikePlatformRoot(current))
     {
         return current;
     }
 
     var parent = Directory.GetParent(current)?.FullName;
-    if (parent is not null && File.Exists(Path.Combine(parent, "run.ps1")))
+    if (parent is not null && LooksLikePlatformRoot(parent))
     {
         return parent;
     }

@@ -1,7 +1,7 @@
 # Micro Meet: GitHub Package
 
 > Note (CLI-first): canonical launcher is `HidBridge.RuntimeCtl` direct command syntax.  
-> `Platform/run.ps1 -Task ...` references are legacy compatibility form.
+> `RuntimeCtl ...` references are canonical command form.
 
 ## Що це
 `Micro Meet` — це операторський demo-ready шар поверх `HidBridge`, де можна:
@@ -65,7 +65,7 @@
 - `smoke-bearer`
 
 ## Мінімальний demo script
-1. `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full`
+1. `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full`
 2. відкрити `/`
 3. натиснути `Launch room`
 4. перейти в `/sessions/{id}`

@@ -118,6 +118,52 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
+    public void IsValid_DefaultSwitchMode_UsesDefaultSwitch()
+    {
+        var options = CreateBaselineOptions();
+        options.EngineSwitchMode = string.Empty;
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(EdgeProxyEngineSwitchMode.DefaultSwitch, options.GetEngineSwitchMode());
+    }
+
+    [Fact]
+    public void IsValid_RejectsUnknownSwitchMode()
+    {
+        var options = CreateBaselineOptions();
+        options.EngineSwitchMode = "unsupported";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("EngineSwitchMode", error);
+    }
+
+    [Fact]
+    public void Normalize_ClampsSwitchSloThresholds()
+    {
+        var options = CreateBaselineOptions();
+        options.EngineCanaryPercent = 180;
+        options.EngineSloMinCommandSampleCount = 0;
+        options.EngineSloAckTimeoutRateMaxPct = -10;
+        options.EngineSloReconnectFrequencyMaxPerHour = -5;
+        options.EngineSloRoundtripP95MsMax = 50;
+
+        options.Normalize();
+
+        Assert.Equal(100, options.EngineCanaryPercent);
+        Assert.Equal(1, options.EngineSloMinCommandSampleCount);
+        Assert.Equal(0.0, options.EngineSloAckTimeoutRateMaxPct);
+        Assert.Equal(0.0, options.EngineSloReconnectFrequencyMaxPerHour);
+        Assert.Equal(100, options.EngineSloRoundtripP95MsMax);
+    }
+
+    [Fact]
     public void IsValid_DefaultMediaEngine_UsesNone()
     {
         var options = CreateBaselineOptions();

@@ -1,7 +1,7 @@
 # Micro Meet Publish Checklist
 
 > Note (CLI-first): use direct `HidBridge.RuntimeCtl` commands.  
-> `Platform/run.ps1 -Task ...` is compatibility-only.
+> `RuntimeCtl ...` is compatibility-only.
 
 ## 1. Repo
 
@@ -52,4 +52,4 @@
 - [ ] не вставляти описовий текст у PowerShell, тільки команди
 - [ ] перед демо проганяти `full`
 - [ ] якщо realm drift-нув:
-  - `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset`
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform identity-reset`

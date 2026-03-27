@@ -20,9 +20,9 @@ Highlights:
   - Ops Status quick links (Doctor/CI Local/Full/Smoke) and priority ordering
 
 Validation baseline (local):
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi`
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local`
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor -StartApiProbe -RequireApi`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full`
 
 Demo bootstrap:
-- `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow`
+- `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow`

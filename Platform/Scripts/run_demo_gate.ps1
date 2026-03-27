@@ -320,7 +320,7 @@ try {
     $null = Invoke-DemoGateJson -Method "GET" -Uri "$base/health" -Headers $callerHeaders
 }
 catch {
-    throw "Demo gate requires a running API at $BaseUrl. Start API first (for example via 'Platform/run.ps1 -Task demo-flow -SkipIdentityReset'). $($_.Exception.Message)"
+    throw "Demo gate requires a running API at $BaseUrl. Start API first (for example via 'dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset'). $($_.Exception.Message)"
 }
 
 try {

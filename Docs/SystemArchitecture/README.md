@@ -273,7 +273,7 @@
 - додано policy governance diagnostics summary endpoint: `GET /api/v1/diagnostics/policies/summary`;
 - додано manual policy prune endpoint: `POST /api/v1/diagnostics/policies/prune` (`operator.admin`);
 - додано bearer-first smoke runner для non-web clients: `Platform/run_api_bearer_smoke.ps1`;
-- додано unified operational launcher: `Platform/run.ps1`;
+- додано unified operational launcher: `HidBridge.RuntimeCtl`;
 - додано `full` pipeline: `realm sync -> ci-local -> artifact export on failure`;
 - `HIDBRIDGE_AUTH_ALLOW_HEADER_FALLBACK=false` тепер використовується для жорсткої перевірки protected API consumption без legacy header fallback.
 
@@ -316,7 +316,7 @@
 
 
 - canonical operational entrypoint is `Platform/Tools/HidBridge.RuntimeCtl` (CLI-first).
-- `Platform/run.ps1` is kept as compatibility shim only.
+- `HidBridge.RuntimeCtl` is kept as native RuntimeCtl entrypoint only.
 - canonical on-call runbook: `Docs/SystemArchitecture/RuntimeCtl_OnCall_HowTo_UA.md`.
 
 - operational helpers added: `Platform/run_doctor.ps1`, `Platform/run_clean_logs.ps1`, `Platform/run_ci_local.ps1`, `Platform/run_full.ps1`, `Platform/run_token_debug.ps1`, and shared script helpers in `Platform/Scripts/Common/ScriptCommon.ps1`, `Platform/Scripts/Common/KeycloakCommon.ps1`.

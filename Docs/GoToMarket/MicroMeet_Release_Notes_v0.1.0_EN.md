@@ -1,7 +1,7 @@
 # Micro Meet v0.1.0 Release Notes
 
 > Note (CLI-first): current canonical launcher is direct `HidBridge.RuntimeCtl` command syntax.  
-> Historical `Platform/run.ps1 -Task ...` examples are compatibility-only.
+> Historical `RuntimeCtl ...` examples are compatibility-only.
 
 Date: March 12, 2026
 
@@ -45,7 +45,7 @@ Date: March 12, 2026
   - verify smoke users/token acquisition
 
 5. Operational automation
-- Unified `Platform/run.ps1` task launcher:
+- Unified `HidBridge.RuntimeCtl` task launcher:
   - `doctor`
   - `smoke-bearer`
   - `ci-local`
@@ -59,9 +59,9 @@ Date: March 12, 2026
 Expected pass path:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor -StartApiProbe -RequireApi
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
 ```
 
 ## Known Current Constraints

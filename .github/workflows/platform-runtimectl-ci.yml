@@ -45,12 +45,12 @@ jobs:
           $dll = (Resolve-Path "Platform/.artifacts/runtimectl/HidBridge.RuntimeCtl.dll").Path
           "RUNTIMECTL_DLL=$dll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Guard - no PowerShell compatibility launcher in workflow
+      - name: Guard - no legacy task-compat syntax in workflow
         shell: pwsh
         run: |
           $workflowText = Get-Content '.github/workflows/platform-runtimectl-ci.yml' -Raw
-          if ($workflowText -match 'run\.ps1') {
-            throw "CI workflow must not invoke run.ps1; use native RuntimeCtl commands only."
+          if ($workflowText -match '\s-Task\s') {
+            throw "CI workflow must use native RuntimeCtl command syntax only."
           }
 
       - name: Runtime up

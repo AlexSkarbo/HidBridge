@@ -1,7 +1,7 @@
 # Micro Meet Next Implementation Plan
 
 > Note (CLI-first): canonical launcher is `HidBridge.RuntimeCtl` direct command syntax.  
-> `Platform/run.ps1 -Task ...` references in historical sections are legacy compatibility form.
+> `RuntimeCtl ...` references in historical sections are canonical command form.
 
 Дата: 12 березня 2026 (оновлено після стабілізації `demo-flow`)
 
@@ -91,9 +91,9 @@
 ```powershell
 dotnet build Platform/HidBridge.Platform.sln -c Debug -v minimal -m:1 -nodeReuse:false
 dotnet test Platform/Tests/HidBridge.Platform.Tests/HidBridge.Platform.Tests.csproj -c Debug -v minimal -m:1 -nodeReuse:false
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task demo-flow -SkipIdentityReset
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform demo-flow -SkipIdentityReset
 ```
 
 Manual smoke:
