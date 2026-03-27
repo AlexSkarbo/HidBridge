@@ -76,7 +76,6 @@ internal static class WebRtcStackCommand
         var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
         var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
         var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
-        var configuredMediaEngine = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAENGINE") ?? string.Empty).Trim();
         var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
         var configuredMediaBackendAutoStart = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART") ?? string.Empty).Trim();
         var configuredMediaBackendExecutablePath = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH") ?? string.Empty).Trim();
@@ -86,13 +85,10 @@ internal static class WebRtcStackCommand
         var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
         var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
         var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
-        var useFfmpegDcdMediaEngine = string.Equals(configuredMediaEngine, "ffmpeg-dcd", StringComparison.OrdinalIgnoreCase);
         var effectiveMediaBackendAutoStart = !string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart)
             ? configuredMediaBackendAutoStart
-            : (useFfmpegDcdMediaEngine ? "true" : string.Empty);
-        var effectiveMediaBackendExecutablePath = !string.IsNullOrWhiteSpace(configuredMediaBackendExecutablePath)
-            ? configuredMediaBackendExecutablePath
-            : (TryParseOptionalBool(effectiveMediaBackendAutoStart) ? "ffmpeg" : string.Empty);
+            : "false";
+        var effectiveMediaBackendExecutablePath = configuredMediaBackendExecutablePath;
 
         if (!ValidateMediaBackendAutoStartPreflight(
                 repoRoot,
@@ -601,6 +597,16 @@ internal static class WebRtcStackCommand
                 ? "PATH/current directory"
                 : $"'{resolvedWorkingDirectory}' or PATH";
             error = $"Media backend executable '{executablePathRaw}' was not found in {scope}.";
+            return false;
+        }
+
+        var executableFileName = Path.GetFileName(resolvedExecutablePath);
+        if (!string.IsNullOrWhiteSpace(executableFileName)
+            && executableFileName.StartsWith("ffmpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            error =
+                "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH points to ffmpeg. " +
+                "Media backend executable must be a WHIP/WHEP backend launcher (server), not ffmpeg publisher.";
             return false;
         }
 
