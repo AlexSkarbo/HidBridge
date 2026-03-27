@@ -89,6 +89,30 @@ public sealed class FfmpegDataChannelDotNetMediaRuntimeEngineTests
     }
 
     [Fact]
+    public void TryBuildRtmpPublishUrlFromWhip_MapsKnownSrsPortsAndQuery()
+    {
+        var mapped = FfmpegDataChannelDotNetMediaRuntimeEngine.TryBuildRtmpPublishUrlFromWhip(
+            "http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream=cam21",
+            "edge-main",
+            out var rtmpUrl);
+
+        Assert.True(mapped);
+        Assert.Equal("rtmp://127.0.0.1:19351/live/cam21", rtmpUrl);
+    }
+
+    [Fact]
+    public void TryBuildRtmpPublishUrlFromWhip_UsesFallbackStreamWhenQueryIsMissing()
+    {
+        var mapped = FfmpegDataChannelDotNetMediaRuntimeEngine.TryBuildRtmpPublishUrlFromWhip(
+            "http://localhost:19851/rtc/v1/whip/",
+            "edge-main",
+            out var rtmpUrl);
+
+        Assert.True(mapped);
+        Assert.Equal("rtmp://localhost:19351/live/edge-main", rtmpUrl);
+    }
+
+    [Fact]
     public async Task StartAsync_AutoStartEnabled_NoBackendExecutable_ReportsMediaBackendNotConfigured()
     {
         var port = GetFreeTcpPort();

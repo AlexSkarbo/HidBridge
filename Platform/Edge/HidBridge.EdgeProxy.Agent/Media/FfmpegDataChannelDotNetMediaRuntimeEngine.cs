@@ -109,8 +109,19 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
         if (string.IsNullOrWhiteSpace(argsTemplate) &&
             !string.IsNullOrWhiteSpace(_options.MediaWhipUrl))
         {
-            argsTemplate = BuildDefaultWhipArgumentsTemplate(_options.MediaWhipBearerToken);
-            argsSource = "DefaultWhipTemplate";
+            // Prefer RTMP ingest template for SRS-style WHIP/WHEP backend because many
+            // stock ffmpeg builds do not ship WHIP muxer support. This keeps local
+            // runtime deterministic without requiring custom ffmpeg binaries.
+            if (TryBuildRtmpPublishUrlFromWhip(_options.MediaWhipUrl, context.StreamId, out var rtmpPublishUrl))
+            {
+                argsTemplate = BuildDefaultRtmpArgumentsTemplate(rtmpPublishUrl);
+                argsSource = "DefaultRtmpTemplate";
+            }
+            else
+            {
+                argsTemplate = BuildDefaultWhipArgumentsTemplate(_options.MediaWhipBearerToken);
+                argsSource = "DefaultWhipTemplate";
+            }
         }
         if (string.IsNullOrWhiteSpace(argsTemplate))
         {
@@ -1085,6 +1096,80 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
             ? string.Empty
             : "-headers \"Authorization: Bearer {{whipBearerToken}}\\r\\n\" ";
         return $"{headerPrefix}-re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 -shortest -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 30 -keyint_min 30 -c:a aac -b:a 128k -f whip {{whipUrl}}";
+    }
+
+    /// <summary>
+    /// Builds default ffmpeg RTMP publish arguments for backends that expose WHIP/WHEP
+    /// but are easier to ingest via RTMP from stock ffmpeg.
+    /// </summary>
+    private static string BuildDefaultRtmpArgumentsTemplate(string rtmpPublishUrl)
+        => $"-re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 -shortest -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -c:a aac -b:a 128k -ar 48000 -ac 2 -f flv \"{rtmpPublishUrl}\"";
+
+    /// <summary>
+    /// Derives RTMP ingest URL from WHIP endpoint query shape:
+    /// http://host:19851/rtc/v1/whip/?app=live&stream=edge-main -> rtmp://host:19351/live/edge-main
+    /// </summary>
+    internal static bool TryBuildRtmpPublishUrlFromWhip(
+        string? whipUrl,
+        string fallbackStreamId,
+        out string rtmpPublishUrl)
+    {
+        rtmpPublishUrl = string.Empty;
+        if (!Uri.TryCreate(whipUrl, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var query = ParseQuery(uri.Query);
+        var app = query.TryGetValue("app", out var parsedApp) && !string.IsNullOrWhiteSpace(parsedApp)
+            ? parsedApp
+            : "live";
+        var stream = query.TryGetValue("stream", out var parsedStream) && !string.IsNullOrWhiteSpace(parsedStream)
+            ? parsedStream
+            : (string.IsNullOrWhiteSpace(fallbackStreamId) ? "edge-main" : fallbackStreamId);
+
+        var rtmpPort = uri.Port switch
+        {
+            19851 => 19351, // host-mapped SRS compose port
+            1985 => 1935,   // direct container/internal SRS API port mapping pair
+            _ => 1935,
+        };
+
+        rtmpPublishUrl = $"rtmp://{uri.Host}:{rtmpPort}/{app}/{stream}";
+        return true;
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseQuery(string query)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return values;
+        }
+
+        var span = query.AsSpan();
+        if (!span.IsEmpty && span[0] == '?')
+        {
+            span = span[1..];
+        }
+
+        foreach (var pair in span.ToString().Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = Uri.UnescapeDataString(pair[..separator]);
+            var value = Uri.UnescapeDataString(pair[(separator + 1)..]);
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                values[key] = value;
+            }
+        }
+
+        return values;
     }
 
     /// <summary>

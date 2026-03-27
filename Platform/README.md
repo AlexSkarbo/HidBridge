@@ -318,6 +318,7 @@ Docker runtime profile (step `21`):
   - `hidbridge_api` (`http://127.0.0.1:18093`)
   - `hidbridge_web` (`http://127.0.0.1:18110`)
   - `hidbridge_identity` (`http://127.0.0.1:18096`)
+  - `hidbridge_media_backend` (`http://127.0.0.1:19851`, WHIP/WHEP + media API)
   - `platform_postgres` (`127.0.0.1:5434`)
   - `hidbridge_identity_db` (`127.0.0.1:5435`)
 - stop and cleanup:
@@ -329,7 +330,7 @@ Docker runtime profile (step `21`):
   - status: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action status`
   - logs: `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action logs -Follow`
 - runtime policy in this profile:
-  - API/Web/Keycloak/Postgres are containerized.
+  - API/Web/Keycloak/Postgres + shared WHIP/WHEP media backend are containerized.
   - edge-agent remains a separate process/host (not container-coupled).
   - default API transport in this profile is `webrtc-datachannel`.
   - API auth posture is strict-by-default:
@@ -355,10 +356,12 @@ Edge-agent as external process (outside docker):
   - `HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR=uart`
   - `HIDBRIDGE_EDGE_PROXY_TRANSPORTENGINE=relay` (`dcd` preview consumes direct signal commands first and can fallback to relay queue)
   - `HIDBRIDGE_EDGE_PROXY_DCDALLOWRELAYFALLBACK=true` (set `false` to enforce direct-signal-only behavior in `dcd` mode)
-  - `HIDBRIDGE_EDGE_PROXY_MEDIAENGINE=none` (`ffmpeg-dcd` is preview scaffold; current production media path remains probe-driven)
+  - `HIDBRIDGE_EDGE_PROXY_MEDIAENGINE=ffmpeg-dcd`
   - `HIDBRIDGE_EDGE_PROXY_UARTPORT=COM6`
   - `HIDBRIDGE_EDGE_PROXY_UARTHMACKEY=your-master-secret`
-  - `HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL=http://127.0.0.1:8080/live.m3u8` (optional media preview URL surfaced in Web transport diagnostics)
+  - `HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL=http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream=edge-main`
+  - `HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL=http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main`
+  - `HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL=http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main`
 
 Transport-engine promotion plan (`relay` -> `dcd`, `none` -> `ffmpeg-dcd`):
 - Shadow mode:

@@ -62,6 +62,7 @@ internal static class PlatformRuntimeCommand
                         await WaitHttpReadyAsync("API health", "http://127.0.0.1:18093/health", options.ReadyTimeoutSec);
                         await WaitHttpReadyAsync("Web shell", "http://127.0.0.1:18110/", options.ReadyTimeoutSec);
                         await WaitHttpReadyAsync("Keycloak realm", "http://127.0.0.1:18096/realms/hidbridge-dev", options.ReadyTimeoutSec);
+                        await WaitHttpReadyAsync("Media backend API", "http://127.0.0.1:19851/api/v1/versions", options.ReadyTimeoutSec);
                     }
 
                     PrintRuntimeSummary(composePath);
@@ -114,6 +115,7 @@ internal static class PlatformRuntimeCommand
                         await WaitHttpReadyAsync("API health", "http://127.0.0.1:18093/health", options.ReadyTimeoutSec);
                         await WaitHttpReadyAsync("Web shell", "http://127.0.0.1:18110/", options.ReadyTimeoutSec);
                         await WaitHttpReadyAsync("Keycloak realm", "http://127.0.0.1:18096/realms/hidbridge-dev", options.ReadyTimeoutSec);
+                        await WaitHttpReadyAsync("Media backend API", "http://127.0.0.1:19851/api/v1/versions", options.ReadyTimeoutSec);
                     }
 
                     PrintRuntimeSummary(composePath);
@@ -252,6 +254,9 @@ internal static class PlatformRuntimeCommand
         Console.WriteLine("API:          http://127.0.0.1:18093");
         Console.WriteLine("Web:          http://127.0.0.1:18110");
         Console.WriteLine("Keycloak:     http://127.0.0.1:18096");
+        Console.WriteLine("Media API:    http://127.0.0.1:19851/api/v1/versions");
+        Console.WriteLine("Media WHEP:   http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main");
+        Console.WriteLine("Media WHIP:   http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream=edge-main");
         Console.WriteLine("Postgres:     127.0.0.1:5434");
         Console.WriteLine("Identity DB:  127.0.0.1:5435");
         Console.WriteLine();

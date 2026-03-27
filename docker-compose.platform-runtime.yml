@@ -67,6 +67,19 @@ services:
       timeout: 5s
       retries: 20
 
+  hidbridge_media_backend:
+    image: ossrs/srs:6
+    container_name: hidbridge_media_backend
+    restart: unless-stopped
+    ports:
+      - "19351:1935"
+      - "19851:1985"
+      - "18081:8080"
+      - "18002:18002/udp"
+    volumes:
+      - ./Platform/Media/Srs/srs.conf:/usr/local/srs/conf/srs.conf:ro
+    command: ["./objs/srs", "-c", "conf/srs.conf"]
+
   hidbridge_api:
     build:
       context: .

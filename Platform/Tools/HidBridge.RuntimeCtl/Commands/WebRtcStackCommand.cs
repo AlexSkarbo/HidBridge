@@ -85,6 +85,25 @@ internal static class WebRtcStackCommand
         var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
         var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
         var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(configuredWhipUrl)
+            || string.IsNullOrWhiteSpace(configuredWhepUrl)
+            || string.IsNullOrWhiteSpace(configuredPlaybackUrl))
+        {
+            if (await IsTcpEndpointReachableAsync("127.0.0.1", 19851, 400))
+            {
+                configuredWhipUrl = string.IsNullOrWhiteSpace(configuredWhipUrl)
+                    ? "http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream=edge-main"
+                    : configuredWhipUrl;
+                configuredWhepUrl = string.IsNullOrWhiteSpace(configuredWhepUrl)
+                    ? "http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main"
+                    : configuredWhepUrl;
+                configuredPlaybackUrl = string.IsNullOrWhiteSpace(configuredPlaybackUrl)
+                    ? configuredWhepUrl
+                    : configuredPlaybackUrl;
+                Console.WriteLine("INFO: Auto-detected local media backend on 127.0.0.1:19851 and applied default WHIP/WHEP URLs.");
+            }
+        }
         var effectiveMediaBackendAutoStart = !string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart)
             ? configuredMediaBackendAutoStart
             : "false";
@@ -734,6 +753,21 @@ internal static class WebRtcStackCommand
                 return false;
             default:
                 return false;
+        }
+    }
+
+    private static async Task<bool> IsTcpEndpointReachableAsync(string host, int port, int timeoutMs)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            using var timeoutCts = new CancellationTokenSource(Math.Max(100, timeoutMs));
+            await client.ConnectAsync(host, port, timeoutCts.Token);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
