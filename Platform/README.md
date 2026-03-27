@@ -814,6 +814,8 @@ powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task identity-reset
   - canonical CI workflow is `.github/workflows/platform-runtimectl-ci.yml` and publishes:
     - `Platform/.logs/**`
     - `Platform/Artifacts/**`
+- On-call quick runbook for RuntimeCtl lanes:
+  - `Docs/SystemArchitecture/RuntimeCtl_OnCall_HowTo_UA.md`
 
 **Stability Baseline Profile (local)**
 - Goal: deterministic daily gate without realm-key churn.
