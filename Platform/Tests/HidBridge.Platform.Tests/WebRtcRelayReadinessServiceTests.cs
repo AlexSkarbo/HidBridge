@@ -199,6 +199,12 @@ public sealed class WebRtcRelayReadinessServiceTests
                     ["lastPeerState"] = "Connected",
                     ["lastPeerMediaReady"] = true,
                     ["lastPeerMediaState"] = "Streaming",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "running",
+                    ["lastPeerMediaSessionEvidence"] = true,
+                    ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                    ["lastPeerMediaSessionState"] = "active",
+                    ["lastPeerMediaVideoTrackState"] = "active",
                     ["lastPeerMediaStreamId"] = "stream-main",
                     ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:8080/live.m3u8",
                 }));
@@ -223,6 +229,150 @@ public sealed class WebRtcRelayReadinessServiceTests
     }
 
     /// <summary>
+    /// Returns media_session_evidence_missing when media reports ready but runtime session evidence is explicitly absent.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsMediaSessionEvidenceMissing_WhenEvidenceFlagsAreFalse()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-evidence-missing"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = true,
+                    ["lastPeerMediaState"] = "Ready",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "running",
+                    ["lastPeerMediaSessionEvidence"] = false,
+                    ["lastPeerMediaRuntimeSessionEvidence"] = false,
+                    ["lastPeerMediaSessionState"] = "offline",
+                    ["lastPeerMediaVideoTrackState"] = "missing",
+                    ["lastPeerMediaAudioTrackState"] = "missing",
+                    ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-evidence-missing",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(readiness.Ready);
+        Assert.Equal("media_session_evidence_missing", readiness.ReasonCode);
+        Assert.Contains("session=offline", readiness.Reason, StringComparison.Ordinal);
+        Assert.Contains("videoTrack=missing", readiness.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Returns media_session_state_unhealthy when runtime reports non-healthy media session state.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsMediaSessionStateUnhealthy_WhenSessionStateIsConnecting()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-session-state"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = true,
+                    ["lastPeerMediaState"] = "Ready",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "running",
+                    ["lastPeerMediaSessionEvidence"] = true,
+                    ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                    ["lastPeerMediaSessionState"] = "connecting",
+                    ["lastPeerMediaVideoTrackState"] = "negotiated",
+                    ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-session-state",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(readiness.Ready);
+        Assert.Equal("media_session_state_unhealthy", readiness.ReasonCode);
+        Assert.Contains("session=connecting", readiness.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Returns media_video_track_unhealthy when runtime session is active but video track evidence is missing.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsMediaVideoTrackUnhealthy_WhenVideoTrackIsMissing()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-video-track"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = true,
+                    ["lastPeerMediaState"] = "Ready",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "running",
+                    ["lastPeerMediaSessionEvidence"] = true,
+                    ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                    ["lastPeerMediaSessionState"] = "active",
+                    ["lastPeerMediaVideoTrackState"] = "missing",
+                    ["lastPeerMediaAudioTrackState"] = "active",
+                    ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-video-track",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(readiness.Ready);
+        Assert.Equal("media_video_track_unhealthy", readiness.ReasonCode);
+        Assert.Contains("videoTrack=missing", readiness.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Prefers platform media registry snapshot over transport metrics when both are present.
     /// </summary>
     [Fact]
@@ -244,6 +394,12 @@ public sealed class WebRtcRelayReadinessServiceTests
                     ["lastPeerMediaReady"] = false,
                     ["lastPeerMediaState"] = "Unavailable",
                     ["lastPeerMediaFailureReason"] = "stale-transport-metric",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "running",
+                    ["lastPeerMediaSessionEvidence"] = true,
+                    ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                    ["lastPeerMediaSessionState"] = "active",
+                    ["lastPeerMediaVideoTrackState"] = "active",
                 }));
         var mediaRegistry = new SessionMediaRegistryService();
         _ = await mediaRegistry.UpsertAsync(
@@ -285,6 +441,92 @@ public sealed class WebRtcRelayReadinessServiceTests
         Assert.Equal(1920, readiness.MediaVideo?.Width);
         Assert.Equal("opus", readiness.MediaAudio?.Codec);
         Assert.Equal(2, readiness.MediaAudio?.Channels);
+    }
+
+    /// <summary>
+    /// Returns media_runtime_not_running when media policy is required but runtime process is not running.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsMediaRuntimeNotRunning_WhenRuntimeFlagIsFalse()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-runtime-down"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = true,
+                    ["lastPeerMediaState"] = "Ready",
+                    ["lastPeerMediaRuntimeRunning"] = false,
+                    ["lastPeerMediaRuntimeState"] = "stopped",
+                    ["lastPeerMediaRuntimeFailureReason"] = "ffmpeg-exit-1",
+                    ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-runtime-down",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(readiness.Ready);
+        Assert.Equal("media_runtime_not_running", readiness.ReasonCode);
+        Assert.Contains("state=stopped", readiness.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns media_playback_url_invalid when readiness requires media and playback URL is malformed.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_ReturnsMediaPlaybackUrlInvalid_WhenPlaybackUrlIsMalformed()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-playback-invalid"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = true,
+                    ["lastPeerMediaState"] = "Ready",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "running",
+                    ["lastPeerMediaPlaybackUrl"] = "not-a-url",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-playback-invalid",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(readiness.Ready);
+        Assert.Equal("media_playback_url_invalid", readiness.ReasonCode);
     }
 
     /// <summary>

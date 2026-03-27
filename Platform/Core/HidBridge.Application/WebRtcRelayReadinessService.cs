@@ -83,6 +83,14 @@ public sealed class WebRtcRelayReadinessService
         var mediaSource = TryReadMetricString(health.Metrics, "lastPeerMediaSource");
         var mediaPlaybackUrl = TryReadMetricString(health.Metrics, "lastPeerMediaPlaybackUrl");
         var mediaStreamKind = TryReadMetricString(health.Metrics, "lastPeerMediaStreamKind");
+        var mediaRuntimeRunning = TryReadMetricBoolean(health.Metrics, "lastPeerMediaRuntimeRunning");
+        var mediaRuntimeState = TryReadMetricString(health.Metrics, "lastPeerMediaRuntimeState");
+        var mediaRuntimeFailureReason = TryReadMetricString(health.Metrics, "lastPeerMediaRuntimeFailureReason");
+        var mediaSessionEvidence = TryReadMetricBoolean(health.Metrics, "lastPeerMediaSessionEvidence");
+        var mediaRuntimeSessionEvidence = TryReadMetricBoolean(health.Metrics, "lastPeerMediaRuntimeSessionEvidence");
+        var mediaSessionState = TryReadMetricString(health.Metrics, "lastPeerMediaSessionState");
+        var mediaVideoTrackState = TryReadMetricString(health.Metrics, "lastPeerMediaVideoTrackState");
+        var mediaAudioTrackState = TryReadMetricString(health.Metrics, "lastPeerMediaAudioTrackState");
         var mediaVideo = BuildMediaVideoDescriptor(health.Metrics);
         var mediaAudio = BuildMediaAudioDescriptor(health.Metrics);
         if (_mediaRegistry is not null)
@@ -112,7 +120,16 @@ public sealed class WebRtcRelayReadinessService
             lastPeerFailureReason,
             mediaReady,
             mediaState,
-            mediaFailureReason);
+            mediaFailureReason,
+            mediaPlaybackUrl,
+            mediaRuntimeRunning,
+            mediaRuntimeState,
+            mediaRuntimeFailureReason,
+            mediaSessionEvidence,
+            mediaRuntimeSessionEvidence,
+            mediaSessionState,
+            mediaVideoTrackState,
+            mediaAudioTrackState);
         return new SessionTransportReadinessBody(
             SessionId: snapshot.SessionId,
             AgentId: snapshot.AgentId,
@@ -154,7 +171,16 @@ public sealed class WebRtcRelayReadinessService
         string? lastPeerFailureReason,
         bool? mediaReady,
         string? mediaState,
-        string? mediaFailureReason)
+        string? mediaFailureReason,
+        string? mediaPlaybackUrl,
+        bool? mediaRuntimeRunning,
+        string? mediaRuntimeState,
+        string? mediaRuntimeFailureReason,
+        bool? mediaSessionEvidence,
+        bool? mediaRuntimeSessionEvidence,
+        string? mediaSessionState,
+        string? mediaVideoTrackState,
+        string? mediaAudioTrackState)
     {
         if (sessionState is SessionState.Ended or SessionState.Failed or SessionState.Terminating)
         {
@@ -195,6 +221,27 @@ public sealed class WebRtcRelayReadinessService
                 return (false, "media_not_ready", $"Media capture path is not ready.{suffix}");
             }
 
+            if (mediaRuntimeRunning != true)
+            {
+                var runtimeState = string.IsNullOrWhiteSpace(mediaRuntimeState)
+                    ? "unknown"
+                    : mediaRuntimeState;
+                var suffix = string.IsNullOrWhiteSpace(mediaRuntimeFailureReason)
+                    ? string.Empty
+                    : $" Failure reason: {mediaRuntimeFailureReason}";
+                return (false, "media_runtime_not_running", $"Media runtime is not running (state={runtimeState}).{suffix}");
+            }
+
+            if (string.IsNullOrWhiteSpace(mediaPlaybackUrl))
+            {
+                return (false, "media_playback_url_missing", "Media playback URL is missing.");
+            }
+
+            if (!IsValidPlaybackUrl(mediaPlaybackUrl))
+            {
+                return (false, "media_playback_url_invalid", $"Media playback URL is invalid: '{mediaPlaybackUrl}'.");
+            }
+
             if (!string.IsNullOrWhiteSpace(mediaState)
                 && !_options.HealthyMediaStates.Contains(mediaState))
             {
@@ -203,9 +250,109 @@ public sealed class WebRtcRelayReadinessService
                     : $" Failure reason: {mediaFailureReason}";
                 return (false, "media_state_unhealthy", $"Media state is '{mediaState}', which is outside readiness policy.{suffix}");
             }
+
+            var hasSessionEvidenceSignals = mediaSessionEvidence.HasValue
+                || mediaRuntimeSessionEvidence.HasValue
+                || !string.IsNullOrWhiteSpace(mediaSessionState)
+                || !string.IsNullOrWhiteSpace(mediaVideoTrackState)
+                || !string.IsNullOrWhiteSpace(mediaAudioTrackState);
+            if (_options.RequireMediaSessionEvidence && hasSessionEvidenceSignals)
+            {
+                if (mediaSessionEvidence == false || mediaRuntimeSessionEvidence == false)
+                {
+                    return (false, "media_session_evidence_missing", BuildSessionEvidenceReason(
+                        "Media runtime session evidence is missing.",
+                        mediaSessionState,
+                        mediaVideoTrackState,
+                        mediaAudioTrackState,
+                        mediaFailureReason));
+                }
+
+                if (!string.IsNullOrWhiteSpace(mediaSessionState)
+                    && !_options.HealthyMediaSessionStates.Contains(mediaSessionState))
+                {
+                    return (false, "media_session_state_unhealthy", BuildSessionEvidenceReason(
+                        $"Media session state is '{mediaSessionState}', which is outside readiness policy.",
+                        mediaSessionState,
+                        mediaVideoTrackState,
+                        mediaAudioTrackState,
+                        mediaFailureReason));
+                }
+
+                if (!string.IsNullOrWhiteSpace(mediaVideoTrackState)
+                    && !_options.HealthyMediaVideoTrackStates.Contains(mediaVideoTrackState))
+                {
+                    return (false, "media_video_track_unhealthy", BuildSessionEvidenceReason(
+                        $"Media video track state is '{mediaVideoTrackState}', which is outside readiness policy.",
+                        mediaSessionState,
+                        mediaVideoTrackState,
+                        mediaAudioTrackState,
+                        mediaFailureReason));
+                }
+            }
+            else if (_options.RequireMediaSessionEvidence)
+            {
+                return (false, "media_session_evidence_missing", "Media session evidence is missing.");
+            }
         }
 
         return (true, "ready", "WebRTC relay route is ready.");
+    }
+
+    /// <summary>
+    /// Builds deterministic readiness reason enriched by media session/track-state evidence.
+    /// </summary>
+    private static string BuildSessionEvidenceReason(
+        string prefix,
+        string? mediaSessionState,
+        string? mediaVideoTrackState,
+        string? mediaAudioTrackState,
+        string? mediaFailureReason)
+    {
+        var details = new List<string>();
+        if (!string.IsNullOrWhiteSpace(mediaSessionState))
+        {
+            details.Add($"session={mediaSessionState}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(mediaVideoTrackState))
+        {
+            details.Add($"videoTrack={mediaVideoTrackState}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(mediaAudioTrackState))
+        {
+            details.Add($"audioTrack={mediaAudioTrackState}");
+        }
+
+        var detailsSuffix = details.Count == 0
+            ? string.Empty
+            : $" Evidence: {string.Join(", ", details)}.";
+        var failureSuffix = string.IsNullOrWhiteSpace(mediaFailureReason)
+            ? string.Empty
+            : $" Failure reason: {mediaFailureReason}";
+        return $"{prefix}{detailsSuffix}{failureSuffix}";
+    }
+
+    /// <summary>
+    /// Validates media playback URL shape accepted by UI playback paths.
+    /// </summary>
+    private static bool IsValidPlaybackUrl(string? playbackUrl)
+    {
+        if (string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(playbackUrl, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
