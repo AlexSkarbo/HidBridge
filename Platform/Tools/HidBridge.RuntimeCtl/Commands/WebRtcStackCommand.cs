@@ -242,6 +242,41 @@ internal static class WebRtcStackCommand
             return 1;
         }
 
+        var edgeAgentDll = Path.Combine(
+            repoRoot,
+            "Platform",
+            "Edge",
+            "HidBridge.EdgeProxy.Agent",
+            "bin",
+            "Debug",
+            "net10.0",
+            "HidBridge.EdgeProxy.Agent.dll");
+
+        var edgeAgentBuildExit = await RunProcessAsync(
+            "dotnet",
+            new[]
+            {
+                "build",
+                edgeAgentProject,
+                "-c",
+                "Debug",
+                "-v",
+                "minimal",
+                "-nologo",
+            },
+            repoRoot);
+        if (edgeAgentBuildExit != 0)
+        {
+            Console.Error.WriteLine($"Failed to build EdgeProxy.Agent (exit code {edgeAgentBuildExit}).");
+            return 1;
+        }
+
+        if (!File.Exists(edgeAgentDll))
+        {
+            Console.Error.WriteLine($"EdgeProxy.Agent build output not found: {edgeAgentDll}");
+            return 1;
+        }
+
         var adapterStart = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -250,11 +285,7 @@ internal static class WebRtcStackCommand
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        adapterStart.ArgumentList.Add("run");
-        adapterStart.ArgumentList.Add("--project");
-        adapterStart.ArgumentList.Add(edgeAgentProject);
-        adapterStart.ArgumentList.Add("-c");
-        adapterStart.ArgumentList.Add("Debug");
+        adapterStart.ArgumentList.Add(edgeAgentDll);
 
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_BASEURL"] = options.ApiBaseUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_SESSIONID"] = sessionId;
@@ -467,6 +498,33 @@ internal static class WebRtcStackCommand
         }
 
         return string.Join(Environment.NewLine, all.Skip(Math.Max(0, all.Length - lines)));
+    }
+
+    private static async Task<int> RunProcessAsync(
+        string fileName,
+        IEnumerable<string> args,
+        string workingDirectory)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+        };
+
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return 1;
+        }
+
+        await process.WaitForExitAsync();
+        return process.ExitCode;
     }
 
     private static string ConvertControlWsToHealthUrl(string controlWsUrl)
