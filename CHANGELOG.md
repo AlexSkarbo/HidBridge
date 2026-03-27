@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-27 (integration): cover ffmpeg-dcd runtime-evidence readiness fallback
+
+Summary:
+
+- Added hosted integration coverage for strict media readiness when probe-ready is `false` but ffmpeg-dcd runtime/session evidence is present.
+- Locks backend behavior for non-docker/agent-managed media backend scenarios where probe endpoints may come up after agent bootstrap.
+- Prevents regressions where strict policy would incorrectly return `media_not_ready`.
+
+Detailed notes:
+
+- `Platform/Tests/HidBridge.Platform.Tests/HostedWebRtcFullStackIntegrationTests.cs`
+
 ## 2026-03-27 (acceptance/runtimectl: support agent-managed media backend bootstrap)
 
 Summary:

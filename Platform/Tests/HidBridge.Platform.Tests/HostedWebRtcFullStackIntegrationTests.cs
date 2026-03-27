@@ -256,6 +256,50 @@ public sealed class HostedWebRtcFullStackIntegrationTests
         Assert.Equal("media_video_track_unhealthy", snapshot.ReasonCode);
     }
 
+    [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_FfmpegDcdRuntimeEvidence_AllowsReadyWhenProbeNotReady()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+                RequireMediaSessionEvidence = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = false,
+                ["lastPeerMediaState"] = "RuntimeNotReady",
+                ["lastPeerMediaRuntimeEngine"] = "ffmpeg-dcd",
+                ["lastPeerMediaRuntimeRunning"] = true,
+                ["lastPeerMediaRuntimeState"] = "Running",
+                ["lastPeerMediaSessionEvidence"] = true,
+                ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                ["lastPeerMediaSessionState"] = "active",
+                ["lastPeerMediaVideoTrackState"] = "active",
+                ["lastPeerMediaAudioTrackState"] = "active",
+                ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=cam21",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-runtime-evidence",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(snapshot.Ready);
+        Assert.Equal("ready", snapshot.ReasonCode);
+    }
+
     private static IHost BuildHost(
         bool throwLeaseConflict,
         bool seedSession = false,
