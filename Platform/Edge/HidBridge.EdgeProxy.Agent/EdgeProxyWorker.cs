@@ -764,7 +764,29 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         if (reasons.Count == 0)
         {
-            return probeSnapshot;
+            // For ffmpeg-dcd, runtime session evidence is the primary readiness source.
+            // Probe endpoints (for example :28092) are optional diagnostics and must not
+            // block readiness when runtime + tracks + playback URL are healthy.
+            var readyState = string.IsNullOrWhiteSpace(probeSnapshot.State)
+                ? "Ready"
+                : probeSnapshot.State;
+            if (string.Equals(readyState, "ProbeFailed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(readyState, "Unavailable", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(readyState, "Unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                readyState = "Ready";
+            }
+
+            return probeSnapshot with
+            {
+                IsReady = true,
+                State = readyState,
+                FailureReason = null,
+                PlaybackUrl = playbackUrl,
+                ReportedAtUtc = runtimeSnapshot.ReportedAtUtc > probeSnapshot.ReportedAtUtc
+                    ? runtimeSnapshot.ReportedAtUtc
+                    : probeSnapshot.ReportedAtUtc,
+            };
         }
 
         var failureReason = string.Join(" ", reasons);
