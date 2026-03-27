@@ -76,6 +76,7 @@ try
     if (smokeSummary.MediaGateRequired)
     {
         Console.WriteLine($"Media gate:    {(smokeSummary.MediaGatePass == true ? "PASS" : "FAIL")}");
+        Console.WriteLine($"Media tracks:  {(smokeSummary.MediaTrackEvidenceObserved == true ? smokeSummary.MediaTrackCountObserved : 0)}");
         if (!string.IsNullOrWhiteSpace(smokeSummary.MediaGateFailureReason))
         {
             Console.WriteLine($"Media reason:  {smokeSummary.MediaGateFailureReason}");
@@ -216,6 +217,8 @@ static async Task<SmokeSummary> RunSmokeAsync(
         MediaGatePass = mediaGate?.Pass,
         MediaReadyObserved = mediaGate?.ObservedMediaReady,
         MediaPlaybackUrlObserved = mediaGate?.ObservedPlaybackUrl,
+        MediaTrackEvidenceObserved = mediaGate?.ObservedTrackEvidence,
+        MediaTrackCountObserved = mediaGate?.ObservedTrackCount,
         MediaGateFailureReason = mediaGate?.FailureReason,
         MediaReadiness = mediaGate?.ReadinessSnapshot,
         MediaStreams = mediaGate?.StreamsSnapshot,
@@ -840,6 +843,8 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
     object? lastStreams = null;
     bool observedMediaReady = false;
     string? observedPlaybackUrl = null;
+    bool observedTrackEvidence = false;
+    var observedTrackCount = 0;
 
     for (var i = 0; i < attempts; i++)
     {
@@ -860,6 +865,11 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
                 }
 
                 observedPlaybackUrl ??= TryReadString(readinessRoot, "mediaPlaybackUrl");
+                if (TryReadTrackEvidence(readinessRoot, out var readinessTrackCount))
+                {
+                    observedTrackEvidence = true;
+                    observedTrackCount = Math.Max(observedTrackCount, readinessTrackCount);
+                }
             }
         }
         catch
@@ -887,6 +897,11 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
                         }
 
                         observedPlaybackUrl ??= TryReadString(item, "playbackUrl");
+                        if (TryReadTrackEvidence(item, out var streamTrackCount))
+                        {
+                            observedTrackEvidence = true;
+                            observedTrackCount = Math.Max(observedTrackCount, streamTrackCount);
+                        }
                     }
                 }
             }
@@ -896,14 +911,18 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
             // keep polling
         }
 
+        var requireTrackEvidence = options.RequireMediaReady;
         var mediaReadySatisfied = !options.RequireMediaReady || observedMediaReady;
         var playbackSatisfied = !options.RequireMediaPlaybackUrl || !string.IsNullOrWhiteSpace(observedPlaybackUrl);
-        if (mediaReadySatisfied && playbackSatisfied)
+        var trackSatisfied = !requireTrackEvidence || observedTrackEvidence;
+        if (mediaReadySatisfied && playbackSatisfied && trackSatisfied)
         {
             return new MediaGateResult(
                 Pass: true,
                 ObservedMediaReady: observedMediaReady,
                 ObservedPlaybackUrl: observedPlaybackUrl,
+                ObservedTrackEvidence: observedTrackEvidence,
+                ObservedTrackCount: observedTrackCount,
                 ReadinessSnapshot: lastReadiness,
                 StreamsSnapshot: lastStreams,
                 FailureReason: null);
@@ -923,15 +942,77 @@ static async Task<MediaGateResult> WaitMediaGateAsync(
         reasons.Add("mediaPlaybackUrl/playbackUrl is missing");
     }
 
+    if (options.RequireMediaReady && !observedTrackEvidence)
+    {
+        reasons.Add("media track evidence did not become available (tracks=0)");
+    }
+
     return new MediaGateResult(
         Pass: false,
         ObservedMediaReady: observedMediaReady,
         ObservedPlaybackUrl: observedPlaybackUrl,
+        ObservedTrackEvidence: observedTrackEvidence,
+        ObservedTrackCount: observedTrackCount,
         ReadinessSnapshot: lastReadiness,
         StreamsSnapshot: lastStreams,
         FailureReason: reasons.Count == 0
             ? "Media gate did not satisfy required conditions."
             : string.Join("; ", reasons));
+}
+
+static bool TryReadTrackEvidence(JsonElement element, out int trackCount)
+{
+    trackCount = 0;
+    var hasVideo = element.TryGetProperty("mediaVideo", out var mediaVideo) && mediaVideo.ValueKind == JsonValueKind.Object;
+    var hasAudio = element.TryGetProperty("mediaAudio", out var mediaAudio) && mediaAudio.ValueKind == JsonValueKind.Object;
+    var hasVideoInStream = element.TryGetProperty("video", out var streamVideo) && streamVideo.ValueKind == JsonValueKind.Object;
+    var hasAudioInStream = element.TryGetProperty("audio", out var streamAudio) && streamAudio.ValueKind == JsonValueKind.Object;
+
+    if (hasVideo || hasVideoInStream)
+    {
+        trackCount++;
+    }
+
+    if (hasAudio || hasAudioInStream)
+    {
+        trackCount++;
+    }
+
+    if (trackCount > 0)
+    {
+        return true;
+    }
+
+    if (!element.TryGetProperty("metrics", out var metrics) || metrics.ValueKind != JsonValueKind.Object)
+    {
+        return false;
+    }
+
+    var videoState = TryReadString(metrics, "lastPeerMediaVideoTrackState");
+    var audioState = TryReadString(metrics, "lastPeerMediaAudioTrackState");
+    if (IsHealthyTrackState(videoState))
+    {
+        trackCount++;
+    }
+
+    if (IsHealthyTrackState(audioState))
+    {
+        trackCount++;
+    }
+
+    return trackCount > 0;
+}
+
+static bool IsHealthyTrackState(string? state)
+{
+    if (string.IsNullOrWhiteSpace(state))
+    {
+        return false;
+    }
+
+    return string.Equals(state, "active", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(state, "active_untyped", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(state, "negotiated", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool? TryReadBoolean(JsonElement element, string propertyName)
@@ -1332,6 +1413,8 @@ internal sealed class SmokeSummary
     public bool? MediaGatePass { get; set; }
     public bool? MediaReadyObserved { get; set; }
     public string? MediaPlaybackUrlObserved { get; set; }
+    public bool? MediaTrackEvidenceObserved { get; set; }
+    public int? MediaTrackCountObserved { get; set; }
     public string? MediaGateFailureReason { get; set; }
     public object? MediaReadiness { get; set; }
     public object? MediaStreams { get; set; }
@@ -1342,6 +1425,8 @@ internal sealed record MediaGateResult(
     bool Pass,
     bool ObservedMediaReady,
     string? ObservedPlaybackUrl,
+    bool ObservedTrackEvidence,
+    int ObservedTrackCount,
     object? ReadinessSnapshot,
     object? StreamsSnapshot,
     string? FailureReason);
