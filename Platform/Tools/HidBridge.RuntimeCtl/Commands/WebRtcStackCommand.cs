@@ -76,6 +76,7 @@ internal static class WebRtcStackCommand
         var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
         var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
         var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
+        var configuredMediaEngine = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAENGINE") ?? string.Empty).Trim();
         var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
         var configuredMediaBackendAutoStart = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART") ?? string.Empty).Trim();
         var configuredMediaBackendExecutablePath = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH") ?? string.Empty).Trim();
@@ -85,11 +86,18 @@ internal static class WebRtcStackCommand
         var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
         var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
         var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
+        var useFfmpegDcdMediaEngine = string.Equals(configuredMediaEngine, "ffmpeg-dcd", StringComparison.OrdinalIgnoreCase);
+        var effectiveMediaBackendAutoStart = !string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart)
+            ? configuredMediaBackendAutoStart
+            : (useFfmpegDcdMediaEngine ? "true" : string.Empty);
+        var effectiveMediaBackendExecutablePath = !string.IsNullOrWhiteSpace(configuredMediaBackendExecutablePath)
+            ? configuredMediaBackendExecutablePath
+            : (TryParseOptionalBool(effectiveMediaBackendAutoStart) ? "ffmpeg" : string.Empty);
 
         if (!ValidateMediaBackendAutoStartPreflight(
                 repoRoot,
-                configuredMediaBackendAutoStart,
-                configuredMediaBackendExecutablePath,
+                effectiveMediaBackendAutoStart,
+                effectiveMediaBackendExecutablePath,
                 configuredMediaBackendWorkingDirectory,
                 out var resolvedMediaBackendExecutablePath,
                 out var mediaBackendPreflightError))
@@ -277,7 +285,7 @@ internal static class WebRtcStackCommand
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = effectivePlaybackUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = configuredMediaBackendAutoStart;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = effectiveMediaBackendAutoStart;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH"] = resolvedMediaBackendExecutablePath;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE"] = configuredMediaBackendArgumentsTemplate;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY"] = configuredMediaBackendWorkingDirectory;
@@ -336,7 +344,7 @@ internal static class WebRtcStackCommand
             mediaWhipUrl = configuredWhipUrl,
             mediaWhepUrl = configuredWhepUrl,
             mediaPlaybackUrl = effectivePlaybackUrl,
-            mediaBackendAutoStart = TryParseOptionalBool(configuredMediaBackendAutoStart),
+            mediaBackendAutoStart = TryParseOptionalBool(effectiveMediaBackendAutoStart),
             mediaBackendExecutablePath = resolvedMediaBackendExecutablePath,
             runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
             sessionId,
@@ -377,7 +385,7 @@ internal static class WebRtcStackCommand
         Console.WriteLine($"Media WHEP:     {(string.IsNullOrWhiteSpace(configuredWhepUrl) ? "<not configured>" : configuredWhepUrl)}");
         Console.WriteLine($"Media WHIP:     {(string.IsNullOrWhiteSpace(configuredWhipUrl) ? "<not configured>" : configuredWhipUrl)}");
         Console.WriteLine($"Media playback: {(string.IsNullOrWhiteSpace(effectivePlaybackUrl) ? "<not configured>" : effectivePlaybackUrl)}");
-        Console.WriteLine($"Media backend auto-start: {(string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart) ? "false" : configuredMediaBackendAutoStart)}");
+        Console.WriteLine($"Media backend auto-start: {(string.IsNullOrWhiteSpace(effectiveMediaBackendAutoStart) ? "false" : effectiveMediaBackendAutoStart)}");
         if (!string.IsNullOrWhiteSpace(resolvedMediaBackendExecutablePath))
         {
             Console.WriteLine($"Media backend executable: {resolvedMediaBackendExecutablePath}");

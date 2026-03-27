@@ -319,7 +319,8 @@ internal static class WebRtcAcceptanceCommand
         public bool RequireMediaPlaybackUrl { get; set; }
         public int MediaHealthAttempts { get; set; } = 20;
         public int MediaHealthDelayMs { get; set; } = 500;
-        public bool SkipMediaEndpointPreflight { get; set; }
+        public bool SkipMediaEndpointPreflight { get; set; } =
+            ParseBoolEnv("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART");
         public int MediaEndpointPreflightTimeoutMs { get; set; } = 1500;
         public string UartPort { get; set; } = "COM6";
         public int UartBaud { get; set; } = 3000000;
@@ -496,6 +497,12 @@ internal static class WebRtcAcceptanceCommand
                 default:
                     return false;
             }
+        }
+
+        private static bool ParseBoolEnv(string envName)
+        {
+            var value = Environment.GetEnvironmentVariable(envName);
+            return TryParseBool(value, out var parsed) && parsed;
         }
     }
 }
