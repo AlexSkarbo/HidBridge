@@ -92,7 +92,175 @@ public sealed class HostedWebRtcFullStackIntegrationTests
         Assert.Equal("owner:other", conflict.CurrentControllerParticipantId);
     }
 
-    private static IHost BuildHost(bool throwLeaseConflict, bool seedSession = false)
+    [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_RunningRuntimeWithPlaybackAndTracks_IsReady()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = true,
+                ["lastPeerMediaState"] = "Ready",
+                ["lastPeerMediaRuntimeRunning"] = true,
+                ["lastPeerMediaRuntimeState"] = "running",
+                ["lastPeerMediaSessionEvidence"] = true,
+                ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                ["lastPeerMediaSessionState"] = "active",
+                ["lastPeerMediaVideoTrackState"] = "active",
+                ["lastPeerMediaAudioTrackState"] = "active",
+                ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+                ["lastPeerMediaStreamId"] = "edge-main",
+                ["lastPeerMediaSource"] = "edge-capture",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-media-ready",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(snapshot.Ready);
+        Assert.Equal("ready", snapshot.ReasonCode);
+    }
+
+    [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_RuntimeDown_ReturnsRuntimeNotRunning()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = true,
+                ["lastPeerMediaState"] = "Ready",
+                ["lastPeerMediaRuntimeRunning"] = false,
+                ["lastPeerMediaRuntimeState"] = "degraded",
+                ["lastPeerMediaRuntimeFailureReason"] = "ffmpeg exited",
+                ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-runtime-down",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(snapshot.Ready);
+        Assert.Equal("media_runtime_not_running", snapshot.ReasonCode);
+    }
+
+    [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_MissingPlaybackUrl_ReturnsPlaybackUrlMissing()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = true,
+                ["lastPeerMediaState"] = "Ready",
+                ["lastPeerMediaRuntimeRunning"] = true,
+                ["lastPeerMediaRuntimeState"] = "running",
+                ["lastPeerMediaSessionEvidence"] = true,
+                ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                ["lastPeerMediaSessionState"] = "active",
+                ["lastPeerMediaVideoTrackState"] = "active",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-no-playback",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(snapshot.Ready);
+        Assert.Equal("media_playback_url_missing", snapshot.ReasonCode);
+    }
+
+    [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_TrackAttachTimeout_ReturnsVideoTrackUnhealthy()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = true,
+                ["lastPeerMediaState"] = "Ready",
+                ["lastPeerMediaRuntimeRunning"] = true,
+                ["lastPeerMediaRuntimeState"] = "running",
+                ["lastPeerMediaSessionEvidence"] = true,
+                ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                ["lastPeerMediaSessionState"] = "active",
+                ["lastPeerMediaVideoTrackState"] = "missing",
+                ["lastPeerMediaAudioTrackState"] = "active",
+                ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-track-timeout",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(snapshot.Ready);
+        Assert.Equal("media_video_track_unhealthy", snapshot.ReasonCode);
+    }
+
+    private static IHost BuildHost(
+        bool throwLeaseConflict,
+        bool seedSession = false,
+        WebRtcRelayReadinessOptions? readinessOptions = null,
+        IReadOnlyDictionary<string, object?>? healthMetrics = null)
     {
         var sessionStore = new InMemorySessionStore();
         if (seedSession)
@@ -115,12 +283,16 @@ public sealed class HostedWebRtcFullStackIntegrationTests
                         Capabilities: []),
                 ]));
                 services.AddSingleton<ISessionOrchestrator>(new HostedSessionOrchestrator(sessionStore, throwLeaseConflict));
-                services.AddSingleton<IRealtimeTransportFactory>(new HostedTransportFactory());
+                services.AddSingleton<IRealtimeTransportFactory>(new HostedTransportFactory(healthMetrics));
                 services.AddSingleton<RecordingEventWriter>();
                 services.AddSingleton<IEventWriter>(sp => sp.GetRequiredService<RecordingEventWriter>());
                 services.AddSingleton<WebRtcCommandRelayService>();
                 services.AddSingleton<SessionMediaRegistryService>();
-                services.AddSingleton<WebRtcRelayReadinessService>();
+                services.AddSingleton(sp => new WebRtcRelayReadinessService(
+                    sp.GetRequiredService<ISessionStore>(),
+                    sp.GetRequiredService<IRealtimeTransportFactory>(),
+                    sp.GetRequiredService<SessionMediaRegistryService>(),
+                    readinessOptions));
                 services.AddSingleton<EnsureSessionControlLeaseUseCase>();
             })
             .Build();
@@ -211,9 +383,9 @@ public sealed class HostedWebRtcFullStackIntegrationTests
             => Task.FromResult<IConnector?>(null);
     }
 
-    private sealed class HostedTransportFactory : IRealtimeTransportFactory
+    private sealed class HostedTransportFactory(IReadOnlyDictionary<string, object?>? metrics) : IRealtimeTransportFactory
     {
-        private readonly HostedTransport _transport = new();
+        private readonly HostedTransport _transport = new(metrics);
 
         public RealtimeTransportProvider DefaultProvider => RealtimeTransportProvider.WebRtcDataChannel;
 
@@ -225,7 +397,7 @@ public sealed class HostedWebRtcFullStackIntegrationTests
                 Source: "session");
     }
 
-    private sealed class HostedTransport : IRealtimeTransport
+    private sealed class HostedTransport(IReadOnlyDictionary<string, object?>? metrics) : IRealtimeTransport
     {
         public RealtimeTransportProvider Provider => RealtimeTransportProvider.WebRtcDataChannel;
 
@@ -246,16 +418,27 @@ public sealed class HostedWebRtcFullStackIntegrationTests
             => Task.CompletedTask;
 
         public Task<RealtimeTransportHealth> GetHealthAsync(RealtimeTransportRouteContext route, CancellationToken cancellationToken)
-            => Task.FromResult(new RealtimeTransportHealth(
+        {
+            var defaultMetrics = new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastRelayAckAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
+            };
+            if (metrics is not null)
+            {
+                foreach (var (key, value) in metrics)
+                {
+                    defaultMetrics[key] = value;
+                }
+            }
+
+            return Task.FromResult(new RealtimeTransportHealth(
                 Provider: Provider,
                 IsConnected: true,
                 Status: "Connected",
-                Metrics: new Dictionary<string, object?>
-                {
-                    ["onlinePeerCount"] = 1,
-                    ["lastPeerState"] = "Connected",
-                    ["lastRelayAckAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
-                }));
+                Metrics: defaultMetrics));
+        }
     }
 
     private sealed class HostedSessionOrchestrator(InMemorySessionStore sessionStore, bool throwLeaseConflict) : ISessionOrchestrator

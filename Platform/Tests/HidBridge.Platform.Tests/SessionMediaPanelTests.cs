@@ -91,7 +91,7 @@ public sealed class SessionMediaPanelTests : Bunit.TestContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Contains("Playback error: WHEP negotiation failed (500).", cut.Markup, StringComparison.Ordinal);
+            Assert.Contains("Not playable reason: WHEP negotiation failed (500).", cut.Markup, StringComparison.Ordinal);
             Assert.Contains("Playback state: Stopped", cut.Markup, StringComparison.Ordinal);
         });
     }
