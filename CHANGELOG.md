@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-03-27 (ci workflow: prebuilt RuntimeCtl binary, no dotnet run in gates)
+
+Summary:
+
+- Updated CI workflow `.github/workflows/platform-runtimectl-ci.yml` to publish `HidBridge.RuntimeCtl` once (`dotnet publish -c Release`) and run gates via the published DLL.
+- Replaced workflow lane invocations from `dotnet run --project ...` to:
+  - `dotnet $env:RUNTIMECTL_DLL --platform-root Platform ...`
+- Kept native-only guard to prevent `run.ps1` invocation in CI workflow.
+- Reduced workflow coupling to per-step compile/restore behavior for improved gate stability.
+
+Detailed notes:
+
+- `.github/workflows/platform-runtimectl-ci.yml`
+
+## 2026-03-27 (runtimectl: remove legacy task routing, direct command-only parsing)
+
+Summary:
+
+- Removed legacy `task <name>` top-level routing in `HidBridge.RuntimeCtl`.
+- RuntimeCtl now accepts only direct native command syntax:
+  - `runtimectl <command> [args...]`
+- Kept `Platform/run.ps1` as compatibility shim, but it now translates `-Task` directly into native RuntimeCtl command invocation (without `task` bridge).
+- Updated routing regression tests to assert:
+  - legacy `task` syntax is rejected with a clear error,
+  - command aliases still route correctly.
+- Updated README examples away from `task ...` usage to direct native command invocation.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.RuntimeCtl/Program.cs`
+- `Platform/run.ps1`
+- `Platform/Tests/HidBridge.Platform.Tests/RuntimeCtlAppRoutingTests.cs`
+- `Platform/README.md`
+
 ## 2026-03-26 (webrtc-acceptance timeout/cleanup hardening in native RuntimeCtl)
 
 Summary:

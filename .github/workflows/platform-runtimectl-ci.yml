@@ -33,6 +33,13 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Publish RuntimeCtl (Release)
+        shell: pwsh
+        run: |
+          dotnet publish Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -c Release -nologo -o Platform/.artifacts/runtimectl
+          $dll = (Resolve-Path "Platform/.artifacts/runtimectl/HidBridge.RuntimeCtl.dll").Path
+          "RUNTIMECTL_DLL=$dll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Guard - no PowerShell compatibility launcher in workflow
         shell: pwsh
         run: |
@@ -44,17 +51,17 @@ jobs:
       - name: Runtime up
         shell: pwsh
         run: |
-          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action up -Build
+          dotnet $env:RUNTIMECTL_DLL --platform-root Platform platform-runtime -Action up -Build
 
       - name: CI Local (must-pass media gate)
         shell: pwsh
         run: |
-          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
+          dotnet $env:RUNTIMECTL_DLL --platform-root Platform ci-local -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
 
       - name: Full (must-pass media gate)
         shell: pwsh
         run: |
-          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
+          dotnet $env:RUNTIMECTL_DLL --platform-root Platform full -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
 
       - name: Upload runtime artifacts
         if: always()
@@ -70,4 +77,4 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action down -RemoveOrphans
+          dotnet $env:RUNTIMECTL_DLL --platform-root Platform platform-runtime -Action down -RemoveOrphans
