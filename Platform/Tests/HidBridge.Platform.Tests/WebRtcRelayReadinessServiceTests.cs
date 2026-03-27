@@ -530,6 +530,55 @@ public sealed class WebRtcRelayReadinessServiceTests
     }
 
     /// <summary>
+    /// Allows ffmpeg-dcd readiness to pass from runtime+session evidence even when probe-ready flag is false.
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_AllowsFfmpegDcdRuntimeEvidence_WhenProbeReadyFlagIsFalse()
+    {
+        var sessionStore = new InMemorySessionStore();
+        await sessionStore.UpsertAsync(CreateSession("session-media-runtime-evidence"), TestContext.Current.CancellationToken);
+        var transportFactory = new StubTransportFactory(
+            provider: RealtimeTransportProvider.WebRtcDataChannel,
+            source: "request",
+            health: new RealtimeTransportHealth(
+                RealtimeTransportProvider.WebRtcDataChannel,
+                IsConnected: true,
+                Status: "Connected",
+                Metrics: new Dictionary<string, object?>
+                {
+                    ["onlinePeerCount"] = 1,
+                    ["lastPeerState"] = "Connected",
+                    ["lastPeerMediaReady"] = false,
+                    ["lastPeerMediaState"] = "RuntimeNotReady",
+                    ["lastPeerMediaRuntimeEngine"] = "ffmpeg-dcd",
+                    ["lastPeerMediaRuntimeRunning"] = true,
+                    ["lastPeerMediaRuntimeState"] = "Running",
+                    ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=cam21",
+                    ["lastPeerMediaSessionEvidence"] = true,
+                    ["lastPeerMediaRuntimeSessionEvidence"] = true,
+                    ["lastPeerMediaSessionState"] = "active",
+                    ["lastPeerMediaVideoTrackState"] = "active",
+                    ["lastPeerMediaAudioTrackState"] = "active",
+                }));
+        var service = new WebRtcRelayReadinessService(
+            sessionStore,
+            transportFactory,
+            new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+                RequireMediaSessionEvidence = true,
+            });
+
+        var readiness = await service.EvaluateAsync(
+            "session-media-runtime-evidence",
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(readiness.Ready);
+        Assert.Equal("ready", readiness.ReasonCode);
+    }
+
+    /// <summary>
     /// Creates a session snapshot used by readiness tests.
     /// </summary>
     private static SessionSnapshot CreateSession(string sessionId)

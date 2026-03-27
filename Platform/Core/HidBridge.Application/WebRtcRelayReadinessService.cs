@@ -86,6 +86,7 @@ public sealed class WebRtcRelayReadinessService
         var mediaRuntimeRunning = TryReadMetricBoolean(health.Metrics, "lastPeerMediaRuntimeRunning");
         var mediaRuntimeState = TryReadMetricString(health.Metrics, "lastPeerMediaRuntimeState");
         var mediaRuntimeFailureReason = TryReadMetricString(health.Metrics, "lastPeerMediaRuntimeFailureReason");
+        var mediaRuntimeEngine = TryReadMetricString(health.Metrics, "lastPeerMediaRuntimeEngine");
         var mediaSessionEvidence = TryReadMetricBoolean(health.Metrics, "lastPeerMediaSessionEvidence");
         var mediaRuntimeSessionEvidence = TryReadMetricBoolean(health.Metrics, "lastPeerMediaRuntimeSessionEvidence");
         var mediaSessionState = TryReadMetricString(health.Metrics, "lastPeerMediaSessionState");
@@ -125,6 +126,7 @@ public sealed class WebRtcRelayReadinessService
             mediaRuntimeRunning,
             mediaRuntimeState,
             mediaRuntimeFailureReason,
+            mediaRuntimeEngine,
             mediaSessionEvidence,
             mediaRuntimeSessionEvidence,
             mediaSessionState,
@@ -176,6 +178,7 @@ public sealed class WebRtcRelayReadinessService
         bool? mediaRuntimeRunning,
         string? mediaRuntimeState,
         string? mediaRuntimeFailureReason,
+        string? mediaRuntimeEngine,
         bool? mediaSessionEvidence,
         bool? mediaRuntimeSessionEvidence,
         string? mediaSessionState,
@@ -213,7 +216,30 @@ public sealed class WebRtcRelayReadinessService
 
         if (_options.RequireMediaReady)
         {
-            if (mediaReady != true)
+            var runtimeEngineUsesEvidenceGate =
+                string.Equals(mediaRuntimeEngine, "ffmpeg-dcd", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mediaRuntimeEngine, "FfmpegDataChannelDotNet", StringComparison.OrdinalIgnoreCase);
+
+            var mediaReadinessSatisfied = mediaReady == true;
+            var usingRuntimeEvidenceFallback = false;
+            if (!mediaReadinessSatisfied && runtimeEngineUsesEvidenceGate)
+            {
+                // ffmpeg-dcd readiness uses runtime+track evidence as canonical source.
+                // Probe URLs are diagnostics and may be absent in non-docker installs.
+                var hasRuntimeEvidenceSignals = mediaSessionEvidence.HasValue
+                    || mediaRuntimeSessionEvidence.HasValue
+                    || !string.IsNullOrWhiteSpace(mediaSessionState)
+                    || !string.IsNullOrWhiteSpace(mediaVideoTrackState)
+                    || !string.IsNullOrWhiteSpace(mediaAudioTrackState);
+                var runtimeEvidenceSatisfied = mediaRuntimeRunning == true
+                    && !string.IsNullOrWhiteSpace(mediaPlaybackUrl)
+                    && IsValidPlaybackUrl(mediaPlaybackUrl)
+                    && (!_options.RequireMediaSessionEvidence || hasRuntimeEvidenceSignals);
+                mediaReadinessSatisfied = runtimeEvidenceSatisfied;
+                usingRuntimeEvidenceFallback = runtimeEvidenceSatisfied;
+            }
+
+            if (!mediaReadinessSatisfied)
             {
                 var suffix = string.IsNullOrWhiteSpace(mediaFailureReason)
                     ? string.Empty
@@ -242,7 +268,8 @@ public sealed class WebRtcRelayReadinessService
                 return (false, "media_playback_url_invalid", $"Media playback URL is invalid: '{mediaPlaybackUrl}'.");
             }
 
-            if (!string.IsNullOrWhiteSpace(mediaState)
+            if (!usingRuntimeEvidenceFallback
+                && !string.IsNullOrWhiteSpace(mediaState)
                 && !_options.HealthyMediaStates.Contains(mediaState))
             {
                 var suffix = string.IsNullOrWhiteSpace(mediaFailureReason)

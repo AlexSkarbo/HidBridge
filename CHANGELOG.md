@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-03-27 (readiness fix: ffmpeg-dcd runtime evidence accepted without probe-ready flag)
+
+Summary:
+
+- Updated strict readiness policy to allow `MediaEngine=ffmpeg-dcd` to pass with runtime evidence even when probe-ready flag is `false`.
+- Kept strict runtime gates: readiness still requires runtime running, valid playback URL, and session/track evidence when configured.
+- Avoided false-negative `media_state_unhealthy` when readiness is satisfied by runtime evidence fallback.
+- Added regression test to lock this behavior.
+
+Detailed notes:
+
+- `Platform/Core/HidBridge.Application/WebRtcRelayReadinessService.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/WebRtcRelayReadinessServiceTests.cs`
+
 ## 2026-03-27 (pr-b completion: production DCD+FFmpeg switch policy + remove legacy PowerShell shim)
 
 Summary:
