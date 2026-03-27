@@ -44,6 +44,7 @@ try
             runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
             source = "dotnet-acceptance-runner",
         });
+        ApplyStackMediaOverrides(options, result.Stack.Value);
         result.StackSummaryPath = stackSummaryPath;
     }
     else
@@ -57,6 +58,7 @@ try
             runtimeBootstrapSkipped = true,
             source = "dotnet-smoke-runner",
         });
+        ApplyStackMediaOverrides(options, result.Stack.Value);
     }
 
     Console.WriteLine("\n=== WebRTC Edge Agent Smoke ===");
@@ -319,6 +321,64 @@ static void AddIfSet(ICollection<(string Label, string Url)> checks, string labe
     }
 
     checks.Add((label, value));
+}
+
+static void ApplyStackMediaOverrides(AcceptanceRunnerOptions options, JsonElement stack)
+{
+    if (stack.ValueKind != JsonValueKind.Object)
+    {
+        return;
+    }
+
+    if (stack.TryGetProperty("mediaHealthUrl", out var mediaHealthUrl)
+        && mediaHealthUrl.ValueKind == JsonValueKind.String
+        && !string.IsNullOrWhiteSpace(mediaHealthUrl.GetString()))
+    {
+        options.MediaHealthUrl = mediaHealthUrl.GetString()!;
+    }
+
+    if (stack.TryGetProperty("mediaWhipUrl", out var mediaWhipUrl)
+        && mediaWhipUrl.ValueKind == JsonValueKind.String
+        && !string.IsNullOrWhiteSpace(mediaWhipUrl.GetString()))
+    {
+        options.MediaWhipUrl = mediaWhipUrl.GetString()!;
+    }
+
+    if (stack.TryGetProperty("mediaWhepUrl", out var mediaWhepUrl)
+        && mediaWhepUrl.ValueKind == JsonValueKind.String
+        && !string.IsNullOrWhiteSpace(mediaWhepUrl.GetString()))
+    {
+        options.MediaWhepUrl = mediaWhepUrl.GetString()!;
+    }
+
+    if (stack.TryGetProperty("mediaPlaybackUrl", out var mediaPlaybackUrl)
+        && mediaPlaybackUrl.ValueKind == JsonValueKind.String
+        && !string.IsNullOrWhiteSpace(mediaPlaybackUrl.GetString()))
+    {
+        options.MediaPlaybackUrl = mediaPlaybackUrl.GetString()!;
+    }
+
+    if (!stack.TryGetProperty("mediaBackendAutoStart", out var mediaBackendAutoStart))
+    {
+        return;
+    }
+
+    switch (mediaBackendAutoStart.ValueKind)
+    {
+        case JsonValueKind.True:
+            options.MediaBackendAutoStart = true;
+            break;
+        case JsonValueKind.False:
+            options.MediaBackendAutoStart = false;
+            break;
+        case JsonValueKind.String:
+            if (bool.TryParse(mediaBackendAutoStart.GetString(), out var parsed))
+            {
+                options.MediaBackendAutoStart = parsed;
+            }
+
+            break;
+    }
 }
 
 static SessionRuntime ResolveSessionRuntime(AcceptanceRunnerOptions options, string platformRoot)
@@ -1357,10 +1417,10 @@ internal sealed class AcceptanceRunnerOptions
     public bool AllowLegacyControlWs { get; private set; }
     public string ControlHealthUrl { get; private set; } = "http://127.0.0.1:28092/health";
     public string ControlWsUrl { get; private set; } = string.Empty;
-    public string MediaHealthUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty;
-    public string MediaWhipUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty;
-    public string MediaWhepUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty;
-    public string MediaPlaybackUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty;
+    public string MediaHealthUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty;
+    public string MediaWhipUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty;
+    public string MediaWhepUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty;
+    public string MediaPlaybackUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty;
     public string KeycloakBaseUrl { get; private set; } = "http://host.docker.internal:18096";
     public string RealmName { get; private set; } = "hidbridge-dev";
     public string TokenClientId { get; private set; } = "controlplane-smoke";
@@ -1403,7 +1463,7 @@ internal sealed class AcceptanceRunnerOptions
     public int MediaHealthDelayMs { get; private set; } = 500;
     public bool SkipMediaEndpointPreflight { get; private set; }
     public int MediaEndpointPreflightTimeoutMs { get; private set; } = 1500;
-    public bool MediaBackendAutoStart { get; private set; } =
+    public bool MediaBackendAutoStart { get; set; } =
         ParseBoolEnv("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART");
     public bool SkipControlLeaseRequest { get; private set; }
     public int LeaseSeconds { get; private set; } = 120;
