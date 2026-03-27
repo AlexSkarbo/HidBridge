@@ -1113,6 +1113,8 @@ public sealed class EdgeProxyWorker : BackgroundService
                     _ => pair.Value.ToString() ?? string.Empty,
                 };
             }
+
+            ProjectMediaBackendRuntimeMetrics(metadata, runtimeSnapshot.Metrics);
         }
 
         return metadata;
@@ -1303,9 +1305,62 @@ public sealed class EdgeProxyWorker : BackgroundService
             {
                 merged[$"mediaRuntimeMetric.{pair.Key}"] = pair.Value;
             }
+
+            ProjectMediaBackendRuntimeMetrics(merged, runtimeSnapshot.Metrics);
         }
 
         return merged;
+    }
+
+    /// <summary>
+    /// Projects deterministic media-backend runtime fields from runtime metrics into top-level metadata.
+    /// </summary>
+    private static void ProjectMediaBackendRuntimeMetrics(
+        IDictionary<string, string> metadata,
+        IReadOnlyDictionary<string, object?> runtimeMetrics)
+        => ProjectMediaBackendRuntimeMetricsCore((key, value) => metadata[key] = value, runtimeMetrics);
+
+    private static void ProjectMediaBackendRuntimeMetrics(
+        IDictionary<string, object?> metadata,
+        IReadOnlyDictionary<string, object?> runtimeMetrics)
+        => ProjectMediaBackendRuntimeMetricsCore((key, value) => metadata[key] = value, runtimeMetrics);
+
+    private static void ProjectMediaBackendRuntimeMetricsCore(
+        Action<string, string> setMetric,
+        IReadOnlyDictionary<string, object?> runtimeMetrics)
+    {
+        static string? ReadMetric(IReadOnlyDictionary<string, object?> metrics, string key)
+            => metrics.TryGetValue(key, out var value) && value is not null
+                ? value switch
+                {
+                    string text => text,
+                    IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+                    _ => value.ToString(),
+                }
+                : null;
+
+        var mapping = new (string RuntimeMetricKey, string MetadataKey)[]
+        {
+            ("mediaBackendAutoStart", "mediaBackendAutoStart"),
+            ("mediaBackendRunning", "mediaBackendRunning"),
+            ("mediaBackendState", "mediaBackendState"),
+            ("mediaBackendReportedAtUtc", "mediaBackendReportedAtUtc"),
+            ("mediaBackendPid", "mediaBackendPid"),
+            ("mediaBackendUptimeSec", "mediaBackendUptimeSec"),
+            ("mediaBackendLastLine", "mediaBackendLastLine"),
+            ("mediaBackendExecutable", "mediaBackendExecutable"),
+            ("mediaBackendWorkingDirectory", "mediaBackendWorkingDirectory"),
+            ("mediaBackendProbeEndpoints", "mediaBackendProbeEndpoints"),
+        };
+
+        foreach (var (runtimeMetricKey, metadataKey) in mapping)
+        {
+            var value = ReadMetric(runtimeMetrics, runtimeMetricKey);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                setMetric(metadataKey, value);
+            }
+        }
     }
 
     /// <summary>

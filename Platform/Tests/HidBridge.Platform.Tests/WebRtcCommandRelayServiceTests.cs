@@ -50,6 +50,16 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Null(metrics["lastPeerMediaVideoTrackState"]);
         Assert.Null(metrics["lastPeerMediaAudioTrackState"]);
         Assert.Null(metrics["lastPeerMediaSessionObservedAtUtc"]);
+        Assert.Null(metrics["lastPeerMediaBackendAutoStart"]);
+        Assert.Null(metrics["lastPeerMediaBackendRunning"]);
+        Assert.Null(metrics["lastPeerMediaBackendState"]);
+        Assert.Null(metrics["lastPeerMediaBackendReportedAtUtc"]);
+        Assert.Null(metrics["lastPeerMediaBackendPid"]);
+        Assert.Null(metrics["lastPeerMediaBackendUptimeSec"]);
+        Assert.Null(metrics["lastPeerMediaBackendLastLine"]);
+        Assert.Null(metrics["lastPeerMediaBackendExecutable"]);
+        Assert.Null(metrics["lastPeerMediaBackendWorkingDirectory"]);
+        Assert.Null(metrics["lastPeerMediaBackendProbeEndpoints"]);
     }
 
     [Fact]
@@ -114,6 +124,16 @@ public sealed class WebRtcCommandRelayServiceTests
                 ["mediaVideoTrackState"] = "active",
                 ["mediaAudioTrackState"] = "active",
                 ["mediaSessionObservedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
+                ["mediaBackendAutoStart"] = "true",
+                ["mediaBackendRunning"] = "true",
+                ["mediaBackendState"] = "running",
+                ["mediaBackendReportedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
+                ["mediaBackendPid"] = "45400",
+                ["mediaBackendUptimeSec"] = "22.5",
+                ["mediaBackendLastLine"] = "backend-started",
+                ["mediaBackendExecutable"] = "srs.exe",
+                ["mediaBackendWorkingDirectory"] = "C:/media",
+                ["mediaBackendProbeEndpoints"] = "http://127.0.0.1:19851, http://127.0.0.1:28092",
             },
             cancellationToken);
 
@@ -142,9 +162,19 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Equal("active", metrics["lastPeerMediaSessionState"]?.ToString());
         Assert.Equal("active", metrics["lastPeerMediaVideoTrackState"]?.ToString());
         Assert.Equal("active", metrics["lastPeerMediaAudioTrackState"]?.ToString());
+        Assert.Equal("true", metrics["lastPeerMediaBackendAutoStart"]?.ToString());
+        Assert.Equal("true", metrics["lastPeerMediaBackendRunning"]?.ToString());
+        Assert.Equal("running", metrics["lastPeerMediaBackendState"]?.ToString());
+        Assert.Equal("45400", metrics["lastPeerMediaBackendPid"]?.ToString());
+        Assert.Equal("22.5", metrics["lastPeerMediaBackendUptimeSec"]?.ToString());
+        Assert.Equal("backend-started", metrics["lastPeerMediaBackendLastLine"]?.ToString());
+        Assert.Equal("srs.exe", metrics["lastPeerMediaBackendExecutable"]?.ToString());
+        Assert.Equal("C:/media", metrics["lastPeerMediaBackendWorkingDirectory"]?.ToString());
+        Assert.Equal("http://127.0.0.1:19851, http://127.0.0.1:28092", metrics["lastPeerMediaBackendProbeEndpoints"]?.ToString());
         Assert.NotNull(metrics["lastPeerSeenAtUtc"]);
         Assert.NotNull(metrics["lastPeerMediaReportedAtUtc"]);
         Assert.NotNull(metrics["lastPeerMediaSessionObservedAtUtc"]);
+        Assert.NotNull(metrics["lastPeerMediaBackendReportedAtUtc"]);
     }
 
     [Fact]

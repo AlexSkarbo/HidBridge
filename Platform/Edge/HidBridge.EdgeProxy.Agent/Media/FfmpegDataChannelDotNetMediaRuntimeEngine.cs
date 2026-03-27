@@ -375,13 +375,14 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 metrics["mediaSessionState"] = sessionState;
                 metrics["mediaVideoTrackState"] = videoTrackState;
                 metrics["mediaAudioTrackState"] = audioTrackState;
+                var mergedMetrics = BuildRuntimeMetricsUnsafe(metrics, state, failureReason);
 
                 return Task.FromResult(_snapshot with
                 {
                     State = state,
                     ReportedAtUtc = DateTimeOffset.UtcNow,
                     FailureReason = failureReason,
-                    Metrics = metrics,
+                    Metrics = mergedMetrics,
                     SessionState = sessionState,
                     VideoTrackState = videoTrackState,
                     AudioTrackState = audioTrackState,
@@ -1113,17 +1114,115 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 _sessionObservedAtUtc = null;
             }
 
+            var mergedMetrics = BuildRuntimeMetricsUnsafe(metrics, state, failureReason);
+
             _snapshot = new EdgeMediaRuntimeSnapshot(
                 IsRunning: isRunning,
                 State: state,
                 ReportedAtUtc: DateTimeOffset.UtcNow,
                 FailureReason: failureReason,
-                Metrics: metrics,
+                Metrics: mergedMetrics,
                 SessionState: _sessionState,
                 VideoTrackState: _videoTrackState,
                 AudioTrackState: _audioTrackState,
                 SessionObservedAtUtc: _sessionObservedAtUtc);
         }
+    }
+
+    /// <summary>
+    /// Builds deterministic runtime metrics with explicit media-backend health projection.
+    /// </summary>
+    private IReadOnlyDictionary<string, object?> BuildRuntimeMetricsUnsafe(
+        IReadOnlyDictionary<string, object?>? metrics,
+        string runtimeState,
+        string? failureReason)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var merged = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (metrics is not null)
+        {
+            foreach (var pair in metrics)
+            {
+                merged[pair.Key] = pair.Value;
+            }
+        }
+
+        if (!merged.ContainsKey("engine"))
+        {
+            merged["engine"] = "ffmpeg-dcd";
+        }
+
+        merged["mediaBackendAutoStart"] = _options.MediaBackendAutoStart;
+        merged["mediaBackendRunning"] = _mediaBackendProcess is { HasExited: false };
+        merged["mediaBackendState"] = ResolveMediaBackendStateUnsafe(runtimeState, failureReason);
+        merged["mediaBackendReportedAtUtc"] = nowUtc;
+
+        if (_mediaBackendProcess is { HasExited: false } backendProcess)
+        {
+            merged["mediaBackendPid"] = backendProcess.Id;
+        }
+
+        if (_mediaBackendStartedAtUtc.HasValue)
+        {
+            merged["mediaBackendUptimeSec"] = Math.Max(0, (nowUtc - _mediaBackendStartedAtUtc.Value).TotalSeconds);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_lastMediaBackendLine))
+        {
+            merged["mediaBackendLastLine"] = _lastMediaBackendLine;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.MediaBackendExecutablePath))
+        {
+            merged["mediaBackendExecutable"] = _options.MediaBackendExecutablePath;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.MediaBackendWorkingDirectory))
+        {
+            merged["mediaBackendWorkingDirectory"] = _options.MediaBackendWorkingDirectory;
+        }
+
+        if (_options.MediaBackendAutoStart)
+        {
+            var endpoints = BuildMediaBackendProbeEndpoints();
+            if (endpoints.Count > 0)
+            {
+                merged["mediaBackendProbeEndpoints"] = string.Join(", ", endpoints.Select(static x => x.ToString()));
+            }
+        }
+
+        return merged;
+    }
+
+    private string ResolveMediaBackendStateUnsafe(string runtimeState, string? failureReason)
+    {
+        if (!_options.MediaBackendAutoStart)
+        {
+            return "disabled";
+        }
+
+        if (_mediaBackendProcess is { HasExited: false })
+        {
+            return "running";
+        }
+
+        if (string.Equals(runtimeState, "MediaBackendStartFailed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "start-failed";
+        }
+
+        if (string.Equals(runtimeState, "MediaBackendUnavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "unreachable";
+        }
+
+        if (!string.IsNullOrWhiteSpace(failureReason)
+            && failureReason.Contains("Media backend exited unexpectedly", StringComparison.OrdinalIgnoreCase))
+        {
+            return "exited";
+        }
+
+        return "stopped";
     }
 
     private static bool HasSessionEvidenceState(string sessionState)

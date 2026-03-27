@@ -1478,27 +1478,27 @@ internal sealed class AcceptanceRunnerOptions
         index++;
         return args[index];
     }
-}
 
-static bool ParseBoolEnv(string name)
-{
-    var raw = Environment.GetEnvironmentVariable(name);
-    if (string.IsNullOrWhiteSpace(raw))
+    private static bool ParseBoolEnv(string name)
     {
+        var raw = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (bool.TryParse(raw, out var parsed))
+        {
+            return parsed;
+        }
+
+        if (int.TryParse(raw, out var numeric))
+        {
+            return numeric != 0;
+        }
+
         return false;
     }
-
-    if (bool.TryParse(raw, out var parsed))
-    {
-        return parsed;
-    }
-
-    if (int.TryParse(raw, out var numeric))
-    {
-        return numeric != 0;
-    }
-
-    return false;
 }
 
 internal sealed class AcceptanceSummary

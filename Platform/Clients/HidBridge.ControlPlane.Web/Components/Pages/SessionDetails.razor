@@ -201,6 +201,12 @@
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaReportedAt"]</div><div class="hid-detail-value">@GetTransportMediaReportedAt(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaVideo"]</div><div class="hid-detail-value">@GetTransportMediaVideo(_transportReadiness, _transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaAudio"]</div><div class="hid-detail-value">@GetTransportMediaAudio(_transportReadiness, _transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaBackendAutoStart"]</div><div class="hid-detail-value">@GetTransportBackendAutoStart(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaBackendRunning"]</div><div class="hid-detail-value">@GetTransportBackendRunning(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaBackendState"]</div><div class="hid-detail-value">@GetTransportBackendState(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaBackendPid"]</div><div class="hid-detail-value">@GetTransportMetricValue(_transportHealth, "lastPeerMediaBackendPid")</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaBackendUptime"]</div><div class="hid-detail-value">@GetTransportBackendUptime(_transportHealth)</div></div>
+                            <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportMediaBackendReportedAt"]</div><div class="hid-detail-value">@GetTransportBackendReportedAt(_transportHealth)</div></div>
                             <div class="hid-detail-card"><div class="hid-detail-label">@T["TransportRoundtripMs"]</div><div class="hid-detail-value">@GetAckRoundtripMs(_transportHealth?.LastCommandAck)</div></div>
                         </div>
 
@@ -212,6 +218,11 @@
                         @if (!string.Equals(GetTransportMediaFailureReason(_transportReadiness, _transportHealth), "—", StringComparison.Ordinal))
                         {
                             <div class="hid-meta-note">@T["TransportMediaFailureReason"]: @GetTransportMediaFailureReason(_transportReadiness, _transportHealth)</div>
+                        }
+
+                        @if (!string.Equals(GetTransportMetricValue(_transportHealth, "lastPeerMediaBackendLastLine"), "—", StringComparison.Ordinal))
+                        {
+                            <div class="hid-meta-note">@T["TransportMediaBackendLastLine"]: @GetTransportMetricValue(_transportHealth, "lastPeerMediaBackendLastLine")</div>
                         }
 
                         @if (_transportHealth?.LastPeerConsecutiveFailures.HasValue == true || _transportHealth?.LastPeerReconnectBackoffMs.HasValue == true)
@@ -2163,6 +2174,78 @@
         return descriptor is null
             ? "—"
             : FormatMediaAudioDescriptor(descriptor);
+    }
+
+    /// <summary>
+    /// Resolves media-backend auto-start flag from transport metrics.
+    /// </summary>
+    private string GetTransportBackendAutoStart(SessionTransportHealthViewModel? health)
+        => FormatBooleanMetricLabel(GetTransportMetricValue(health, "lastPeerMediaBackendAutoStart"));
+
+    /// <summary>
+    /// Resolves media-backend running flag from transport metrics.
+    /// </summary>
+    private string GetTransportBackendRunning(SessionTransportHealthViewModel? health)
+        => FormatBooleanMetricLabel(GetTransportMetricValue(health, "lastPeerMediaBackendRunning"));
+
+    /// <summary>
+    /// Resolves media-backend lifecycle state from transport metrics.
+    /// </summary>
+    private static string GetTransportBackendState(SessionTransportHealthViewModel? health)
+        => GetTransportMetricValue(health, "lastPeerMediaBackendState");
+
+    /// <summary>
+    /// Formats media-backend reported timestamp from transport metrics.
+    /// </summary>
+    private string GetTransportBackendReportedAt(SessionTransportHealthViewModel? health)
+    {
+        var raw = GetTransportMetricValue(health, "lastPeerMediaBackendReportedAtUtc");
+        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+        {
+            return FormatTime(parsed);
+        }
+
+        return raw;
+    }
+
+    /// <summary>
+    /// Formats media-backend uptime from transport metrics.
+    /// </summary>
+    private static string GetTransportBackendUptime(SessionTransportHealthViewModel? health)
+    {
+        var raw = GetTransportMetricValue(health, "lastPeerMediaBackendUptimeSec");
+        var seconds = ParseDoubleMetric(raw);
+        if (seconds is null)
+        {
+            return raw;
+        }
+
+        return $"{seconds.Value.ToString("0.##", CultureInfo.InvariantCulture)}s";
+    }
+
+    private string FormatBooleanMetricLabel(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || string.Equals(raw, "—", StringComparison.Ordinal))
+        {
+            return "—";
+        }
+
+        if (string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return T["Yes"];
+        }
+
+        if (string.Equals(raw, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            return T["No"];
+        }
+
+        if (bool.TryParse(raw, out var parsed))
+        {
+            return parsed ? T["Yes"] : T["No"];
+        }
+
+        return raw;
     }
 
     /// <summary>
