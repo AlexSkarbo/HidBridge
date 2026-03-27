@@ -276,7 +276,11 @@
                                    PlaybackUrl="@GetTransportMediaPlayback(_transportReadiness, _transportHealth)"
                                    MediaReady="@(_transportReadiness?.MediaReady ?? _transportHealth?.MediaReady)"
                                    MediaState="@GetTransportMediaState(_transportReadiness, _transportHealth)"
-                                   MediaStreamId="@GetTransportMediaStreamId(_transportReadiness, _transportHealth)" />
+                                   MediaStreamId="@GetTransportMediaStreamId(_transportReadiness, _transportHealth)"
+                                   BackendReady="@(_transportReadiness?.Ready)"
+                                   BackendReasonCode="@_transportReadiness?.ReasonCode"
+                                   BackendReason="@_transportReadiness?.Reason"
+                                   BackendMediaFailureReason="@GetTransportMediaFailureReason(_transportReadiness, _transportHealth)" />
 
                 <div>
                     <div class="hid-panel-toolbar">

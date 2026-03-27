@@ -55,9 +55,18 @@
         <span>@T["MediaLastEvent"]: @GetLastEventLabel()</span>
     </div>
 
-    @if (!string.IsNullOrWhiteSpace(_error))
+    @{
+        var notPlayableReason = GetNotPlayableReason();
+    }
+
+    @if (!string.IsNullOrWhiteSpace(notPlayableReason))
     {
-        <div class="hid-alert hid-alert--warning">@T["MediaPlaybackError"]: @_error</div>
+        <div class="hid-alert hid-alert--warning">@T["MediaNotPlayableReason"]: @notPlayableReason</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error) && !string.Equals(_error, notPlayableReason, StringComparison.OrdinalIgnoreCase))
+    {
+        <div class="hid-meta-note">@T["MediaPlaybackError"]: @_error</div>
     }
 
     <video @ref="_videoElement" controls autoplay playsinline class="hid-media-player"></video>
@@ -83,6 +92,18 @@
 
     [Parameter]
     public string? MediaStreamId { get; set; }
+
+    [Parameter]
+    public bool? BackendReady { get; set; }
+
+    [Parameter]
+    public string? BackendReasonCode { get; set; }
+
+    [Parameter]
+    public string? BackendReason { get; set; }
+
+    [Parameter]
+    public string? BackendMediaFailureReason { get; set; }
 
     [Parameter]
     public bool AutoStartWhenReady { get; set; } = true;
@@ -410,6 +431,85 @@
 
         return $"{_lastEvent} ({_lastEventAtUtc.Value.LocalDateTime:HH:mm:ss})";
     }
+
+    private string? GetNotPlayableReason()
+    {
+        var backendReason = GetBackendNotPlayableReason();
+        if (!string.IsNullOrWhiteSpace(backendReason))
+        {
+            return backendReason;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_error))
+        {
+            return _error;
+        }
+
+        if (string.IsNullOrWhiteSpace(PlaybackUrl))
+        {
+            return T["MediaPlaybackNotAvailable"];
+        }
+
+        return null;
+    }
+
+    private string? GetBackendNotPlayableReason()
+    {
+        if (BackendReady != false)
+        {
+            return null;
+        }
+
+        var readinessReason = NormalizeDiagnosticInput(BackendReason);
+        var readinessCode = NormalizeDiagnosticInput(BackendReasonCode);
+        if (!string.IsNullOrWhiteSpace(readinessReason) && !string.IsNullOrWhiteSpace(readinessCode))
+        {
+            return $"{readinessCode}: {readinessReason}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(readinessReason))
+        {
+            return readinessReason;
+        }
+
+        if (!string.IsNullOrWhiteSpace(readinessCode))
+        {
+            return readinessCode;
+        }
+
+        var mediaFailure = NormalizeDiagnosticInput(BackendMediaFailureReason);
+        if (!string.IsNullOrWhiteSpace(mediaFailure))
+        {
+            return mediaFailure;
+        }
+
+        var state = NormalizeDiagnosticInput(MediaState);
+        if (!string.IsNullOrWhiteSpace(state) && !IsHealthyMediaState(state))
+        {
+            return $"media_state_unhealthy: {state}";
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeDiagnosticInput(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim();
+        return string.Equals(normalized, "—", StringComparison.Ordinal)
+            ? null
+            : normalized;
+    }
+
+    private static bool IsHealthyMediaState(string state)
+        => string.Equals(state, "Ready", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "Streaming", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "Connected", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "Healthy", StringComparison.OrdinalIgnoreCase);
 
     private static string? NormalizeUrl(string? value)
     {
