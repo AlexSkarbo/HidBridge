@@ -235,6 +235,7 @@ public sealed class WebRtcEdgeAgentIntegrationTests
             TransientFailureThresholdForOffline = transientFailureThresholdForOffline,
             RequireMediaReady = true,
             AssumeMediaReadyWithoutProbe = true,
+            MediaEngine = "none",
         };
         options.Normalize();
 
