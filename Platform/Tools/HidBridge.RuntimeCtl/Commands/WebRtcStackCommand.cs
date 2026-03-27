@@ -72,6 +72,32 @@ internal static class WebRtcStackCommand
         var logRoot = Path.Combine(platformRoot, ".logs", "webrtc-stack", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(logRoot);
 
+        var configuredWhepUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty).Trim();
+        var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
+        var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
+        var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
+        var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
+        var configuredMediaBackendAutoStart = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART") ?? string.Empty).Trim();
+        var configuredMediaBackendExecutablePath = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH") ?? string.Empty).Trim();
+        var configuredMediaBackendArgumentsTemplate = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE") ?? string.Empty).Trim();
+        var configuredMediaBackendWorkingDirectory = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY") ?? string.Empty).Trim();
+        var configuredMediaBackendStartupTimeoutSec = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC") ?? string.Empty).Trim();
+        var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
+        var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
+        var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
+
+        if (!ValidateMediaBackendAutoStartPreflight(
+                repoRoot,
+                configuredMediaBackendAutoStart,
+                configuredMediaBackendExecutablePath,
+                configuredMediaBackendWorkingDirectory,
+                out var resolvedMediaBackendExecutablePath,
+                out var mediaBackendPreflightError))
+        {
+            Console.Error.WriteLine($"webrtc-stack media backend preflight failed: {mediaBackendPreflightError}");
+            return 1;
+        }
+
         var sessionId = $"room-webrtc-peer-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
         var peerId = string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase)
             ? "peer-local-uart-edge"
@@ -245,19 +271,6 @@ internal static class WebRtcStackCommand
         // does not flap during short command retries.
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_HEARTBEATINTERVALSEC"] = "3";
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_POLLINTERVALMS"] = "100";
-        var configuredWhepUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty).Trim();
-        var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
-        var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
-        var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
-        var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
-        var configuredMediaBackendAutoStart = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART") ?? string.Empty).Trim();
-        var configuredMediaBackendExecutablePath = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH") ?? string.Empty).Trim();
-        var configuredMediaBackendArgumentsTemplate = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE") ?? string.Empty).Trim();
-        var configuredMediaBackendWorkingDirectory = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY") ?? string.Empty).Trim();
-        var configuredMediaBackendStartupTimeoutSec = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC") ?? string.Empty).Trim();
-        var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
-        var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
-        var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
         var effectivePlaybackUrl = !string.IsNullOrWhiteSpace(configuredWhepUrl)
             ? configuredWhepUrl
             : configuredPlaybackUrl;
@@ -265,7 +278,7 @@ internal static class WebRtcStackCommand
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = configuredMediaBackendAutoStart;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH"] = configuredMediaBackendExecutablePath;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH"] = resolvedMediaBackendExecutablePath;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE"] = configuredMediaBackendArgumentsTemplate;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY"] = configuredMediaBackendWorkingDirectory;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC"] = configuredMediaBackendStartupTimeoutSec;
@@ -359,9 +372,9 @@ internal static class WebRtcStackCommand
         Console.WriteLine($"Media WHIP:     {(string.IsNullOrWhiteSpace(configuredWhipUrl) ? "<not configured>" : configuredWhipUrl)}");
         Console.WriteLine($"Media playback: {(string.IsNullOrWhiteSpace(effectivePlaybackUrl) ? "<not configured>" : effectivePlaybackUrl)}");
         Console.WriteLine($"Media backend auto-start: {(string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart) ? "false" : configuredMediaBackendAutoStart)}");
-        if (!string.IsNullOrWhiteSpace(configuredMediaBackendExecutablePath))
+        if (!string.IsNullOrWhiteSpace(resolvedMediaBackendExecutablePath))
         {
-            Console.WriteLine($"Media backend executable: {configuredMediaBackendExecutablePath}");
+            Console.WriteLine($"Media backend executable: {resolvedMediaBackendExecutablePath}");
         }
         Console.WriteLine($"Session env:    {sessionEnvPath}");
         Console.WriteLine($"Summary JSON:   {stackSummaryPath}");
@@ -469,6 +482,171 @@ internal static class WebRtcStackCommand
         }
 
         return false;
+    }
+
+    private static bool ValidateMediaBackendAutoStartPreflight(
+        string repoRoot,
+        string autoStartRaw,
+        string executablePathRaw,
+        string workingDirectoryRaw,
+        out string resolvedExecutablePath,
+        out string? error)
+    {
+        resolvedExecutablePath = executablePathRaw;
+        error = null;
+
+        if (!TryParseOptionalBool(autoStartRaw))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(executablePathRaw))
+        {
+            error = "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART=true requires HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH.";
+            return false;
+        }
+
+        var resolvedWorkingDirectory = ResolveWorkingDirectory(repoRoot, workingDirectoryRaw);
+        if (!string.IsNullOrWhiteSpace(resolvedWorkingDirectory) && !Directory.Exists(resolvedWorkingDirectory))
+        {
+            error = $"Configured media backend working directory does not exist: {resolvedWorkingDirectory}";
+            return false;
+        }
+
+        if (!TryResolveExecutablePath(executablePathRaw, resolvedWorkingDirectory, out resolvedExecutablePath))
+        {
+            var scope = string.IsNullOrWhiteSpace(resolvedWorkingDirectory)
+                ? "PATH/current directory"
+                : $"'{resolvedWorkingDirectory}' or PATH";
+            error = $"Media backend executable '{executablePathRaw}' was not found in {scope}.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string? ResolveWorkingDirectory(string repoRoot, string configuredWorkingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(configuredWorkingDirectory))
+        {
+            return null;
+        }
+
+        if (Path.IsPathRooted(configuredWorkingDirectory))
+        {
+            return Path.GetFullPath(configuredWorkingDirectory);
+        }
+
+        return Path.GetFullPath(Path.Combine(repoRoot, configuredWorkingDirectory));
+    }
+
+    private static bool TryResolveExecutablePath(
+        string executablePath,
+        string? workingDirectory,
+        out string resolvedPath)
+    {
+        resolvedPath = executablePath;
+        var candidate = executablePath.Trim();
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        var treatAsPath = candidate.Contains(Path.DirectorySeparatorChar)
+            || candidate.Contains(Path.AltDirectorySeparatorChar)
+            || Path.IsPathRooted(candidate);
+
+        if (treatAsPath)
+        {
+            var pathCandidate = Path.IsPathRooted(candidate)
+                ? candidate
+                : Path.Combine(workingDirectory ?? Directory.GetCurrentDirectory(), candidate);
+            pathCandidate = Path.GetFullPath(pathCandidate);
+            if (File.Exists(pathCandidate))
+            {
+                resolvedPath = pathCandidate;
+                return true;
+            }
+
+            if (OperatingSystem.IsWindows() && !pathCandidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var exeCandidate = $"{pathCandidate}.exe";
+                if (File.Exists(exeCandidate))
+                {
+                    resolvedPath = exeCandidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            var localCandidate = Path.Combine(workingDirectory, candidate);
+            if (File.Exists(localCandidate))
+            {
+                resolvedPath = localCandidate;
+                return true;
+            }
+
+            if (OperatingSystem.IsWindows() && !localCandidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var localExeCandidate = $"{localCandidate}.exe";
+                if (File.Exists(localExeCandidate))
+                {
+                    resolvedPath = localExeCandidate;
+                    return true;
+                }
+            }
+        }
+
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (var entry in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var fullCandidate = Path.Combine(entry, candidate);
+            if (File.Exists(fullCandidate))
+            {
+                resolvedPath = fullCandidate;
+                return true;
+            }
+
+            if (OperatingSystem.IsWindows() && !fullCandidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var fullExeCandidate = $"{fullCandidate}.exe";
+                if (File.Exists(fullExeCandidate))
+                {
+                    resolvedPath = fullExeCandidate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryParseOptionalBool(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "1":
+            case "true":
+            case "yes":
+            case "on":
+                return true;
+            case "0":
+            case "false":
+            case "no":
+            case "off":
+                return false;
+            default:
+                return false;
+        }
     }
 
     private static IEnumerable<string?> ReadLegacyEnvCandidates(string name)
