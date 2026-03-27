@@ -14,3 +14,8 @@ Key highlights:
 - Run: ./string_manager_harness – harness prints PASS/FAIL for cached flow, extra fetch, idx>2 fallback, timeout, cache-eviction.
 
 For state-machine notes see control_flow.md. For roadmap/details check TODO_4.4.1.md.
+
+## Runtime Evidence
+
+- PR-B.2 media E2E evidence (RuntimeCtl gates + acceptance artifacts):
+  - `Docs/Reports/PR-B2_Media_E2E_Evidence_2026-03-27.md`

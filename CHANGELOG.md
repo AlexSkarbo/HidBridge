@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-27 (pr-b.2 formalization: media e2e evidence artifact)
+
+Summary:
+
+- Added formal PR-B.2 evidence report with concrete RuntimeCtl gate logs and acceptance result JSON snapshots.
+- Documented media gate/pass, playback URL presence, media-ready latency observations, and reconnect evidence coverage.
+- Indexed report in `Docs/Reports/README.md`.
+
+Detailed notes:
+
+- `Docs/Reports/PR-B2_Media_E2E_Evidence_2026-03-27.md`
+- `Docs/Reports/README.md`
+
 ## 2026-03-27 (ci stabilization: optional 3x full loop in RuntimeCtl workflow)
 
 Summary:
