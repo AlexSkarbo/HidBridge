@@ -2,6 +2,11 @@ name: platform-runtimectl-ci
 
 on:
   workflow_dispatch:
+    inputs:
+      run_full_stability_loop:
+        description: "Run additional 3x full -SkipRealmSync stability loop"
+        required: false
+        default: "false"
   push:
     branches:
       - main
@@ -62,6 +67,15 @@ jobs:
         shell: pwsh
         run: |
           dotnet $env:RUNTIMECTL_DLL --platform-root Platform full -StopOnFailure -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
+
+      - name: Full Stability Loop (3x, no realm sync)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full_stability_loop == 'true' }}
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Host "=== Full stability iteration $i/3 ==="
+            dotnet $env:RUNTIMECTL_DLL --platform-root Platform full -StopOnFailure -SkipRealmSync -IncludeWebRtcMediaE2EGate true -SkipWebRtcMediaE2EGate false
+          }
 
       - name: Upload runtime artifacts
         if: always()

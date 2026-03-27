@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-27 (ci stabilization: optional 3x full loop in RuntimeCtl workflow)
+
+Summary:
+
+- Added workflow-dispatch input `run_full_stability_loop` to `.github/workflows/platform-runtimectl-ci.yml`.
+- When enabled, CI runs an additional stabilization gate:
+  - `full -StopOnFailure -SkipRealmSync` executed `3x` sequentially.
+- Purpose: catch flaky regressions in post-sync steady-state without repeating realm reset each iteration.
+
+Detailed notes:
+
+- `.github/workflows/platform-runtimectl-ci.yml`
+
 ## 2026-03-27 (ci workflow: prebuilt RuntimeCtl binary, no dotnet run in gates)
 
 Summary:
