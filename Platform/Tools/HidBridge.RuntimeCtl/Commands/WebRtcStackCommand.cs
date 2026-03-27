@@ -316,14 +316,14 @@ internal static class WebRtcStackCommand
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = effectivePlaybackUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = effectiveMediaBackendAutoStart;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH"] = resolvedMediaBackendExecutablePath;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE"] = configuredMediaBackendArgumentsTemplate;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY"] = configuredMediaBackendWorkingDirectory;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC"] = configuredMediaBackendStartupTimeoutSec;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS"] = configuredMediaBackendProbeDelayMs;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS"] = configuredMediaBackendProbeTimeoutMs;
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS"] = configuredMediaBackendStopTimeoutMs;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = TryParseOptionalBool(effectiveMediaBackendAutoStart) ? "true" : "false";
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH", resolvedMediaBackendExecutablePath);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE", configuredMediaBackendArgumentsTemplate);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY", configuredMediaBackendWorkingDirectory);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC", configuredMediaBackendStartupTimeoutSec);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS", configuredMediaBackendProbeDelayMs);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS", configuredMediaBackendProbeTimeoutMs);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS", configuredMediaBackendStopTimeoutMs);
         if (string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase))
         {
             // Preserve explicit media-health and assume-ready settings from caller.
@@ -525,6 +525,16 @@ internal static class WebRtcStackCommand
 
         await process.WaitForExitAsync();
         return process.ExitCode;
+    }
+
+    private static void SetEnvironmentIfNotEmpty(ProcessStartInfo startInfo, string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        startInfo.Environment[key] = value;
     }
 
     private static string ConvertControlWsToHealthUrl(string controlWsUrl)
