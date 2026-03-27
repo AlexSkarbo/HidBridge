@@ -1,4 +1,8 @@
 using HidBridge.EdgeProxy.Agent.Media;
+using HidBridge.EdgeProxy.Agent;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Net;
+using System.Net.Sockets;
 using Xunit;
 
 namespace HidBridge.Platform.Tests;
@@ -82,5 +86,150 @@ public sealed class FfmpegDataChannelDotNetMediaRuntimeEngineTests
         Assert.True(detected);
         Assert.False(hasVideo);
         Assert.True(hasAudio);
+    }
+
+    [Fact]
+    public async Task StartAsync_AutoStartEnabled_NoBackendExecutable_ReportsMediaBackendNotConfigured()
+    {
+        var port = GetFreeTcpPort();
+        var options = CreateBaseOptions();
+        options.MediaBackendAutoStart = true;
+        options.MediaBackendExecutablePath = string.Empty;
+        options.MediaWhipUrl = $"http://127.0.0.1:{port}/rtc/v1/whip/?app=live&stream=test";
+        options.MediaWhepUrl = $"http://127.0.0.1:{port}/rtc/v1/whep/?app=live&stream=test";
+        options.Normalize();
+
+        var engine = new FfmpegDataChannelDotNetMediaRuntimeEngine(options, NullLogger.Instance);
+        await engine.StartAsync(CreateContext(), CancellationToken.None);
+        var snapshot = await engine.GetSnapshotAsync(CancellationToken.None);
+
+        Assert.Equal("MediaBackendNotConfigured", snapshot.State);
+        Assert.Contains("Media backend is unreachable", snapshot.FailureReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartAsync_AutoStartEnabled_BackendExitsDuringStartup_ReportsStartFailed()
+    {
+        var port = GetFreeTcpPort();
+        var options = CreateBaseOptions();
+        options.MediaBackendAutoStart = true;
+        options.MediaBackendExecutablePath = "dotnet";
+        options.MediaBackendArgumentsTemplate = "--version";
+        options.MediaBackendStartupTimeoutSec = 3;
+        options.MediaBackendProbeDelayMs = 100;
+        options.MediaBackendProbeTimeoutMs = 200;
+        options.MediaWhipUrl = $"http://127.0.0.1:{port}/rtc/v1/whip/?app=live&stream=test";
+        options.MediaWhepUrl = $"http://127.0.0.1:{port}/rtc/v1/whep/?app=live&stream=test";
+        options.Normalize();
+
+        var engine = new FfmpegDataChannelDotNetMediaRuntimeEngine(options, NullLogger.Instance);
+        await engine.StartAsync(CreateContext(), CancellationToken.None);
+        var snapshot = await engine.GetSnapshotAsync(CancellationToken.None);
+
+        Assert.Equal("MediaBackendStartFailed", snapshot.State);
+        Assert.Contains("exited during startup", snapshot.FailureReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartAsync_AutoStartEnabled_BackendUnreachableUntilTimeout_ReportsUnavailable()
+    {
+        if (!TryGetLongRunningCommand(out var executable, out var args))
+        {
+            return;
+        }
+
+        var port = GetFreeTcpPort();
+        var options = CreateBaseOptions();
+        options.MediaBackendAutoStart = true;
+        options.MediaBackendExecutablePath = executable;
+        options.MediaBackendArgumentsTemplate = args;
+        options.MediaBackendStartupTimeoutSec = 1;
+        options.MediaBackendProbeDelayMs = 100;
+        options.MediaBackendProbeTimeoutMs = 200;
+        options.MediaWhipUrl = $"http://127.0.0.1:{port}/rtc/v1/whip/?app=live&stream=test";
+        options.MediaWhepUrl = $"http://127.0.0.1:{port}/rtc/v1/whep/?app=live&stream=test";
+        options.Normalize();
+
+        var engine = new FfmpegDataChannelDotNetMediaRuntimeEngine(options, NullLogger.Instance);
+        await engine.StartAsync(CreateContext(), CancellationToken.None);
+        var snapshot = await engine.GetSnapshotAsync(CancellationToken.None);
+
+        Assert.Equal("MediaBackendUnavailable", snapshot.State);
+        Assert.Contains("unreachable", snapshot.FailureReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartAsync_AutoStartEnabled_WhenEndpointAlreadyReachable_DoesNotBlockFfmpegStart()
+    {
+        if (!TryGetLongRunningCommand(out var executable, out var args))
+        {
+            return;
+        }
+
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var options = CreateBaseOptions();
+        options.MediaBackendAutoStart = true;
+        options.MediaBackendExecutablePath = "definitely-not-used-when-endpoint-is-reachable";
+        options.MediaBackendArgumentsTemplate = "--ignored";
+        options.FfmpegExecutablePath = executable;
+        options.FfmpegArgumentsTemplate = args;
+        options.MediaWhipUrl = $"http://127.0.0.1:{port}/rtc/v1/whip/?app=live&stream=test";
+        options.MediaWhepUrl = $"http://127.0.0.1:{port}/rtc/v1/whep/?app=live&stream=test";
+        options.Normalize();
+
+        var engine = new FfmpegDataChannelDotNetMediaRuntimeEngine(options, NullLogger.Instance);
+        await engine.StartAsync(CreateContext(), CancellationToken.None);
+        var snapshot = await engine.GetSnapshotAsync(CancellationToken.None);
+
+        Assert.True(snapshot.IsRunning);
+        Assert.Contains(snapshot.State, new[] { "Publishing", "Connecting", "Running", "Degraded" });
+
+        await engine.StopAsync(CancellationToken.None);
+    }
+
+    private static EdgeProxyOptions CreateBaseOptions()
+        => new()
+        {
+            BaseUrl = "http://127.0.0.1:18093",
+            SessionId = "session-1",
+            PeerId = "peer-1",
+            EndpointId = "endpoint-1",
+            CommandExecutor = "uart",
+            UartPort = "COM6",
+            MediaEngine = "ffmpeg-dcd",
+            FfmpegExecutablePath = "ffmpeg",
+            FfmpegArgumentsTemplate = "-re -f lavfi -i testsrc2=size=320x240:rate=30 -f null -",
+        };
+
+    private static EdgeMediaRuntimeContext CreateContext()
+        => new(
+            SessionId: "session-1",
+            PeerId: "peer-1",
+            EndpointId: "endpoint-1",
+            StreamId: "edge-main",
+            Source: "edge-capture");
+
+    private static int GetFreeTcpPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private static bool TryGetLongRunningCommand(out string executable, out string args)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            executable = "ping";
+            args = "-t 127.0.0.1";
+            return true;
+        }
+
+        executable = "ping";
+        args = "127.0.0.1";
+        return true;
     }
 }
