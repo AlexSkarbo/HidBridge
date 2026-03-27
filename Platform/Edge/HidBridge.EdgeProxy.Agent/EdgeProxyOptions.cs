@@ -96,6 +96,11 @@ public sealed class EdgeProxyOptions
     /// </summary>
     public int FfmpegStopTimeoutMs { get; set; } = 3000;
 
+    /// <summary>
+    /// Marks runtime as degraded when ffmpeg progress telemetry is stale for longer than this threshold.
+    /// </summary>
+    public int FfmpegTelemetryStaleAfterSec { get; set; } = 10;
+
     [Required]
     public string ControlWsUrl { get; set; } = "ws://127.0.0.1:28092/ws/control";
 
@@ -255,6 +260,7 @@ public sealed class EdgeProxyOptions
         FfmpegExecutablePath = (FfmpegExecutablePath ?? string.Empty).Trim();
         FfmpegArgumentsTemplate = (FfmpegArgumentsTemplate ?? string.Empty).Trim();
         FfmpegStopTimeoutMs = Math.Max(250, FfmpegStopTimeoutMs);
+        FfmpegTelemetryStaleAfterSec = Math.Max(2, FfmpegTelemetryStaleAfterSec);
         EngineCanaryPercent = Math.Clamp(EngineCanaryPercent, 0, 100);
         EngineSloMinCommandSampleCount = Math.Max(1, EngineSloMinCommandSampleCount);
         EngineSloAckTimeoutRateMaxPct = Math.Clamp(EngineSloAckTimeoutRateMaxPct, 0.0, 100.0);

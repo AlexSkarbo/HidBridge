@@ -536,8 +536,9 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         var mediaSnapshot = await ReadMediaSnapshotSafeAsync(cancellationToken);
         var mediaRuntimeSnapshot = await ReadMediaRuntimeSnapshotSafeAsync(cancellationToken);
-        await PublishMediaStreamSnapshotAsync(mediaSnapshot, mediaRuntimeSnapshot, cancellationToken);
-        foreach (var pair in BuildMediaMetadata(mediaSnapshot, mediaRuntimeSnapshot))
+        var effectiveMediaSnapshot = ApplyMediaRuntimeGates(mediaSnapshot, mediaRuntimeSnapshot);
+        await PublishMediaStreamSnapshotAsync(effectiveMediaSnapshot, mediaRuntimeSnapshot, cancellationToken);
+        foreach (var pair in BuildMediaMetadata(effectiveMediaSnapshot, mediaRuntimeSnapshot))
         {
             metadata[pair.Key] = pair.Value;
         }
@@ -706,6 +707,193 @@ public sealed class EdgeProxyWorker : BackgroundService
     }
 
     /// <summary>
+    /// Applies strict runtime media gates for production media-engine path.
+    /// Probe-only readiness is not enough for <c>ffmpeg-dcd</c>; runtime must be live and publish a real playback URL.
+    /// </summary>
+    private EdgeMediaReadinessSnapshot ApplyMediaRuntimeGates(
+        EdgeMediaReadinessSnapshot probeSnapshot,
+        EdgeMediaRuntimeSnapshot runtimeSnapshot)
+    {
+        if (_options.GetMediaEngineKind() != EdgeProxyMediaEngineKind.FfmpegDataChannelDotNet)
+        {
+            return probeSnapshot;
+        }
+
+        var reasons = new List<string>();
+        var evidence = BuildMediaSessionEvidence(probeSnapshot, runtimeSnapshot);
+        if (!runtimeSnapshot.IsRunning)
+        {
+            var runtimeReason = string.IsNullOrWhiteSpace(runtimeSnapshot.FailureReason)
+                ? $"media runtime state is '{runtimeSnapshot.State}'."
+                : runtimeSnapshot.FailureReason!;
+            reasons.Add(runtimeReason);
+        }
+        else
+        {
+            if (!string.Equals(runtimeSnapshot.State, "Running", StringComparison.OrdinalIgnoreCase))
+            {
+                reasons.Add($"media runtime is not fully running (state='{runtimeSnapshot.State}').");
+            }
+
+            if (!string.IsNullOrWhiteSpace(runtimeSnapshot.FailureReason))
+            {
+                reasons.Add(runtimeSnapshot.FailureReason);
+            }
+
+            if (!HasFrameTelemetryEvidence(runtimeSnapshot))
+            {
+                reasons.Add("media runtime has no frame telemetry evidence yet.");
+            }
+
+            if (!evidence.HasRuntimeSessionEvidence)
+            {
+                reasons.Add("media runtime session evidence is missing (session/track state is not observed yet).");
+            }
+
+            if (!evidence.HasVideoTrackEvidence)
+            {
+                reasons.Add("media video track evidence is missing.");
+            }
+        }
+
+        var playbackUrl = ResolveEffectiveMediaPlaybackUrl(probeSnapshot);
+        if (string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            reasons.Add("media playback URL is not configured.");
+        }
+
+        if (reasons.Count == 0)
+        {
+            return probeSnapshot;
+        }
+
+        var failureReason = string.Join(" ", reasons);
+        _logger.LogWarning(
+            "Media runtime gate blocked readiness for session {SessionId}: {FailureReason}",
+            _effectiveSessionId,
+            failureReason);
+
+        return probeSnapshot with
+        {
+            IsReady = false,
+            State = "RuntimeNotReady",
+            FailureReason = failureReason,
+            PlaybackUrl = playbackUrl,
+            ReportedAtUtc = DateTimeOffset.UtcNow,
+        };
+    }
+
+    /// <summary>
+    /// Returns true when runtime snapshot contains frame progress telemetry (exp-022 parity gate).
+    /// </summary>
+    private static bool HasFrameTelemetryEvidence(EdgeMediaRuntimeSnapshot runtimeSnapshot)
+    {
+        if (runtimeSnapshot.Metrics is null)
+        {
+            return false;
+        }
+
+        if (!runtimeSnapshot.Metrics.TryGetValue("ffmpegFrame", out var frameValue) || frameValue is null)
+        {
+            return false;
+        }
+
+        return frameValue switch
+        {
+            int number => number > 0,
+            long number => number > 0,
+            double number => number > 0,
+            float number => number > 0,
+            decimal number => number > 0,
+            string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed > 0,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Builds typed media session evidence used by readiness and diagnostics projections.
+    /// </summary>
+    private static MediaSessionEvidence BuildMediaSessionEvidence(
+        EdgeMediaReadinessSnapshot probeSnapshot,
+        EdgeMediaRuntimeSnapshot runtimeSnapshot)
+    {
+        var hasVideoTrack = probeSnapshot.Video is not null;
+        var hasAudioTrack = probeSnapshot.Audio is not null;
+        var hasStreamKind = !string.IsNullOrWhiteSpace(probeSnapshot.StreamKind);
+        var hasFrameTelemetry = HasFrameTelemetryEvidence(runtimeSnapshot);
+        var sessionState = ResolveMediaSessionState(runtimeSnapshot, hasFrameTelemetry);
+        var videoTrackState = ResolveTrackState(runtimeSnapshot.VideoTrackState, hasVideoTrack, hasFrameTelemetry);
+        var audioTrackState = ResolveTrackState(runtimeSnapshot.AudioTrackState, hasAudioTrack, hasFrameTelemetry: false);
+
+        var hasRuntimeTrackEvidence = !IsMissingTrackState(videoTrackState)
+            || !IsMissingTrackState(audioTrackState);
+        var hasRuntimeSessionEvidence = runtimeSnapshot.SessionObservedAtUtc.HasValue
+            || !string.Equals(sessionState, "offline", StringComparison.OrdinalIgnoreCase)
+            || hasRuntimeTrackEvidence
+            || hasFrameTelemetry;
+
+        var hasSessionEvidence = hasRuntimeSessionEvidence
+            || hasVideoTrack
+            || hasAudioTrack
+            || hasStreamKind
+            || hasFrameTelemetry;
+        var hasVideoTrackEvidence = !IsMissingTrackState(videoTrackState);
+
+        return new MediaSessionEvidence(
+            HasSessionEvidence: hasSessionEvidence,
+            HasRuntimeSessionEvidence: hasRuntimeSessionEvidence,
+            HasVideoTrackEvidence: hasVideoTrackEvidence,
+            HasVideoTrack: hasVideoTrack,
+            HasAudioTrack: hasAudioTrack,
+            HasStreamKind: hasStreamKind,
+            HasFrameTelemetry: hasFrameTelemetry,
+            SessionState: sessionState,
+            VideoTrackState: videoTrackState,
+            AudioTrackState: audioTrackState,
+            SessionObservedAtUtc: runtimeSnapshot.SessionObservedAtUtc);
+    }
+
+    private static string ResolveMediaSessionState(EdgeMediaRuntimeSnapshot runtimeSnapshot, bool hasFrameTelemetry)
+    {
+        if (!string.IsNullOrWhiteSpace(runtimeSnapshot.SessionState))
+        {
+            return runtimeSnapshot.SessionState!;
+        }
+
+        if (!runtimeSnapshot.IsRunning)
+        {
+            return "offline";
+        }
+
+        if (string.Equals(runtimeSnapshot.State, "Degraded", StringComparison.OrdinalIgnoreCase))
+        {
+            return "degraded";
+        }
+
+        return hasFrameTelemetry ? "active" : "connecting";
+    }
+
+    private static string ResolveTrackState(string? runtimeTrackState, bool hasTypedProbeTrack, bool hasFrameTelemetry)
+    {
+        if (!string.IsNullOrWhiteSpace(runtimeTrackState))
+        {
+            return runtimeTrackState!;
+        }
+
+        if (hasTypedProbeTrack)
+        {
+            return "active";
+        }
+
+        return hasFrameTelemetry ? "active_untyped" : "missing";
+    }
+
+    private static bool IsMissingTrackState(string state)
+        => string.Equals(state, "missing", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "none", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Projects dynamic command arguments to typed transport HID arguments.
     /// </summary>
     private static TransportHidCommandArgsBody BuildTypedHidArgs(IReadOnlyDictionary<string, object?>? args)
@@ -783,6 +971,7 @@ public sealed class EdgeProxyWorker : BackgroundService
         EdgeMediaReadinessSnapshot snapshot,
         EdgeMediaRuntimeSnapshot runtimeSnapshot)
     {
+        var sessionEvidence = BuildMediaSessionEvidence(snapshot, runtimeSnapshot);
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["mediaReady"] = snapshot.IsReady ? "true" : "false",
@@ -792,7 +981,17 @@ public sealed class EdgeProxyWorker : BackgroundService
             ["mediaRuntimeRunning"] = runtimeSnapshot.IsRunning ? "true" : "false",
             ["mediaRuntimeState"] = string.IsNullOrWhiteSpace(runtimeSnapshot.State) ? "Unknown" : runtimeSnapshot.State,
             ["mediaRuntimeReportedAtUtc"] = runtimeSnapshot.ReportedAtUtc.ToString("O"),
+            ["mediaSessionEvidence"] = sessionEvidence.HasSessionEvidence ? "true" : "false",
+            ["mediaRuntimeSessionEvidence"] = sessionEvidence.HasRuntimeSessionEvidence ? "true" : "false",
+            ["mediaSessionState"] = sessionEvidence.SessionState,
+            ["mediaVideoTrackState"] = sessionEvidence.VideoTrackState,
+            ["mediaAudioTrackState"] = sessionEvidence.AudioTrackState,
         };
+
+        if (sessionEvidence.SessionObservedAtUtc.HasValue)
+        {
+            metadata["mediaSessionObservedAtUtc"] = sessionEvidence.SessionObservedAtUtc.Value.ToString("O");
+        }
 
         if (!string.IsNullOrWhiteSpace(snapshot.FailureReason))
         {
@@ -1019,7 +1218,7 @@ public sealed class EdgeProxyWorker : BackgroundService
             ? _options.MediaSource
             : snapshot.Source;
         var effectivePlaybackUrl = ResolveEffectiveMediaPlaybackUrl(snapshot);
-        var mergedMetrics = MergeMediaMetrics(snapshot.Metrics, runtimeSnapshot);
+        var mergedMetrics = MergeMediaMetrics(snapshot, runtimeSnapshot);
 
         await SendAsync(
             HttpMethod.Post,
@@ -1047,18 +1246,29 @@ public sealed class EdgeProxyWorker : BackgroundService
     /// Merges probe metrics with media runtime diagnostics while keeping probe as source of truth for readiness.
     /// </summary>
     private IReadOnlyDictionary<string, object?> MergeMediaMetrics(
-        IReadOnlyDictionary<string, object?>? probeMetrics,
+        EdgeMediaReadinessSnapshot probeSnapshot,
         EdgeMediaRuntimeSnapshot runtimeSnapshot)
     {
+        var sessionEvidence = BuildMediaSessionEvidence(probeSnapshot, runtimeSnapshot);
         var merged = new Dictionary<string, object?>(
-            probeMetrics ?? new Dictionary<string, object?>(),
+            probeSnapshot.Metrics ?? new Dictionary<string, object?>(),
             StringComparer.OrdinalIgnoreCase)
         {
             ["mediaRuntimeEngine"] = _options.GetMediaEngineKind().ToString(),
             ["mediaRuntimeRunning"] = runtimeSnapshot.IsRunning,
             ["mediaRuntimeState"] = runtimeSnapshot.State,
             ["mediaRuntimeReportedAtUtc"] = runtimeSnapshot.ReportedAtUtc,
+            ["mediaSessionEvidence"] = sessionEvidence.HasSessionEvidence,
+            ["mediaRuntimeSessionEvidence"] = sessionEvidence.HasRuntimeSessionEvidence,
+            ["mediaSessionState"] = sessionEvidence.SessionState,
+            ["mediaVideoTrackState"] = sessionEvidence.VideoTrackState,
+            ["mediaAudioTrackState"] = sessionEvidence.AudioTrackState,
         };
+
+        if (sessionEvidence.SessionObservedAtUtc.HasValue)
+        {
+            merged["mediaSessionObservedAtUtc"] = sessionEvidence.SessionObservedAtUtc.Value;
+        }
 
         if (!string.IsNullOrWhiteSpace(runtimeSnapshot.FailureReason))
         {
@@ -1635,6 +1845,22 @@ public sealed class EdgeProxyWorker : BackgroundService
             ? "operator.edge"
             : string.Join(",", normalized);
     }
+
+    /// <summary>
+    /// Captures media runtime/probe evidence used by readiness gating and diagnostics projection.
+    /// </summary>
+    private sealed record MediaSessionEvidence(
+        bool HasSessionEvidence,
+        bool HasRuntimeSessionEvidence,
+        bool HasVideoTrackEvidence,
+        bool HasVideoTrack,
+        bool HasAudioTrack,
+        bool HasStreamKind,
+        bool HasFrameTelemetry,
+        string SessionState,
+        string VideoTrackState,
+        string AudioTrackState,
+        DateTimeOffset? SessionObservedAtUtc);
 
     private sealed record ResolvedEnginePlan(
         EdgeProxyEngineSwitchMode SwitchMode,

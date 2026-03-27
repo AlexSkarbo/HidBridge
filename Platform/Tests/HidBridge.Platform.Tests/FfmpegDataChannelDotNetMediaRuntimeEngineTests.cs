@@ -32,4 +32,55 @@ public sealed class FfmpegDataChannelDotNetMediaRuntimeEngineTests
         Assert.False(parsed);
         Assert.Empty(metrics);
     }
+
+    [Fact]
+    public void TryClassifyRuntimeErrorLine_DetectsTransportAndHttpFailures()
+    {
+        var classified = FfmpegDataChannelDotNetMediaRuntimeEngine.TryClassifyRuntimeErrorLine(
+            "av_interleaved_write_frame(): Connection refused",
+            out var reason);
+
+        Assert.True(classified);
+        Assert.Contains("connection refused", reason, StringComparison.OrdinalIgnoreCase);
+
+        classified = FfmpegDataChannelDotNetMediaRuntimeEngine.TryClassifyRuntimeErrorLine(
+            "Server returned 404 Not Found",
+            out reason);
+
+        Assert.True(classified);
+        Assert.Contains("rejected request", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryClassifyRuntimeErrorLine_IgnoresNeutralLine()
+    {
+        var classified = FfmpegDataChannelDotNetMediaRuntimeEngine.TryClassifyRuntimeErrorLine(
+            "[libx264 @ 000001] profile High, level 3.1",
+            out var reason);
+
+        Assert.False(classified);
+        Assert.Equal(string.Empty, reason);
+    }
+
+    [Fact]
+    public void TryDetectTrackDescriptor_DetectsVideoAndAudioDescriptors()
+    {
+        var detected = FfmpegDataChannelDotNetMediaRuntimeEngine.TryDetectTrackDescriptor(
+            "Stream #0:0: Video: h264 (High), yuv420p, 1280x720",
+            out var hasVideo,
+            out var hasAudio);
+
+        Assert.True(detected);
+        Assert.True(hasVideo);
+        Assert.False(hasAudio);
+
+        detected = FfmpegDataChannelDotNetMediaRuntimeEngine.TryDetectTrackDescriptor(
+            "Stream #0:1: Audio: aac (LC), 48000 Hz, stereo",
+            out hasVideo,
+            out hasAudio);
+
+        Assert.True(detected);
+        Assert.False(hasVideo);
+        Assert.True(hasAudio);
+    }
 }

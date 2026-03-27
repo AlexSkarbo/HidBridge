@@ -380,16 +380,25 @@ public sealed class EdgeProxyWorkerLifecycleTests
             var onlinePayload = await handler.OnlinePayloadTask.Task.WaitAsync(
                 TimeSpan.FromSeconds(5),
                 TestContext.Current.CancellationToken);
-            Assert.Contains("\"mediaState\":\"Ready\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaState\":\"RuntimeNotReady\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaReady\":\"false\"", onlinePayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaRuntimeEngine\":\"FfmpegDataChannelDotNet\"", onlinePayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaRuntimeState\":\"NoExecutableConfigured\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaRuntimeSessionEvidence\":\"false\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaSessionState\":\"offline\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaVideoTrackState\":\"missing\"", onlinePayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaAudioTrackState\":\"missing\"", onlinePayload, StringComparison.Ordinal);
 
             var mediaPayload = await handler.MediaPayloadTask.Task.WaitAsync(
                 TimeSpan.FromSeconds(5),
                 TestContext.Current.CancellationToken);
             Assert.Contains("\"mediaRuntimeEngine\":\"FfmpegDataChannelDotNet\"", mediaPayload, StringComparison.Ordinal);
             Assert.Contains("\"mediaRuntimeState\":\"NoExecutableConfigured\"", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaRuntimeSessionEvidence\":false", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"mediaSessionState\":\"offline\"", mediaPayload, StringComparison.Ordinal);
             Assert.Contains("\"playbackUrl\":\"http://127.0.0.1:8889/whep/edge-main\"", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"ready\":false", mediaPayload, StringComparison.Ordinal);
+            Assert.Contains("\"state\":\"RuntimeNotReady\"", mediaPayload, StringComparison.Ordinal);
         }
         finally
         {
@@ -610,6 +619,8 @@ public sealed class EdgeProxyWorkerLifecycleTests
             PrincipalId = "smoke-runner",
             TenantId = "local-tenant",
             OrganizationId = "local-org",
+            // Keep lifecycle tests deterministic and decoupled from ffmpeg runtime gates.
+            MediaEngine = "none",
         };
         configure?.Invoke(options);
         options.Normalize();

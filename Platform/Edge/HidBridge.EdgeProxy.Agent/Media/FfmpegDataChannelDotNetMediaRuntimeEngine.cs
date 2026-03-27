@@ -15,11 +15,19 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
     private readonly ILogger _logger;
     private EdgeMediaRuntimeSnapshot _snapshot = new(
         IsRunning: false,
-        State: "NotStarted",
-        ReportedAtUtc: DateTimeOffset.UtcNow);
+        State: "Offline",
+        ReportedAtUtc: DateTimeOffset.UtcNow,
+        SessionState: "offline",
+        VideoTrackState: "missing",
+        AudioTrackState: "missing");
     private Process? _ffmpegProcess;
     private DateTimeOffset? _ffmpegStartedAtUtc;
+    private DateTimeOffset? _lastTelemetryAtUtc;
+    private DateTimeOffset? _sessionObservedAtUtc;
     private string? _lastFfmpegLine;
+    private string _sessionState = "offline";
+    private string _videoTrackState = "missing";
+    private string _audioTrackState = "missing";
     private IReadOnlyDictionary<string, object?>? _lastTelemetryMetrics;
     private bool _stopRequested;
 
@@ -37,9 +45,27 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
     /// <inheritdoc />
     public Task StartAsync(EdgeMediaRuntimeContext context, CancellationToken cancellationToken)
     {
+        SetSnapshot(
+            isRunning: false,
+            state: "Starting",
+            failureReason: null,
+            metrics: new Dictionary<string, object?>
+            {
+                ["engine"] = "ffmpeg-dcd",
+                ["streamId"] = context.StreamId,
+                ["source"] = context.Source,
+            });
+
         lock (_gate)
         {
             _stopRequested = false;
+            _lastTelemetryAtUtc = null;
+            _sessionObservedAtUtc = null;
+            _lastTelemetryMetrics = null;
+            _lastFfmpegLine = null;
+            _sessionState = "starting";
+            _videoTrackState = "initializing";
+            _audioTrackState = "initializing";
         }
 
         var executable = _options.FfmpegExecutablePath;
@@ -55,7 +81,10 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     ["streamId"] = context.StreamId,
                     ["source"] = context.Source,
                     ["whepUrl"] = _options.MediaWhepUrl,
-                });
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
 
             _logger.LogWarning(
                 "MediaEngine=ffmpeg-dcd is selected but FfmpegExecutablePath is empty. Worker continues with probe-driven media readiness.");
@@ -83,7 +112,10 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     ["whipUrl"] = _options.MediaWhipUrl,
                     ["whepUrl"] = _options.MediaWhepUrl,
                     ["argsSource"] = argsSource,
-                });
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
             _logger.LogWarning(
                 "MediaEngine=ffmpeg-dcd is selected but FfmpegArgumentsTemplate is empty. Worker continues with probe-driven media readiness.");
             return Task.CompletedTask;
@@ -122,7 +154,10 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                         ["executable"] = executable,
                         ["whipUrl"] = _options.MediaWhipUrl,
                         ["whepUrl"] = _options.MediaWhepUrl,
-                    });
+                    },
+                    sessionState: "offline",
+                    videoTrackState: "missing",
+                    audioTrackState: "missing");
                 return Task.CompletedTask;
             }
 
@@ -137,7 +172,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
 
             SetSnapshot(
                 isRunning: true,
-                state: "Running",
+                state: "Publishing",
                 failureReason: null,
                 metrics: new Dictionary<string, object?>
                 {
@@ -147,7 +182,10 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     ["whipUrl"] = _options.MediaWhipUrl,
                     ["whepUrl"] = _options.MediaWhepUrl,
                     ["argsSource"] = argsSource,
-                });
+                },
+                sessionState: "connecting",
+                videoTrackState: "negotiating",
+                audioTrackState: "negotiating");
 
             _ = MonitorExitAsync(process);
             _logger.LogInformation("Started ffmpeg media runtime process. PID={Pid}", process.Id);
@@ -164,7 +202,10 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     ["executable"] = executable,
                     ["whipUrl"] = _options.MediaWhipUrl,
                     ["whepUrl"] = _options.MediaWhepUrl,
-                });
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
             _logger.LogWarning(ex, "Failed to start ffmpeg media runtime process.");
         }
 
@@ -187,8 +228,11 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
         {
             SetSnapshot(
                 isRunning: false,
-                state: "Stopped",
-                failureReason: null);
+                state: "Offline",
+                failureReason: null,
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
             return;
         }
 
@@ -217,15 +261,19 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
 
             SetSnapshot(
                 isRunning: false,
-                state: "Stopped",
-                failureReason: null);
+                state: "Offline",
+                failureReason: null,
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
         }
         catch (Exception ex)
         {
             SetSnapshot(
                 isRunning: false,
                 state: "StopFailed",
-                failureReason: ex.Message);
+                failureReason: ex.Message,
+                sessionState: "degraded");
             _logger.LogWarning(ex, "Failed while stopping ffmpeg media runtime process.");
         }
     }
@@ -245,6 +293,12 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 {
                     ["uptimeSec"] = Math.Max(0, (DateTimeOffset.UtcNow - _ffmpegStartedAtUtc.Value).TotalSeconds),
                 };
+                if (_lastTelemetryAtUtc.HasValue)
+                {
+                    var telemetryAgeSec = Math.Max(0, (DateTimeOffset.UtcNow - _lastTelemetryAtUtc.Value).TotalSeconds);
+                    metrics["lastTelemetryAtUtc"] = _lastTelemetryAtUtc.Value;
+                    metrics["lastTelemetryAgeSec"] = telemetryAgeSec;
+                }
                 if (!string.IsNullOrWhiteSpace(_lastFfmpegLine))
                 {
                     metrics["lastProcessLine"] = _lastFfmpegLine;
@@ -257,10 +311,51 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     }
                 }
 
+                if (_sessionObservedAtUtc.HasValue)
+                {
+                    metrics["mediaSessionObservedAtUtc"] = _sessionObservedAtUtc.Value;
+                }
+
+                var state = _snapshot.State;
+                string? failureReason = null;
+                var sessionState = _sessionState;
+                var videoTrackState = _videoTrackState;
+                var audioTrackState = _audioTrackState;
+                if (_lastTelemetryAtUtc.HasValue)
+                {
+                    var telemetryAgeSec = Math.Max(0, (DateTimeOffset.UtcNow - _lastTelemetryAtUtc.Value).TotalSeconds);
+                    if (telemetryAgeSec > _options.FfmpegTelemetryStaleAfterSec)
+                    {
+                        state = "Degraded";
+                        failureReason = $"ffmpeg progress telemetry is stale for {telemetryAgeSec:F1}s.";
+                        sessionState = "degraded";
+                    }
+                    else
+                    {
+                        state = "Running";
+                        sessionState = "active";
+                    }
+                }
+                else if (string.Equals(state, "Publishing", StringComparison.OrdinalIgnoreCase))
+                {
+                    state = "Connecting";
+                    sessionState = "connecting";
+                }
+
+                metrics["mediaSessionState"] = sessionState;
+                metrics["mediaVideoTrackState"] = videoTrackState;
+                metrics["mediaAudioTrackState"] = audioTrackState;
+
                 return Task.FromResult(_snapshot with
                 {
+                    State = state,
                     ReportedAtUtc = DateTimeOffset.UtcNow,
+                    FailureReason = failureReason,
                     Metrics = metrics,
+                    SessionState = sessionState,
+                    VideoTrackState = videoTrackState,
+                    AudioTrackState = audioTrackState,
+                    SessionObservedAtUtc = _sessionObservedAtUtc,
                 });
             }
 
@@ -295,6 +390,18 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
 
         if (stopRequested)
         {
+            SetSnapshot(
+                isRunning: false,
+                state: "Offline",
+                failureReason: null,
+                metrics: new Dictionary<string, object?>
+                {
+                    ["engine"] = "ffmpeg-dcd",
+                    ["lastProcessLine"] = _lastFfmpegLine,
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
             return;
         }
 
@@ -307,7 +414,8 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 ["engine"] = "ffmpeg-dcd",
                 ["exitCode"] = process.ExitCode,
                 ["lastProcessLine"] = _lastFfmpegLine,
-            });
+            },
+            sessionState: "degraded");
     }
 
     /// <summary>
@@ -320,12 +428,129 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
             lock (_gate)
             {
                 _lastFfmpegLine = args.Data;
+                UpdateTrackEvidenceFromProcessLine(args.Data);
                 if (TryParseProgressMetrics(args.Data, out var progressMetrics))
                 {
+                    _lastTelemetryAtUtc = DateTimeOffset.UtcNow;
                     _lastTelemetryMetrics = progressMetrics;
+                    _sessionState = "active";
+                    _videoTrackState = "active";
+                    if (!string.Equals(_audioTrackState, "missing", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _audioTrackState = "active";
+                    }
+                    _sessionObservedAtUtc ??= DateTimeOffset.UtcNow;
+                    _snapshot = _snapshot with
+                    {
+                        IsRunning = true,
+                        State = "Running",
+                        FailureReason = null,
+                        ReportedAtUtc = DateTimeOffset.UtcNow,
+                        SessionState = _sessionState,
+                        VideoTrackState = _videoTrackState,
+                        AudioTrackState = _audioTrackState,
+                        SessionObservedAtUtc = _sessionObservedAtUtc,
+                    };
+                }
+                else if (TryClassifyRuntimeErrorLine(args.Data, out var runtimeError))
+                {
+                    _sessionState = "degraded";
+                    _snapshot = _snapshot with
+                    {
+                        IsRunning = true,
+                        State = "Degraded",
+                        FailureReason = runtimeError,
+                        ReportedAtUtc = DateTimeOffset.UtcNow,
+                        SessionState = _sessionState,
+                        VideoTrackState = _videoTrackState,
+                        AudioTrackState = _audioTrackState,
+                        SessionObservedAtUtc = _sessionObservedAtUtc,
+                    };
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Parses ffmpeg stream descriptor lines to derive runtime session and track evidence.
+    /// </summary>
+    private void UpdateTrackEvidenceFromProcessLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return;
+        }
+
+        if (TryDetectTrackDescriptor(line, out var hasVideoDescriptor, out var hasAudioDescriptor))
+        {
+            _sessionState = "connecting";
+            _sessionObservedAtUtc ??= DateTimeOffset.UtcNow;
+            if (hasVideoDescriptor)
+            {
+                _videoTrackState = "negotiated";
+            }
+
+            if (hasAudioDescriptor)
+            {
+                _audioTrackState = "negotiated";
+            }
+        }
+    }
+
+    internal static bool TryDetectTrackDescriptor(string line, out bool hasVideoDescriptor, out bool hasAudioDescriptor)
+    {
+        hasVideoDescriptor = false;
+        hasAudioDescriptor = false;
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        // Stream descriptor lines usually look like:
+        // "Stream #0:0: Video: h264 ..." and "Stream #0:1: Audio: aac ..."
+        hasVideoDescriptor = line.Contains("Video:", StringComparison.OrdinalIgnoreCase);
+        hasAudioDescriptor = line.Contains("Audio:", StringComparison.OrdinalIgnoreCase);
+        return hasVideoDescriptor || hasAudioDescriptor;
+    }
+
+    /// <summary>
+    /// Classifies fatal/transport ffmpeg stderr lines into deterministic runtime degradation reasons.
+    /// </summary>
+    internal static bool TryClassifyRuntimeErrorLine(string line, out string reason)
+    {
+        reason = string.Empty;
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        var normalized = line.Trim();
+        if (normalized.Contains("Connection refused", StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "ffmpeg media transport connection refused.";
+            return true;
+        }
+
+        if (normalized.Contains("404 Not Found", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("405 Method Not Allowed", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("406 Not Acceptable", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("403 Forbidden", StringComparison.OrdinalIgnoreCase))
+        {
+            reason = $"ffmpeg media endpoint rejected request: {normalized}";
+            return true;
+        }
+
+        if (normalized.Contains("Invalid data found when processing input", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("Could not write header", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("Error while opening encoder", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("Immediate exit requested", StringComparison.OrdinalIgnoreCase))
+        {
+            reason = $"ffmpeg runtime error: {normalized}";
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -490,18 +715,43 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
         bool isRunning,
         string state,
         string? failureReason,
-        IReadOnlyDictionary<string, object?>? metrics = null)
+        IReadOnlyDictionary<string, object?>? metrics = null,
+        string? sessionState = null,
+        string? videoTrackState = null,
+        string? audioTrackState = null)
     {
         lock (_gate)
         {
+            _sessionState = string.IsNullOrWhiteSpace(sessionState) ? _sessionState : sessionState;
+            _videoTrackState = string.IsNullOrWhiteSpace(videoTrackState) ? _videoTrackState : videoTrackState;
+            _audioTrackState = string.IsNullOrWhiteSpace(audioTrackState) ? _audioTrackState : audioTrackState;
+            if (!string.IsNullOrWhiteSpace(sessionState) && HasSessionEvidenceState(_sessionState))
+            {
+                _sessionObservedAtUtc ??= DateTimeOffset.UtcNow;
+            }
+            else if (!string.IsNullOrWhiteSpace(sessionState)
+                && string.Equals(_sessionState, "offline", StringComparison.OrdinalIgnoreCase))
+            {
+                _sessionObservedAtUtc = null;
+            }
+
             _snapshot = new EdgeMediaRuntimeSnapshot(
                 IsRunning: isRunning,
                 State: state,
                 ReportedAtUtc: DateTimeOffset.UtcNow,
                 FailureReason: failureReason,
-                Metrics: metrics);
+                Metrics: metrics,
+                SessionState: _sessionState,
+                VideoTrackState: _videoTrackState,
+                AudioTrackState: _audioTrackState,
+                SessionObservedAtUtc: _sessionObservedAtUtc);
         }
     }
+
+    private static bool HasSessionEvidenceState(string sessionState)
+        => string.Equals(sessionState, "connecting", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sessionState, "active", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sessionState, "degraded", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Waits for process exit with bounded timeout.

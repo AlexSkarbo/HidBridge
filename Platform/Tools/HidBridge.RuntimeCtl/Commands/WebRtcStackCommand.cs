@@ -245,16 +245,39 @@ internal static class WebRtcStackCommand
         // does not flap during short command retries.
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_HEARTBEATINTERVALSEC"] = "3";
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_POLLINTERVALMS"] = "100";
-        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = $"{options.WebBaseUrl.TrimEnd('/')}/media/edge-main";
+        var configuredWhepUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty).Trim();
+        var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
+        var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
+        var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
+        var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
+        var effectivePlaybackUrl = !string.IsNullOrWhiteSpace(configuredWhepUrl)
+            ? configuredWhepUrl
+            : configuredPlaybackUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = effectivePlaybackUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
         if (string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase))
         {
-            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL"] = string.Empty;
-            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = "true";
+            // Preserve explicit media-health and assume-ready settings from caller.
+            // Do not force optimistic media-ready defaults for UART when media path is not configured.
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL"] = configuredMediaHealthUrl;
+            if (!string.IsNullOrWhiteSpace(configuredAssumeMediaReadyWithoutProbe))
+            {
+                adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = configuredAssumeMediaReadyWithoutProbe;
+            }
+            else
+            {
+                adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = "false";
+            }
         }
         else
         {
-            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL"] = ConvertControlWsToHealthUrl(options.ControlWsUrl);
-            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = "false";
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL"] = string.IsNullOrWhiteSpace(configuredMediaHealthUrl)
+                ? ConvertControlWsToHealthUrl(options.ControlWsUrl)
+                : configuredMediaHealthUrl;
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE"] = string.IsNullOrWhiteSpace(configuredAssumeMediaReadyWithoutProbe)
+                ? "false"
+                : configuredAssumeMediaReadyWithoutProbe;
         }
 
         adapterProcess = StartRedirectedProcess(adapterStart, adapterStdout, adapterStderr);
@@ -316,6 +339,9 @@ internal static class WebRtcStackCommand
         Console.WriteLine($"Session:        {sessionId}");
         Console.WriteLine($"Peer:           {peerId}");
         Console.WriteLine($"Adapter PID:    {adapterProcess.Id}");
+        Console.WriteLine($"Media WHEP:     {(string.IsNullOrWhiteSpace(configuredWhepUrl) ? "<not configured>" : configuredWhepUrl)}");
+        Console.WriteLine($"Media WHIP:     {(string.IsNullOrWhiteSpace(configuredWhipUrl) ? "<not configured>" : configuredWhipUrl)}");
+        Console.WriteLine($"Media playback: {(string.IsNullOrWhiteSpace(effectivePlaybackUrl) ? "<not configured>" : effectivePlaybackUrl)}");
         Console.WriteLine($"Session env:    {sessionEnvPath}");
         Console.WriteLine($"Summary JSON:   {stackSummaryPath}");
         if (exp022Process is not null)

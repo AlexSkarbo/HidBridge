@@ -39,4 +39,8 @@ internal sealed record EdgeMediaRuntimeSnapshot(
     string State,
     DateTimeOffset ReportedAtUtc,
     string? FailureReason = null,
-    IReadOnlyDictionary<string, object?>? Metrics = null);
+    IReadOnlyDictionary<string, object?>? Metrics = null,
+    string? SessionState = null,
+    string? VideoTrackState = null,
+    string? AudioTrackState = null,
+    DateTimeOffset? SessionObservedAtUtc = null);

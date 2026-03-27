@@ -44,6 +44,12 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Null(metrics["lastPeerMediaAudioChannels"]);
         Assert.Null(metrics["lastPeerMediaAudioSampleRateHz"]);
         Assert.Null(metrics["lastPeerMediaAudioBitrateKbps"]);
+        Assert.Null(metrics["lastPeerMediaSessionEvidence"]);
+        Assert.Null(metrics["lastPeerMediaRuntimeSessionEvidence"]);
+        Assert.Null(metrics["lastPeerMediaSessionState"]);
+        Assert.Null(metrics["lastPeerMediaVideoTrackState"]);
+        Assert.Null(metrics["lastPeerMediaAudioTrackState"]);
+        Assert.Null(metrics["lastPeerMediaSessionObservedAtUtc"]);
     }
 
     [Fact]
@@ -102,6 +108,12 @@ public sealed class WebRtcCommandRelayServiceTests
                 ["mediaAudioChannels"] = "2",
                 ["mediaAudioSampleRateHz"] = "48000",
                 ["mediaAudioBitrateKbps"] = "128",
+                ["mediaSessionEvidence"] = "true",
+                ["mediaRuntimeSessionEvidence"] = "true",
+                ["mediaSessionState"] = "active",
+                ["mediaVideoTrackState"] = "active",
+                ["mediaAudioTrackState"] = "active",
+                ["mediaSessionObservedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
             },
             cancellationToken);
 
@@ -125,8 +137,14 @@ public sealed class WebRtcCommandRelayServiceTests
         Assert.Equal("2", metrics["lastPeerMediaAudioChannels"]?.ToString());
         Assert.Equal("48000", metrics["lastPeerMediaAudioSampleRateHz"]?.ToString());
         Assert.Equal("128", metrics["lastPeerMediaAudioBitrateKbps"]?.ToString());
+        Assert.Equal("true", metrics["lastPeerMediaSessionEvidence"]?.ToString());
+        Assert.Equal("true", metrics["lastPeerMediaRuntimeSessionEvidence"]?.ToString());
+        Assert.Equal("active", metrics["lastPeerMediaSessionState"]?.ToString());
+        Assert.Equal("active", metrics["lastPeerMediaVideoTrackState"]?.ToString());
+        Assert.Equal("active", metrics["lastPeerMediaAudioTrackState"]?.ToString());
         Assert.NotNull(metrics["lastPeerSeenAtUtc"]);
         Assert.NotNull(metrics["lastPeerMediaReportedAtUtc"]);
+        Assert.NotNull(metrics["lastPeerMediaSessionObservedAtUtc"]);
     }
 
     [Fact]

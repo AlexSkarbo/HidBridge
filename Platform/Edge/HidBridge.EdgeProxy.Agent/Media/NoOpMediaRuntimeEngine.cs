@@ -8,7 +8,10 @@ internal sealed class NoOpMediaRuntimeEngine : IEdgeMediaRuntimeEngine
     private EdgeMediaRuntimeSnapshot _snapshot = new(
         IsRunning: false,
         State: "NotConfigured",
-        ReportedAtUtc: DateTimeOffset.UtcNow);
+        ReportedAtUtc: DateTimeOffset.UtcNow,
+        SessionState: "offline",
+        VideoTrackState: "missing",
+        AudioTrackState: "missing");
 
     /// <inheritdoc />
     public Task StartAsync(EdgeMediaRuntimeContext context, CancellationToken cancellationToken)
@@ -16,7 +19,10 @@ internal sealed class NoOpMediaRuntimeEngine : IEdgeMediaRuntimeEngine
         _snapshot = new EdgeMediaRuntimeSnapshot(
             IsRunning: false,
             State: "NotConfigured",
-            ReportedAtUtc: DateTimeOffset.UtcNow);
+            ReportedAtUtc: DateTimeOffset.UtcNow,
+            SessionState: "offline",
+            VideoTrackState: "missing",
+            AudioTrackState: "missing");
         return Task.CompletedTask;
     }
 
@@ -26,7 +32,10 @@ internal sealed class NoOpMediaRuntimeEngine : IEdgeMediaRuntimeEngine
         _snapshot = new EdgeMediaRuntimeSnapshot(
             IsRunning: false,
             State: "Stopped",
-            ReportedAtUtc: DateTimeOffset.UtcNow);
+            ReportedAtUtc: DateTimeOffset.UtcNow,
+            SessionState: "offline",
+            VideoTrackState: "missing",
+            AudioTrackState: "missing");
         return Task.CompletedTask;
     }
 

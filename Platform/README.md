@@ -477,7 +477,8 @@ Real WebRTC peer adapter (exp-022 `dc-hid-poc` bridge):
   - in controlws mode add `-AllowLegacyControlWs -ControlHealthUrl http://127.0.0.1:28092/health` (or pass `-ControlWsUrl ws://127.0.0.1:28092/ws/control`)
   - optional cleanup of spawned adapter/exp-022 after run: add `-ForwardArgs @('-StopStackAfter')`
   - when runtime is already running in Docker profile (`platform-runtime`), add `-SkipRuntimeBootstrap` to avoid local API/Web restart conflicts on `18093/18110`.
-  - in `CommandExecutor=uart` path stack bootstrap now auto-sets `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true` (control-only acceptance without capture probe).
+  - in `CommandExecutor=uart` path stack bootstrap now preserves explicit media env settings and no longer forces fake playback URL/media-ready assumptions.
+  - for real video/audio local profile (ffmpeg + WHIP/WHEP), see `Platform/Profiles/MediaLocal/README.md`.
 - session room live control/media updates:
   - new batch command endpoint for high-frequency input dispatch: `POST /api/v1/sessions/{sessionId}/commands/batch`
   - `Session Details` now includes live HID capture controls (`Live Control`, `Pointer Lock`, `Panic Reset`) in addition to demo scenarios.
