@@ -62,6 +62,14 @@ All settings are read with prefix `HIDBRIDGE_EDGE_PROXY_`:
 - `MEDIASTREAMID` (default: `edge-main`)
 - `MEDIASOURCE` (default: `edge-capture`)
 - `MEDIAPLAYBACKURL` (optional absolute URL exposed by transport diagnostics/UI as live preview link)
+- `MEDIABACKENDAUTOSTART` (default: `false`; when `true`, agent starts local media backend process itself before ffmpeg publish)
+- `MEDIABACKENDEXECUTABLEPATH` (required when `MEDIABACKENDAUTOSTART=true`; path or command name of local backend binary)
+- `MEDIABACKENDARGUMENTSTEMPLATE` (optional; supports placeholders `{sessionId}`, `{peerId}`, `{endpointId}`, `{streamId}`, `{source}`, `{baseUrl}`, `{whipUrl}`, `{whepUrl}`)
+- `MEDIABACKENDWORKINGDIRECTORY` (optional)
+- `MEDIABACKENDSTARTUPTIMEOUTSEC` (default: `20`)
+- `MEDIABACKENDPROBEDELAYMS` (default: `500`)
+- `MEDIABACKENDPROBETIMEOUTMS` (default: `1200`)
+- `MEDIABACKENDSTOPTIMEOUTMS` (default: `3000`)
 - `REQUIREMEDIAREADY` (default: `true`, used by server-side readiness policy)
 - `ASSUMEMEDIAREADYWITHOUTPROBE` (default: `false`)
 - `PRINCIPALID` (default: `smoke-runner`)
@@ -101,3 +109,13 @@ dotnet run --project Platform/Edge/HidBridge.EdgeProxy.Agent/HidBridge.EdgeProxy
 - If API readiness policy requires media (`HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY=true`) and you run UART-only control path without capture probe, set:
   - `HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE=true`
 - In this mode the agent reports media state as `Ready` (not `NoProbeConfigured`) so server-side readiness can pass for control-only acceptance scenarios.
+
+## Agent-managed media backend
+
+For host installs without Docker/RuntimeCtl orchestration, enable local backend bootstrap directly in the agent:
+
+- set `HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART=true`
+- provide `HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH` (for example local `srs.exe` wrapper/service launcher)
+- set `HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL` and `HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL` to backend endpoints
+
+With this mode the agent itself owns backend process lifecycle and waits for endpoint reachability before starting ffmpeg publish.

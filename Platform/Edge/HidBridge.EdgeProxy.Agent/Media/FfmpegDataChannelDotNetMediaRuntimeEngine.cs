@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
@@ -21,10 +22,13 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
         VideoTrackState: "missing",
         AudioTrackState: "missing");
     private Process? _ffmpegProcess;
+    private Process? _mediaBackendProcess;
     private DateTimeOffset? _ffmpegStartedAtUtc;
+    private DateTimeOffset? _mediaBackendStartedAtUtc;
     private DateTimeOffset? _lastTelemetryAtUtc;
     private DateTimeOffset? _sessionObservedAtUtc;
     private string? _lastFfmpegLine;
+    private string? _lastMediaBackendLine;
     private string _sessionState = "offline";
     private string _videoTrackState = "missing";
     private string _audioTrackState = "missing";
@@ -43,7 +47,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
     }
 
     /// <inheritdoc />
-    public Task StartAsync(EdgeMediaRuntimeContext context, CancellationToken cancellationToken)
+    public async Task StartAsync(EdgeMediaRuntimeContext context, CancellationToken cancellationToken)
     {
         SetSnapshot(
             isRunning: false,
@@ -63,9 +67,18 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
             _sessionObservedAtUtc = null;
             _lastTelemetryMetrics = null;
             _lastFfmpegLine = null;
+            _lastMediaBackendLine = null;
             _sessionState = "starting";
             _videoTrackState = "initializing";
             _audioTrackState = "initializing";
+        }
+
+        // Optional agent-managed media backend bootstrap (for non-docker deployments).
+        // If configured, the agent launches and verifies WHIP/WHEP endpoint reachability
+        // before ffmpeg publish starts.
+        if (!await EnsureMediaBackendReadyAsync(context, cancellationToken).ConfigureAwait(false))
+        {
+            return;
         }
 
         var executable = _options.FfmpegExecutablePath;
@@ -88,7 +101,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
 
             _logger.LogWarning(
                 "MediaEngine=ffmpeg-dcd is selected but FfmpegExecutablePath is empty. Worker continues with probe-driven media readiness.");
-            return Task.CompletedTask;
+            return;
         }
 
         var argsTemplate = _options.FfmpegArgumentsTemplate;
@@ -118,7 +131,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 audioTrackState: "missing");
             _logger.LogWarning(
                 "MediaEngine=ffmpeg-dcd is selected but FfmpegArgumentsTemplate is empty. Worker continues with probe-driven media readiness.");
-            return Task.CompletedTask;
+            return;
         }
 
         try
@@ -158,7 +171,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     sessionState: "offline",
                     videoTrackState: "missing",
                     audioTrackState: "missing");
-                return Task.CompletedTask;
+                return;
             }
 
             process.BeginOutputReadLine();
@@ -209,23 +222,28 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
             _logger.LogWarning(ex, "Failed to start ffmpeg media runtime process.");
         }
 
-        return Task.CompletedTask;
+        return;
     }
 
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         Process? process;
+        Process? mediaBackendProcess;
         lock (_gate)
         {
             _stopRequested = true;
             process = _ffmpegProcess;
             _ffmpegProcess = null;
             _ffmpegStartedAtUtc = null;
+            mediaBackendProcess = _mediaBackendProcess;
+            _mediaBackendProcess = null;
+            _mediaBackendStartedAtUtc = null;
         }
 
         if (process is null)
         {
+            await StopMediaBackendProcessAsync(mediaBackendProcess, cancellationToken).ConfigureAwait(false);
             SetSnapshot(
                 isRunning: false,
                 state: "Offline",
@@ -259,6 +277,8 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 }
             }
 
+            await StopMediaBackendProcessAsync(mediaBackendProcess, cancellationToken).ConfigureAwait(false);
+
             SetSnapshot(
                 isRunning: false,
                 state: "Offline",
@@ -269,6 +289,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
         }
         catch (Exception ex)
         {
+            await StopMediaBackendProcessAsync(mediaBackendProcess, cancellationToken).ConfigureAwait(false);
             SetSnapshot(
                 isRunning: false,
                 state: "StopFailed",
@@ -315,6 +336,15 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                 {
                     metrics["mediaSessionObservedAtUtc"] = _sessionObservedAtUtc.Value;
                 }
+                if (_mediaBackendStartedAtUtc.HasValue)
+                {
+                    metrics["mediaBackendUptimeSec"] = Math.Max(0, (DateTimeOffset.UtcNow - _mediaBackendStartedAtUtc.Value).TotalSeconds);
+                }
+                if (!string.IsNullOrWhiteSpace(_lastMediaBackendLine))
+                {
+                    metrics["mediaBackendLastLine"] = _lastMediaBackendLine;
+                }
+                metrics["mediaBackendRunning"] = _mediaBackendProcess is { HasExited: false };
 
                 var state = _snapshot.State;
                 string? failureReason = null;
@@ -360,6 +390,338 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
             }
 
             return Task.FromResult(_snapshot);
+        }
+    }
+
+    /// <summary>
+    /// Ensures optional agent-managed media backend is reachable before ffmpeg publishing starts.
+    /// </summary>
+    private async Task<bool> EnsureMediaBackendReadyAsync(
+        EdgeMediaRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.MediaBackendAutoStart)
+        {
+            return true;
+        }
+
+        var probeEndpoints = BuildMediaBackendProbeEndpoints();
+        if (await AreMediaBackendEndpointsReachableAsync(probeEndpoints, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.MediaBackendExecutablePath))
+        {
+            SetSnapshot(
+                isRunning: false,
+                state: "MediaBackendNotConfigured",
+                failureReason: "Media backend is unreachable and MediaBackendExecutablePath is not configured.",
+                metrics: new Dictionary<string, object?>
+                {
+                    ["engine"] = "ffmpeg-dcd",
+                    ["mediaBackendAutoStart"] = true,
+                    ["mediaBackendProbeEndpoints"] = probeEndpoints.Select(static uri => uri.ToString()).ToArray(),
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
+            return false;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _options.MediaBackendExecutablePath,
+            Arguments = BuildMediaBackendArguments(_options.MediaBackendArgumentsTemplate, context),
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+
+        if (!string.IsNullOrWhiteSpace(_options.MediaBackendWorkingDirectory))
+        {
+            startInfo.WorkingDirectory = _options.MediaBackendWorkingDirectory;
+        }
+
+        var process = new Process
+        {
+            StartInfo = startInfo,
+            EnableRaisingEvents = true,
+        };
+        process.OutputDataReceived += HandleMediaBackendOutput;
+        process.ErrorDataReceived += HandleMediaBackendOutput;
+
+        try
+        {
+            if (!process.Start())
+            {
+                SetSnapshot(
+                    isRunning: false,
+                    state: "MediaBackendStartFailed",
+                    failureReason: "Media backend Process.Start() returned false.",
+                    metrics: new Dictionary<string, object?>
+                    {
+                        ["engine"] = "ffmpeg-dcd",
+                        ["mediaBackendExecutable"] = _options.MediaBackendExecutablePath,
+                    },
+                    sessionState: "offline",
+                    videoTrackState: "missing",
+                    audioTrackState: "missing");
+                return false;
+            }
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            lock (_gate)
+            {
+                _mediaBackendProcess = process;
+                _mediaBackendStartedAtUtc = DateTimeOffset.UtcNow;
+            }
+            _ = MonitorMediaBackendExitAsync(process);
+
+            _logger.LogInformation("Started agent-managed media backend. PID={Pid}", process.Id);
+
+            var timeout = TimeSpan.FromSeconds(Math.Max(3, _options.MediaBackendStartupTimeoutSec));
+            var deadline = DateTimeOffset.UtcNow + timeout;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (process.HasExited)
+                {
+                    SetSnapshot(
+                        isRunning: false,
+                        state: "MediaBackendStartFailed",
+                        failureReason: $"Media backend exited during startup with code {process.ExitCode}.",
+                        metrics: new Dictionary<string, object?>
+                        {
+                            ["engine"] = "ffmpeg-dcd",
+                            ["mediaBackendExecutable"] = _options.MediaBackendExecutablePath,
+                            ["mediaBackendExitCode"] = process.ExitCode,
+                            ["mediaBackendLastLine"] = _lastMediaBackendLine,
+                        },
+                        sessionState: "offline",
+                        videoTrackState: "missing",
+                        audioTrackState: "missing");
+                    return false;
+                }
+
+                if (await AreMediaBackendEndpointsReachableAsync(probeEndpoints, cancellationToken).ConfigureAwait(false))
+                {
+                    return true;
+                }
+
+                await Task.Delay(Math.Max(100, _options.MediaBackendProbeDelayMs), cancellationToken).ConfigureAwait(false);
+            }
+
+            TryKillProcess(process);
+            SetSnapshot(
+                isRunning: false,
+                state: "MediaBackendUnavailable",
+                failureReason: $"Media backend endpoints are unreachable after {timeout.TotalSeconds:0}s startup timeout.",
+                metrics: new Dictionary<string, object?>
+                {
+                    ["engine"] = "ffmpeg-dcd",
+                    ["mediaBackendExecutable"] = _options.MediaBackendExecutablePath,
+                    ["mediaBackendProbeEndpoints"] = probeEndpoints.Select(static uri => uri.ToString()).ToArray(),
+                    ["mediaBackendLastLine"] = _lastMediaBackendLine,
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            TryKillProcess(process);
+            SetSnapshot(
+                isRunning: false,
+                state: "MediaBackendStartFailed",
+                failureReason: ex.Message,
+                metrics: new Dictionary<string, object?>
+                {
+                    ["engine"] = "ffmpeg-dcd",
+                    ["mediaBackendExecutable"] = _options.MediaBackendExecutablePath,
+                },
+                sessionState: "offline",
+                videoTrackState: "missing",
+                audioTrackState: "missing");
+            _logger.LogWarning(ex, "Failed to start agent-managed media backend.");
+            return false;
+        }
+    }
+
+    private async Task<bool> AreMediaBackendEndpointsReachableAsync(
+        IReadOnlyList<Uri> endpoints,
+        CancellationToken cancellationToken)
+    {
+        if (endpoints.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (var endpoint in endpoints)
+        {
+            var reachable = await IsHostPortReachableAsync(endpoint, cancellationToken).ConfigureAwait(false);
+            if (!reachable)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private async Task<bool> IsHostPortReachableAsync(Uri endpoint, CancellationToken cancellationToken)
+    {
+        var port = endpoint.IsDefaultPort
+            ? (string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80)
+            : endpoint.Port;
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(200, _options.MediaBackendProbeTimeoutMs)));
+        try
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(endpoint.Host, port, timeoutCts.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private IReadOnlyList<Uri> BuildMediaBackendProbeEndpoints()
+    {
+        var results = new List<Uri>();
+        AddIfAbsolute(results, _options.MediaHealthUrl);
+        AddIfAbsolute(results, _options.MediaWhipUrl);
+        AddIfAbsolute(results, _options.MediaWhepUrl);
+        if (results.Count == 0)
+        {
+            AddIfAbsolute(results, _options.MediaPlaybackUrl);
+        }
+
+        return results;
+    }
+
+    private static void AddIfAbsolute(ICollection<Uri> targets, string? candidate)
+    {
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+        {
+            return;
+        }
+
+        if (targets.Any(existing => string.Equals(existing.Authority, uri.Authority, StringComparison.OrdinalIgnoreCase)
+                                    && string.Equals(existing.Scheme, uri.Scheme, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        targets.Add(uri);
+    }
+
+    private string BuildMediaBackendArguments(string template, EdgeMediaRuntimeContext context)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return string.Empty;
+        }
+
+        return BuildArguments(template, context);
+    }
+
+    private async Task StopMediaBackendProcessAsync(Process? process, CancellationToken cancellationToken)
+    {
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using (process)
+            {
+                if (!process.HasExited)
+                {
+                    try
+                    {
+                        process.CloseMainWindow();
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    var exited = await WaitForExitAsync(process, _options.MediaBackendStopTimeoutMs, cancellationToken).ConfigureAwait(false);
+                    if (!exited && !process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await WaitForExitAsync(process, 2000, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // best effort
+        }
+    }
+
+    private async Task MonitorMediaBackendExitAsync(Process process)
+    {
+        try
+        {
+            await process.WaitForExitAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            return;
+        }
+
+        bool stopRequested;
+        bool ffmpegRunning;
+        lock (_gate)
+        {
+            stopRequested = _stopRequested;
+            ffmpegRunning = _ffmpegProcess is { HasExited: false };
+            if (ReferenceEquals(_mediaBackendProcess, process))
+            {
+                _mediaBackendProcess = null;
+                _mediaBackendStartedAtUtc = null;
+            }
+        }
+
+        if (!stopRequested && ffmpegRunning)
+        {
+            SetSnapshot(
+                isRunning: true,
+                state: "Degraded",
+                failureReason: $"Media backend exited unexpectedly with code {process.ExitCode}.",
+                metrics: new Dictionary<string, object?>
+                {
+                    ["engine"] = "ffmpeg-dcd",
+                    ["mediaBackendExitCode"] = process.ExitCode,
+                    ["mediaBackendLastLine"] = _lastMediaBackendLine,
+                },
+                sessionState: "degraded");
+        }
+    }
+
+    private static void TryKillProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // best effort
         }
     }
 
@@ -468,6 +830,22 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     };
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Stores latest media-backend output line for diagnostics.
+    /// </summary>
+    private void HandleMediaBackendOutput(object sender, DataReceivedEventArgs args)
+    {
+        if (string.IsNullOrWhiteSpace(args.Data))
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _lastMediaBackendLine = args.Data;
         }
     }
 

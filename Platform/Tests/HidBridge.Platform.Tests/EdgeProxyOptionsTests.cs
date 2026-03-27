@@ -244,6 +244,34 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
+    public void IsValid_MediaBackendAutoStart_RequiresExecutablePath()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaBackendAutoStart = true;
+        options.MediaBackendExecutablePath = string.Empty;
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("MediaBackendExecutablePath", error);
+    }
+
+    [Fact]
+    public void IsValid_MediaBackendAutoStart_WithExecutablePath_IsAccepted()
+    {
+        var options = CreateBaselineOptions();
+        options.MediaBackendAutoStart = true;
+        options.MediaBackendExecutablePath = "srs";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+    }
+
+    [Fact]
     public void Normalize_DefaultOperatorRole_UsesEdgeRole()
     {
         var options = CreateBaselineOptions();

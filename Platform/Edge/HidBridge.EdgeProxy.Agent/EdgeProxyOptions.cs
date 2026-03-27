@@ -195,6 +195,47 @@ public sealed class EdgeProxyOptions
     public string MediaWhipBearerToken { get; set; } = string.Empty;
 
     /// <summary>
+    /// Enables agent-managed startup of local media backend process (for example SRS binary/service wrapper).
+    /// </summary>
+    public bool MediaBackendAutoStart { get; set; }
+
+    /// <summary>
+    /// Executable path used when <see cref="MediaBackendAutoStart"/> is enabled.
+    /// </summary>
+    public string MediaBackendExecutablePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional arguments template for media backend process.
+    /// Supports placeholders: <c>{sessionId}</c>, <c>{peerId}</c>, <c>{endpointId}</c>, <c>{streamId}</c>, <c>{source}</c>, <c>{baseUrl}</c>, <c>{whipUrl}</c>, <c>{whepUrl}</c>.
+    /// </summary>
+    public string MediaBackendArgumentsTemplate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional working directory for media backend process.
+    /// </summary>
+    public string MediaBackendWorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Startup timeout for media backend auto-start probe.
+    /// </summary>
+    public int MediaBackendStartupTimeoutSec { get; set; } = 20;
+
+    /// <summary>
+    /// Probe delay between startup reachability checks.
+    /// </summary>
+    public int MediaBackendProbeDelayMs { get; set; } = 500;
+
+    /// <summary>
+    /// TCP probe timeout when validating backend endpoint reachability.
+    /// </summary>
+    public int MediaBackendProbeTimeoutMs { get; set; } = 1200;
+
+    /// <summary>
+    /// Stop timeout for media backend process before forced kill.
+    /// </summary>
+    public int MediaBackendStopTimeoutMs { get; set; } = 3000;
+
+    /// <summary>
     /// Requires media probe to report ready before readiness policy can pass.
     /// </summary>
     public bool RequireMediaReady { get; set; } = true;
@@ -290,6 +331,13 @@ public sealed class EdgeProxyOptions
         MediaWhipUrl = MediaWhipUrl?.Trim() ?? string.Empty;
         MediaWhepUrl = MediaWhepUrl?.Trim() ?? string.Empty;
         MediaWhipBearerToken = MediaWhipBearerToken?.Trim() ?? string.Empty;
+        MediaBackendExecutablePath = MediaBackendExecutablePath?.Trim() ?? string.Empty;
+        MediaBackendArgumentsTemplate = MediaBackendArgumentsTemplate?.Trim() ?? string.Empty;
+        MediaBackendWorkingDirectory = MediaBackendWorkingDirectory?.Trim() ?? string.Empty;
+        MediaBackendStartupTimeoutSec = Math.Max(3, MediaBackendStartupTimeoutSec);
+        MediaBackendProbeDelayMs = Math.Max(100, MediaBackendProbeDelayMs);
+        MediaBackendProbeTimeoutMs = Math.Max(200, MediaBackendProbeTimeoutMs);
+        MediaBackendStopTimeoutMs = Math.Max(250, MediaBackendStopTimeoutMs);
         OperatorRolesCsv = string.Join(
             ",",
             (OperatorRolesCsv ?? string.Empty)
@@ -417,6 +465,12 @@ public sealed class EdgeProxyOptions
             !Uri.TryCreate(MediaWhepUrl, UriKind.Absolute, out _))
         {
             error = "MediaWhepUrl must be an absolute URL.";
+            return false;
+        }
+
+        if (MediaBackendAutoStart && string.IsNullOrWhiteSpace(MediaBackendExecutablePath))
+        {
+            error = "MediaBackendExecutablePath is required when MediaBackendAutoStart=true.";
             return false;
         }
 
