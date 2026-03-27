@@ -248,6 +248,7 @@ Test entrypoint:
 - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local`
 - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full`
 - compatibility shim: `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task <command-name>`
+- docs policy: direct RuntimeCtl commands are canonical; `run.ps1 -Task ...` examples are legacy compatibility only.
 - The runner restores the solution, builds it, and then runs `HidBridge.Platform.Tests`.
 - `checks` runs the unit-test pipeline first and then runs the selected smoke profile.
 - `demo-gate` runs the deterministic demo gate (`open session -> request control -> dispatch command -> verify journal -> close session`).

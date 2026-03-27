@@ -1,5 +1,8 @@
 # Micro Meet: GitHub Package
 
+> Note (CLI-first): canonical launcher is `HidBridge.RuntimeCtl` direct command syntax.  
+> `Platform/run.ps1 -Task ...` references are legacy compatibility form.
+
 ## Що це
 `Micro Meet` — це операторський demo-ready шар поверх `HidBridge`, де можна:
 - вибрати endpoint

@@ -1,13 +1,16 @@
 # Micro Meet Test Matrix (Demo/Sales)
 
+> Note (CLI-first): use direct `HidBridge.RuntimeCtl` commands.  
+> `Platform/run.ps1 -Task ...` references below are legacy compatibility form.
+
 Дата фіксації базового стану: 12 березня 2026
 
 ## 1) Gate-команди перед демо
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task ci-local
-powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor -StartApiProbe -RequireApi
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform ci-local -StopOnFailure
+dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure
 ```
 
 Очікування:

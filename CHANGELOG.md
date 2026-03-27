@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-03-27 (docs cleanup: CLI-first canonical runbook + legacy PS marking)
+
+Summary:
+
+- Marked RuntimeCtl direct command syntax as canonical across architecture/go-to-market docs.
+- Added explicit legacy note for historical `Platform/run.ps1 -Task ...` examples.
+- Updated publish/test checklist command blocks to direct RuntimeCtl invocations.
+- Linked canonical on-call runbook in system-architecture index.
+
+Detailed notes:
+
+- `Platform/README.md`
+- `Docs/SystemArchitecture/HidBridge_Runtime_Flow_2026-03-19_UA.md`
+- `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA.md`
+- `Docs/SystemArchitecture/HidBridge_SystemArchitecture_UA_Executive.md`
+- `Docs/SystemArchitecture/HidBridge_Bearer_Rollout_Profile_UA.md`
+- `Docs/SystemArchitecture/README.md`
+- `Docs/GoToMarket/MicroMeet_Demo_Runbook_UA.md`
+- `Docs/GoToMarket/MicroMeet_Demo_Runbook_EN.md`
+- `Docs/GoToMarket/MicroMeet_Next_Implementation_Plan_UA.md`
+- `Docs/GoToMarket/MicroMeet_GitHub_Package_UA.md`
+- `Docs/GoToMarket/MicroMeet_Publish_Checklist_UA.md`
+- `Docs/GoToMarket/MicroMeet_Test_Matrix_UA.md`
+- `Docs/GoToMarket/MicroMeet_Release_Notes_v0.1.0_EN.md`
+
 ## 2026-03-27 (pr-b.2 formalization: media e2e evidence artifact)
 
 Summary:

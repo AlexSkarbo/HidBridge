@@ -1,5 +1,8 @@
 # Micro Meet Publish Checklist
 
+> Note (CLI-first): use direct `HidBridge.RuntimeCtl` commands.  
+> `Platform/run.ps1 -Task ...` is compatibility-only.
+
 ## 1. Repo
 
 - [ ] Кореневий `README.md` містить короткий блок про `Micro Meet`
@@ -9,10 +12,10 @@
 
 ## 2. Контур
 
-- [ ] `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task checks`
-- [ ] `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task doctor -StartApiProbe -RequireApi`
-- [ ] `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task full`
-- [ ] `powershell -ExecutionPolicy Bypass -File Platform/run.ps1 -Task token-debug`
+- [ ] `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform checks`
+- [ ] `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform doctor -StartApiProbe -RequireApi`
+- [ ] `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform full -StopOnFailure`
+- [ ] `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform token-debug`
 
 ## 3. Demo UI
 

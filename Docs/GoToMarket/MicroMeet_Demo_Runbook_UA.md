@@ -1,5 +1,8 @@
 # Micro Meet Demo Runbook (Step-by-Step)
 
+> Note (CLI-first): canonical commands are direct `HidBridge.RuntimeCtl` invocations.  
+> `powershell -File Platform/run.ps1 -Task ...` in this file is kept as legacy compatibility syntax.
+
 ## Мета
 Провести стабільне demo без ручного "лікування" інфраструктури:
 

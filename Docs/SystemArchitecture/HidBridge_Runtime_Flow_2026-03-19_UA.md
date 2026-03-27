@@ -11,7 +11,8 @@
 Цей документ фіксує **фінальний runtime flow** для поточного етапу платформи:
 
 - production/runtime шлях іде через `Platform/` (API/Web/Identity/Persistence + Edge Agent),
-- PowerShell сценарії залишаються thin orchestration/testing шаром,
+- canonical orchestration — через `Platform/Tools/HidBridge.RuntimeCtl` (CLI-first),
+- PowerShell `Platform/run.ps1 -Task ...` лишається лише compatibility shim,
 - `WebRtcTests/exp-022-datachanneldotnet` зафіксовано як **lab-only** стенд.
 
 ---
@@ -31,8 +32,8 @@
 Рекомендований профіль:
 
 - `docker-compose.platform-runtime.yml`
-- запуск/зупинка через:
-  - `Platform/run.ps1 -Task platform-runtime -Action up|down|status|logs`
+- запуск/зупинка через RuntimeCtl:
+  - `dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform platform-runtime -Action up|down|status|logs`
 
 ## 2.2 Edge (external processes/hosts)
 

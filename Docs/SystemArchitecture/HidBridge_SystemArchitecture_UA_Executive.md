@@ -14,7 +14,7 @@
 
 1. канонічний runtime шлях через `Platform/` core stack + external edge agents;
 2. server-side policy ownership для readiness/lease/SLO/security;
-3. PowerShell сценарії як thin orchestration/testing;
+3. canonical CLI-first orchestration через `HidBridge.RuntimeCtl` (`run.ps1 -Task ...` лише compatibility);
 4. `exp-022` як integration-lab (не production dependency).
 
 ---

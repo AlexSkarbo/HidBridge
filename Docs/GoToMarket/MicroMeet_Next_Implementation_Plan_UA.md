@@ -1,5 +1,8 @@
 # Micro Meet Next Implementation Plan
 
+> Note (CLI-first): canonical launcher is `HidBridge.RuntimeCtl` direct command syntax.  
+> `Platform/run.ps1 -Task ...` references in historical sections are legacy compatibility form.
+
 Дата: 12 березня 2026 (оновлено після стабілізації `demo-flow`)
 
 ## Поточний стан

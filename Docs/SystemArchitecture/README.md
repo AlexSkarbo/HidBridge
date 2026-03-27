@@ -315,6 +315,8 @@
   - `Platform/Identity/Keycloak/Sync-HidBridgeDevRealm.ps1`
 
 
-- operational scripts consolidated under `Platform/Scripts/`; top-level `Platform/run_*.ps1` paths remain as compatibility wrappers, and unified entrypoint `Platform/run.ps1` was added.
+- canonical operational entrypoint is `Platform/Tools/HidBridge.RuntimeCtl` (CLI-first).
+- `Platform/run.ps1` is kept as compatibility shim only.
+- canonical on-call runbook: `Docs/SystemArchitecture/RuntimeCtl_OnCall_HowTo_UA.md`.
 
 - operational helpers added: `Platform/run_doctor.ps1`, `Platform/run_clean_logs.ps1`, `Platform/run_ci_local.ps1`, `Platform/run_full.ps1`, `Platform/run_token_debug.ps1`, and shared script helpers in `Platform/Scripts/Common/ScriptCommon.ps1`, `Platform/Scripts/Common/KeycloakCommon.ps1`.

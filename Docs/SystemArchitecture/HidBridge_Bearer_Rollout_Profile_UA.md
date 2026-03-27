@@ -1,5 +1,8 @@
 # HidBridge Bearer Rollout Profile (UA)
 
+> Note (CLI-first): canonical launcher is direct `HidBridge.RuntimeCtl` commands.  
+> `Platform/run.ps1 -Task ...` in historical examples is compatibility-only.
+
 Оновлено: `2026-03-04`
 
 ## Поточний етап

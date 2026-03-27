@@ -1,5 +1,8 @@
 # Micro Meet v0.1.0 Release Notes
 
+> Note (CLI-first): current canonical launcher is direct `HidBridge.RuntimeCtl` command syntax.  
+> Historical `Platform/run.ps1 -Task ...` examples are compatibility-only.
+
 Date: March 12, 2026
 
 ## Summary
