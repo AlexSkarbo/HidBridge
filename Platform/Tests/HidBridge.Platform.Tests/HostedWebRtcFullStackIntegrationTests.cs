@@ -257,6 +257,92 @@ public sealed class HostedWebRtcFullStackIntegrationTests
     }
 
     [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_BackendStartFailed_ReturnsRuntimeNotRunningWithFailureReason()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = true,
+                ["lastPeerMediaState"] = "Ready",
+                ["lastPeerMediaRuntimeRunning"] = false,
+                ["lastPeerMediaRuntimeState"] = "MediaBackendStartFailed",
+                ["lastPeerMediaRuntimeFailureReason"] = "Media backend is unreachable and MediaBackendExecutablePath is not configured.",
+                ["lastPeerMediaBackendAutoStart"] = true,
+                ["lastPeerMediaBackendRunning"] = false,
+                ["lastPeerMediaBackendState"] = "start-failed",
+                ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-backend-start-failed",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(snapshot.Ready);
+        Assert.Equal("media_runtime_not_running", snapshot.ReasonCode);
+        Assert.Contains("MediaBackendStartFailed", snapshot.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Media backend is unreachable", snapshot.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HostedPipeline_StrictMediaPolicy_BackendExited_ReturnsRuntimeNotRunningWithFailureReason()
+    {
+        using var host = BuildHost(
+            throwLeaseConflict: false,
+            readinessOptions: new WebRtcRelayReadinessOptions
+            {
+                RequireMediaReady = true,
+            },
+            healthMetrics: new Dictionary<string, object?>
+            {
+                ["onlinePeerCount"] = 1,
+                ["lastPeerState"] = "Connected",
+                ["lastPeerMediaReady"] = true,
+                ["lastPeerMediaState"] = "Ready",
+                ["lastPeerMediaRuntimeRunning"] = false,
+                ["lastPeerMediaRuntimeState"] = "Degraded",
+                ["lastPeerMediaRuntimeFailureReason"] = "Media backend exited unexpectedly with code 1.",
+                ["lastPeerMediaBackendAutoStart"] = true,
+                ["lastPeerMediaBackendRunning"] = false,
+                ["lastPeerMediaBackendState"] = "exited",
+                ["lastPeerMediaPlaybackUrl"] = "http://127.0.0.1:18110/media/edge-main",
+            });
+        await host.StartAsync(TestContext.Current.CancellationToken);
+
+        var ensure = host.Services.GetRequiredService<EnsureSessionControlLeaseUseCase>();
+        var readiness = host.Services.GetRequiredService<WebRtcRelayReadinessService>();
+        var ensured = await ensure.ExecuteAsync(
+            "hosted-webrtc-strict-backend-exited",
+            CreateEnsureRequest(endpointId: "endpoint-1"),
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await readiness.EvaluateAsync(
+            ensured.EffectiveSessionId,
+            RealtimeTransportProvider.WebRtcDataChannel,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(snapshot.Ready);
+        Assert.Equal("media_runtime_not_running", snapshot.ReasonCode);
+        Assert.Contains("state=Degraded", snapshot.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Media backend exited unexpectedly", snapshot.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task HostedPipeline_StrictMediaPolicy_FfmpegDcdRuntimeEvidence_AllowsReadyWhenProbeNotReady()
     {
         using var host = BuildHost(
