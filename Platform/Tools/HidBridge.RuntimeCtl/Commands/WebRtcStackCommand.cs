@@ -250,12 +250,28 @@ internal static class WebRtcStackCommand
         var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
         var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
         var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
+        var configuredMediaBackendAutoStart = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART") ?? string.Empty).Trim();
+        var configuredMediaBackendExecutablePath = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH") ?? string.Empty).Trim();
+        var configuredMediaBackendArgumentsTemplate = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE") ?? string.Empty).Trim();
+        var configuredMediaBackendWorkingDirectory = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY") ?? string.Empty).Trim();
+        var configuredMediaBackendStartupTimeoutSec = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC") ?? string.Empty).Trim();
+        var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
+        var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
+        var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
         var effectivePlaybackUrl = !string.IsNullOrWhiteSpace(configuredWhepUrl)
             ? configuredWhepUrl
             : configuredPlaybackUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = effectivePlaybackUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = configuredMediaBackendAutoStart;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH"] = configuredMediaBackendExecutablePath;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE"] = configuredMediaBackendArgumentsTemplate;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDWORKINGDIRECTORY"] = configuredMediaBackendWorkingDirectory;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTARTUPTIMEOUTSEC"] = configuredMediaBackendStartupTimeoutSec;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS"] = configuredMediaBackendProbeDelayMs;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS"] = configuredMediaBackendProbeTimeoutMs;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS"] = configuredMediaBackendStopTimeoutMs;
         if (string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase))
         {
             // Preserve explicit media-health and assume-ready settings from caller.
@@ -342,6 +358,11 @@ internal static class WebRtcStackCommand
         Console.WriteLine($"Media WHEP:     {(string.IsNullOrWhiteSpace(configuredWhepUrl) ? "<not configured>" : configuredWhepUrl)}");
         Console.WriteLine($"Media WHIP:     {(string.IsNullOrWhiteSpace(configuredWhipUrl) ? "<not configured>" : configuredWhipUrl)}");
         Console.WriteLine($"Media playback: {(string.IsNullOrWhiteSpace(effectivePlaybackUrl) ? "<not configured>" : effectivePlaybackUrl)}");
+        Console.WriteLine($"Media backend auto-start: {(string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart) ? "false" : configuredMediaBackendAutoStart)}");
+        if (!string.IsNullOrWhiteSpace(configuredMediaBackendExecutablePath))
+        {
+            Console.WriteLine($"Media backend executable: {configuredMediaBackendExecutablePath}");
+        }
         Console.WriteLine($"Session env:    {sessionEnvPath}");
         Console.WriteLine($"Summary JSON:   {stackSummaryPath}");
         if (exp022Process is not null)

@@ -293,6 +293,17 @@ static async Task ValidateMediaEndpointPreflightAsync(
 
     if (failures.Count > 0)
     {
+        if (options.MediaBackendAutoStart)
+        {
+            Console.WriteLine("WARNING: Media endpoint preflight failed while MediaBackendAutoStart=true; continuing and relying on runtime+track evidence gate.");
+            foreach (var failure in failures)
+            {
+                Console.WriteLine($"WARNING: {failure}");
+            }
+
+            return;
+        }
+
         throw new InvalidOperationException(
             "Media endpoint preflight failed: " + string.Join("; ", failures));
     }
@@ -1362,6 +1373,8 @@ internal sealed class AcceptanceRunnerOptions
     public int MediaHealthDelayMs { get; private set; } = 500;
     public bool SkipMediaEndpointPreflight { get; private set; }
     public int MediaEndpointPreflightTimeoutMs { get; private set; } = 1500;
+    public bool MediaBackendAutoStart { get; private set; } =
+        ParseBoolEnv("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART");
     public bool SkipControlLeaseRequest { get; private set; }
     public int LeaseSeconds { get; private set; } = 120;
     public bool SkipRuntimeBootstrap { get; private set; }
@@ -1465,6 +1478,27 @@ internal sealed class AcceptanceRunnerOptions
         index++;
         return args[index];
     }
+}
+
+static bool ParseBoolEnv(string name)
+{
+    var raw = Environment.GetEnvironmentVariable(name);
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return false;
+    }
+
+    if (bool.TryParse(raw, out var parsed))
+    {
+        return parsed;
+    }
+
+    if (int.TryParse(raw, out var numeric))
+    {
+        return numeric != 0;
+    }
+
+    return false;
 }
 
 internal sealed class AcceptanceSummary

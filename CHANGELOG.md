@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-03-27 (acceptance/runtimectl: support agent-managed media backend bootstrap)
+
+Summary:
+
+- Updated acceptance preflight to tolerate temporary endpoint-unreachable state when `HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART=true`.
+- In this mode, acceptance continues and relies on strict runtime+track media gate instead of failing early on TCP preflight.
+- Forwarded media-backend autostart env settings explicitly from `webrtc-stack` into edge-agent process.
+- Added explicit `webrtc-stack` summary lines for media-backend autostart/executable to simplify diagnostics.
+
+Detailed notes:
+
+- `Platform/Tools/HidBridge.Acceptance.Runner/Program.cs`
+- `Platform/Tools/HidBridge.RuntimeCtl/Commands/WebRtcStackCommand.cs`
+
 ## 2026-03-27 (readiness fix: ffmpeg-dcd runtime evidence accepted without probe-ready flag)
 
 Summary:
