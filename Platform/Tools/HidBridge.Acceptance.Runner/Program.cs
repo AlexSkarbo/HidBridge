@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Text.Json;
 
 var options = AcceptanceRunnerOptions.Parse(args);
@@ -106,6 +107,8 @@ static async Task<SmokeSummary> RunSmokeAsync(
     string smokeSummaryPath,
     CancellationToken cancellationToken)
 {
+    await ValidateMediaEndpointPreflightAsync(options, cancellationToken);
+
     var isUartExecutor = string.Equals(options.CommandExecutor, "uart", StringComparison.OrdinalIgnoreCase);
     if (!options.SkipControlHealthCheck && !isUartExecutor)
     {
@@ -224,6 +227,85 @@ static async Task<SmokeSummary> RunSmokeAsync(
         MediaStreams = mediaGate?.StreamsSnapshot,
         OutputPath = smokeSummaryPath,
     };
+}
+
+static async Task ValidateMediaEndpointPreflightAsync(
+    AcceptanceRunnerOptions options,
+    CancellationToken cancellationToken)
+{
+    if (options.SkipMediaEndpointPreflight)
+    {
+        return;
+    }
+
+    if (!options.RequireMediaReady && !options.RequireMediaPlaybackUrl)
+    {
+        return;
+    }
+
+    var checks = new List<(string Label, string Url)>();
+    if (options.RequireMediaReady)
+    {
+        AddIfSet(checks, "Media WHIP endpoint", options.MediaWhipUrl);
+        AddIfSet(checks, "Media WHEP endpoint", options.MediaWhepUrl);
+    }
+
+    if (options.RequireMediaPlaybackUrl)
+    {
+        AddIfSet(checks, "Media playback endpoint", options.MediaPlaybackUrl);
+    }
+
+    if (checks.Count == 0)
+    {
+        Console.WriteLine("WARNING: Media endpoint preflight skipped (no MediaWhip/MediaWhep/MediaPlayback URL configured).");
+        return;
+    }
+
+    Console.WriteLine($"Preflight media endpoints ({checks.Count})...");
+    var failures = new List<string>();
+    foreach (var check in checks)
+    {
+        if (!Uri.TryCreate(check.Url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            failures.Add($"{check.Label}: invalid URL '{check.Url}'");
+            continue;
+        }
+
+        var port = uri.IsDefaultPort
+            ? (uri.Scheme == Uri.UriSchemeHttps ? 443 : 80)
+            : uri.Port;
+
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        probeCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(200, options.MediaEndpointPreflightTimeoutMs)));
+
+        try
+        {
+            using var tcp = new TcpClient();
+            await tcp.ConnectAsync(uri.Host, port, probeCts.Token);
+            Console.WriteLine($"PASS  {check.Label}: {uri.Scheme}://{uri.Host}:{port}");
+        }
+        catch (Exception ex)
+        {
+            failures.Add($"{check.Label}: {uri.Scheme}://{uri.Host}:{port} unreachable ({ex.GetBaseException().Message})");
+        }
+    }
+
+    if (failures.Count > 0)
+    {
+        throw new InvalidOperationException(
+            "Media endpoint preflight failed: " + string.Join("; ", failures));
+    }
+}
+
+static void AddIfSet(ICollection<(string Label, string Url)> checks, string label, string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return;
+    }
+
+    checks.Add((label, value));
 }
 
 static SessionRuntime ResolveSessionRuntime(AcceptanceRunnerOptions options, string platformRoot)
@@ -1234,6 +1316,10 @@ internal sealed class AcceptanceRunnerOptions
     public bool AllowLegacyControlWs { get; private set; }
     public string ControlHealthUrl { get; private set; } = "http://127.0.0.1:28092/health";
     public string ControlWsUrl { get; private set; } = string.Empty;
+    public string MediaHealthUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty;
+    public string MediaWhipUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty;
+    public string MediaWhepUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty;
+    public string MediaPlaybackUrl { get; private set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty;
     public string KeycloakBaseUrl { get; private set; } = "http://host.docker.internal:18096";
     public string RealmName { get; private set; } = "hidbridge-dev";
     public string TokenClientId { get; private set; } = "controlplane-smoke";
@@ -1274,6 +1360,8 @@ internal sealed class AcceptanceRunnerOptions
     public bool RequireMediaPlaybackUrl { get; private set; }
     public int MediaHealthAttempts { get; private set; } = 20;
     public int MediaHealthDelayMs { get; private set; } = 500;
+    public bool SkipMediaEndpointPreflight { get; private set; }
+    public int MediaEndpointPreflightTimeoutMs { get; private set; } = 1500;
     public bool SkipControlLeaseRequest { get; private set; }
     public int LeaseSeconds { get; private set; } = 120;
     public bool SkipRuntimeBootstrap { get; private set; }
@@ -1322,6 +1410,12 @@ internal sealed class AcceptanceRunnerOptions
                 case "lease-seconds": options.LeaseSeconds = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "control-health-url": options.ControlHealthUrl = RequireValue(args, ref i, arg); break;
                 case "control-ws-url": options.ControlWsUrl = RequireValue(args, ref i, arg); break;
+                case "media-health-url": options.MediaHealthUrl = RequireValue(args, ref i, arg); break;
+                case "media-whip-url": options.MediaWhipUrl = RequireValue(args, ref i, arg); break;
+                case "media-whep-url": options.MediaWhepUrl = RequireValue(args, ref i, arg); break;
+                case "media-playback-url": options.MediaPlaybackUrl = RequireValue(args, ref i, arg); break;
+                case "skip-media-endpoint-preflight": options.SkipMediaEndpointPreflight = true; break;
+                case "media-endpoint-preflight-timeout-ms": options.MediaEndpointPreflightTimeoutMs = int.Parse(RequireValue(args, ref i, arg)); break;
                 case "keycloak-base-url": options.KeycloakBaseUrl = RequireValue(args, ref i, arg); break;
                 case "realm-name": options.RealmName = RequireValue(args, ref i, arg); break;
                 case "token-client-id": options.TokenClientId = RequireValue(args, ref i, arg); break;

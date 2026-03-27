@@ -73,6 +73,7 @@ internal static class WebRtcAcceptanceCommand
             "--transport-health-delay-ms", options.TransportHealthDelayMs.ToString(),
             "--media-health-attempts", options.MediaHealthAttempts.ToString(),
             "--media-health-delay-ms", options.MediaHealthDelayMs.ToString(),
+            "--media-endpoint-preflight-timeout-ms", options.MediaEndpointPreflightTimeoutMs.ToString(),
             "--uart-port", options.UartPort,
             "--uart-baud", options.UartBaud.ToString(),
             "--uart-hmac-key", options.UartHmacKey,
@@ -100,6 +101,11 @@ internal static class WebRtcAcceptanceCommand
         if (options.RequireMediaPlaybackUrl)
         {
             runnerArgs.Add("--require-media-playback-url");
+        }
+
+        if (options.SkipMediaEndpointPreflight)
+        {
+            runnerArgs.Add("--skip-media-endpoint-preflight");
         }
 
         if (!string.IsNullOrWhiteSpace(options.TokenClientSecret))
@@ -133,6 +139,30 @@ internal static class WebRtcAcceptanceCommand
         {
             runnerArgs.Add("--control-ws-url");
             runnerArgs.Add(options.ControlWsUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.MediaHealthUrl))
+        {
+            runnerArgs.Add("--media-health-url");
+            runnerArgs.Add(options.MediaHealthUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.MediaWhipUrl))
+        {
+            runnerArgs.Add("--media-whip-url");
+            runnerArgs.Add(options.MediaWhipUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.MediaWhepUrl))
+        {
+            runnerArgs.Add("--media-whep-url");
+            runnerArgs.Add(options.MediaWhepUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.MediaPlaybackUrl))
+        {
+            runnerArgs.Add("--media-playback-url");
+            runnerArgs.Add(options.MediaPlaybackUrl);
         }
 
         var startInfo = new ProcessStartInfo
@@ -265,6 +295,10 @@ internal static class WebRtcAcceptanceCommand
         public bool AllowLegacyControlWs { get; set; }
         public string ControlHealthUrl { get; set; } = "http://127.0.0.1:28092/health";
         public string ControlWsUrl { get; set; } = string.Empty;
+        public string MediaHealthUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty;
+        public string MediaWhipUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty;
+        public string MediaWhepUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty;
+        public string MediaPlaybackUrl { get; set; } = Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty;
         public string KeycloakBaseUrl { get; set; } = "http://host.docker.internal:18096";
         public string RealmName { get; set; } = "hidbridge-dev";
         public string TokenClientId { get; set; } = "controlplane-smoke";
@@ -285,6 +319,8 @@ internal static class WebRtcAcceptanceCommand
         public bool RequireMediaPlaybackUrl { get; set; }
         public int MediaHealthAttempts { get; set; } = 20;
         public int MediaHealthDelayMs { get; set; } = 500;
+        public bool SkipMediaEndpointPreflight { get; set; }
+        public int MediaEndpointPreflightTimeoutMs { get; set; } = 1500;
         public string UartPort { get; set; } = "COM6";
         public int UartBaud { get; set; } = 3000000;
         public string UartHmacKey { get; set; } = "your-master-secret";
@@ -330,6 +366,10 @@ internal static class WebRtcAcceptanceCommand
                     case "allowlegacycontrolws": options.AllowLegacyControlWs = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "controlhealthurl": options.ControlHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "controlwsurl": options.ControlWsUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediahealthurl": options.MediaHealthUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediawhipurl": options.MediaWhipUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediawhepurl": options.MediaWhepUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediaplaybackurl": options.MediaPlaybackUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "keycloakbaseurl": options.KeycloakBaseUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "realmname": options.RealmName = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "tokenclientid": options.TokenClientId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
@@ -350,6 +390,8 @@ internal static class WebRtcAcceptanceCommand
                     case "requiremediaplaybackurl": options.RequireMediaPlaybackUrl = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "mediahealthattempts": options.MediaHealthAttempts = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "mediahealthdelayms": options.MediaHealthDelayMs = ParseInt(name, value, hasValue, ref i, ref error); break;
+                    case "skipmediaendpointpreflight": options.SkipMediaEndpointPreflight = ParseSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "mediaendpointpreflighttimeoutms": options.MediaEndpointPreflightTimeoutMs = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "uartport": options.UartPort = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "uartbaud": options.UartBaud = ParseInt(name, value, hasValue, ref i, ref error); break;
                     case "uarthmackey": options.UartHmacKey = RequireValue(name, value, ref i, ref hasValue, ref error); break;
