@@ -4,7 +4,25 @@ let pointerLockLocked = false;
 let pending = [];
 let flushTimer = null;
 const flushDelayMs = 40;
-const targetElement = () => document.body;
+let captureElement = null;
+const targetElement = () => captureElement || document.getElementById("live-input-capture-zone") || document.body;
+
+function hasCaptureFocus() {
+  const element = targetElement();
+  if (!element) {
+    return false;
+  }
+  const active = document.activeElement;
+  return !!active && (active === element || element.contains(active));
+}
+
+function isEventWithinCapture(event) {
+  const element = targetElement();
+  if (!element || !event || !event.target) {
+    return false;
+  }
+  return event.target === element || element.contains(event.target);
+}
 
 function push(action, args) {
   if (!liveControlEnabled || !dotNetRef) {
@@ -48,6 +66,9 @@ function onKeyDown(event) {
   if (!liveControlEnabled) {
     return;
   }
+  if (!pointerLockLocked && !hasCaptureFocus()) {
+    return;
+  }
   if (event.repeat) {
     return;
   }
@@ -62,12 +83,18 @@ function onKeyUp(event) {
   if (!liveControlEnabled) {
     return;
   }
+  if (!pointerLockLocked && !hasCaptureFocus()) {
+    return;
+  }
   event.preventDefault();
   push("keyboard.reset", {});
 }
 
 function onMouseMove(event) {
   if (!liveControlEnabled) {
+    return;
+  }
+  if (!pointerLockLocked && !isEventWithinCapture(event)) {
     return;
   }
   const dx = Number(event.movementX || 0);
@@ -82,12 +109,26 @@ function onMouseDown(event) {
   if (!liveControlEnabled) {
     return;
   }
+  if (!pointerLockLocked && !isEventWithinCapture(event)) {
+    return;
+  }
+  const element = targetElement();
+  if (element && typeof element.focus === "function") {
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
+  }
   event.preventDefault();
   push("mouse.button", { button: parseButton(event.button), down: true });
 }
 
 function onMouseUp(event) {
   if (!liveControlEnabled) {
+    return;
+  }
+  if (!pointerLockLocked && !isEventWithinCapture(event)) {
     return;
   }
   event.preventDefault();
@@ -98,6 +139,9 @@ function onWheel(event) {
   if (!liveControlEnabled) {
     return;
   }
+  if (!pointerLockLocked && !isEventWithinCapture(event)) {
+    return;
+  }
   event.preventDefault();
   const delta = event.deltaY > 0 ? 1 : (event.deltaY < 0 ? -1 : 0);
   if (delta !== 0) {
@@ -106,7 +150,7 @@ function onWheel(event) {
 }
 
 function onContextMenu(event) {
-  if (liveControlEnabled) {
+  if (liveControlEnabled && (pointerLockLocked || isEventWithinCapture(event))) {
     event.preventDefault();
   }
 }
@@ -136,6 +180,10 @@ async function onPointerLockChange() {
 
 export function initializeLiveInput(dotNetObjectRef) {
   dotNetRef = dotNetObjectRef;
+  captureElement = document.getElementById("live-input-capture-zone") || document.body;
+  if (captureElement && !captureElement.hasAttribute("tabindex")) {
+    captureElement.setAttribute("tabindex", "0");
+  }
   window.addEventListener("keydown", onKeyDown, { passive: false });
   window.addEventListener("keyup", onKeyUp, { passive: false });
   window.addEventListener("mousemove", onMouseMove, { passive: true });
@@ -176,6 +224,7 @@ export function exitPointerLock() {
 export function disposeLiveInput() {
   liveControlEnabled = false;
   dotNetRef = null;
+  captureElement = null;
   pointerLockLocked = false;
   pending = [];
   if (flushTimer) {

@@ -283,15 +283,17 @@
                     }
                 </div>
 
-                <SessionMediaPanel SessionId="@SessionId"
-                                   PlaybackUrl="@GetTransportMediaPlayback(_transportReadiness, _transportHealth)"
-                                   MediaReady="@(_transportReadiness?.MediaReady ?? _transportHealth?.MediaReady)"
-                                   MediaState="@GetTransportMediaState(_transportReadiness, _transportHealth)"
-                                   MediaStreamId="@GetTransportMediaStreamId(_transportReadiness, _transportHealth)"
-                                   BackendReady="@(_transportReadiness?.Ready)"
-                                   BackendReasonCode="@_transportReadiness?.ReasonCode"
-                                   BackendReason="@_transportReadiness?.Reason"
-                                   BackendMediaFailureReason="@GetTransportMediaFailureReason(_transportReadiness, _transportHealth)" />
+                <div id="live-input-capture-zone" tabindex="0">
+                    <SessionMediaPanel SessionId="@SessionId"
+                                       PlaybackUrl="@GetTransportMediaPlayback(_transportReadiness, _transportHealth)"
+                                       MediaReady="@(_transportReadiness?.MediaReady ?? _transportHealth?.MediaReady)"
+                                       MediaState="@GetTransportMediaState(_transportReadiness, _transportHealth)"
+                                       MediaStreamId="@GetTransportMediaStreamId(_transportReadiness, _transportHealth)"
+                                       BackendReady="@(_transportReadiness?.Ready)"
+                                       BackendReasonCode="@_transportReadiness?.ReasonCode"
+                                       BackendReason="@_transportReadiness?.Reason"
+                                       BackendMediaFailureReason="@GetTransportMediaFailureReason(_transportReadiness, _transportHealth)" />
+                </div>
 
                 <div>
                     <div class="hid-panel-toolbar">
@@ -302,6 +304,11 @@
                         </div>
                         <button class="hid-button-secondary" @onclick="RefreshAsync">@T["Refresh"]</button>
                     </div>
+
+                    @if (GetControlBlockedBanner() is { } controlBlockedBanner)
+                    {
+                        <div class="hid-alert hid-alert--warning">@controlBlockedBanner</div>
+                    }
 
                     @if (_control.ActiveLease is null)
                     {
@@ -381,7 +388,19 @@
                     </div>
                     @if (!_isLiveControlAvailable)
                     {
-                        <p class="hid-meta-note">Live control is available only for the active controller.</p>
+                        <p class="hid-meta-note">@GetLiveControlBlockedHint()</p>
+                        <div class="hid-candidate-actions" style="margin-bottom: 0.75rem;">
+                            <button class="hid-button-secondary hid-button-sm"
+                                    disabled="@(!CanQuickRequestControl())"
+                                    @onclick="RequestControlForCurrentOperatorAsync">
+                                @T["RequestControl"]
+                            </button>
+                            <button class="hid-button-danger hid-button-sm"
+                                    disabled="@(!CanQuickForceTakeover())"
+                                    @onclick="ForceTakeoverForCurrentOperatorAsync">
+                                @T["ForceTakeover"]
+                            </button>
+                        </div>
                     }
 
                     <div class="hid-form-grid">
@@ -874,8 +893,121 @@
         || string.Equals(CurrentOperatorPrincipalId, _dashboard?.ActiveControllerPrincipalId, StringComparison.OrdinalIgnoreCase);
 
     private bool _isLiveControlAvailable
-        => !string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId)
-           && string.Equals(CurrentOperatorPrincipalId, _dashboard?.ActiveControllerPrincipalId, StringComparison.OrdinalIgnoreCase);
+        => IsSessionActiveForControl()
+           && !string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId)
+           && string.Equals(CurrentOperatorPrincipalId, _control?.ActiveLease?.PrincipalId, StringComparison.OrdinalIgnoreCase);
+
+    private string GetLiveControlBlockedHint()
+        => GetControlBlockedBanner() ?? T["LiveControlUnavailableHint"];
+
+    private string? GetControlBlockedBanner()
+    {
+        var sessionBlock = ResolveSessionControlBlockReason();
+        if (!string.IsNullOrWhiteSpace(sessionBlock))
+        {
+            return sessionBlock;
+        }
+
+        return ResolveLeaseControlBlockReason();
+    }
+
+    private string? ResolveSessionControlBlockReason()
+    {
+        if (_transportReadiness is not null
+            && string.Equals(_transportReadiness.ReasonCode, "session_not_active", StringComparison.OrdinalIgnoreCase))
+        {
+            var reason = string.IsNullOrWhiteSpace(_transportReadiness.Reason)
+                ? T["ControlBlockedSessionGeneric"]
+                : _transportReadiness.Reason;
+            return string.Format(T["ControlBlockedSessionReasonCode"], _transportReadiness.ReasonCode, reason);
+        }
+
+        if (_dashboard is null)
+        {
+            return null;
+        }
+
+        if (string.Equals(_dashboard.State, "Failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_dashboard.State, "Ended", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_dashboard.State, "Terminating", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Format(
+                T["ControlBlockedSessionState"],
+                _dashboard.State,
+                GetStateReasonLabel());
+        }
+
+        return null;
+    }
+
+    private string? ResolveLeaseControlBlockReason()
+    {
+        if (_control is null || _dashboard is null)
+        {
+            return null;
+        }
+
+        if (_control.ActiveLease is null)
+        {
+            return T["ControlBlockedLeaseMissing"];
+        }
+
+        if (string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId))
+        {
+            return T["ControlBlockedOperatorUnknown"];
+        }
+
+        if (!string.Equals(_control.ActiveLease.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Format(
+                T["ControlBlockedLeaseHeldBy"],
+                _control.ActiveLease.PrincipalId,
+                FormatTime(_control.ActiveLease.ExpiresAtUtc),
+                FormatLeaseRemaining(_control.ActiveLease.ExpiresAtUtc));
+        }
+
+        return null;
+    }
+
+    private bool IsSessionActiveForControl()
+    {
+        if (_dashboard is null)
+        {
+            return false;
+        }
+
+        return !string.Equals(_dashboard.State, "Failed", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(_dashboard.State, "Ended", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(_dashboard.State, "Terminating", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private ControlCandidateViewModel? FindCurrentOperatorCandidate()
+        => _control?.Candidates
+            .FirstOrDefault(candidate => string.Equals(candidate.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase));
+
+    private bool CanQuickRequestControl()
+    {
+        if (_busy || !IsSessionActiveForControl())
+        {
+            return false;
+        }
+
+        var candidate = FindCurrentOperatorCandidate();
+        return candidate is not null
+            && candidate.IsEligible
+            && !candidate.IsCurrentController;
+    }
+
+    private bool CanQuickForceTakeover()
+    {
+        if (_busy || !_canModerate || !IsSessionActiveForControl())
+        {
+            return false;
+        }
+
+        var candidate = FindCurrentOperatorCandidate();
+        return candidate is not null;
+    }
 
     private string NextRecommendedAction
     {
@@ -1130,10 +1262,34 @@
                     });
             });
 
+    private async Task RequestControlForCurrentOperatorAsync()
+    {
+        var candidate = FindCurrentOperatorCandidate();
+        if (candidate is null || !candidate.IsEligible)
+        {
+            _actionMessage = GetLiveControlBlockedHint();
+            return;
+        }
+
+        await RequestControlAsync(candidate);
+    }
+
     private async Task ReleaseControlAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(
             $"{T["ControlReleasedMessage"]} {candidate.PrincipalId}.",
             () => ApiClient.ReleaseControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, "operator released control"));
+
+    private async Task ForceTakeoverForCurrentOperatorAsync()
+    {
+        var candidate = FindCurrentOperatorCandidate();
+        if (candidate is null)
+        {
+            _actionMessage = GetLiveControlBlockedHint();
+            return;
+        }
+
+        await ForceTakeoverAsync(candidate);
+    }
 
     private async Task ForceTakeoverAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(
@@ -1339,8 +1495,19 @@
 
     private async Task ToggleLiveControlAsync()
     {
-        if (_liveInputModule is null || !_isLiveControlAvailable)
+        if (_liveInputModule is null)
         {
+            return;
+        }
+
+        if (!_liveControlEnabled)
+        {
+            await RefreshAsync();
+        }
+
+        if (!_isLiveControlAvailable)
+        {
+            _actionMessage = GetLiveControlBlockedHint();
             return;
         }
 
@@ -1395,6 +1562,11 @@
     {
         if (!_liveControlEnabled || !_isLiveControlAvailable || events is null || events.Count == 0)
         {
+            if (_liveControlEnabled && !_isLiveControlAvailable)
+            {
+                _liveControlEnabled = false;
+                _actionMessage = GetLiveControlBlockedHint();
+            }
             return;
         }
 
