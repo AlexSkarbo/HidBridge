@@ -42,7 +42,26 @@
 
     @if (GetControlBlockedDiagnostic() is { } globalControlBlockedBanner)
     {
-        <div class="hid-alert hid-alert--warning">@string.Format(T["ControlBlockedSessionReasonCode"], globalControlBlockedBanner.Code, globalControlBlockedBanner.Message)</div>
+        <div class="hid-alert hid-alert--warning">
+            <div>@string.Format(T["ControlBlockedSessionReasonCode"], globalControlBlockedBanner.Code, globalControlBlockedBanner.Message)</div>
+            <div class="hid-candidate-actions" style="margin-top: 0.5rem;">
+                <button class="hid-button-secondary hid-button-sm"
+                        disabled="@(!CanQuickRequestControl())"
+                        @onclick="RequestControlForCurrentOperatorAsync">
+                    @T["RequestControl"]
+                </button>
+                <button class="hid-button-danger hid-button-sm"
+                        disabled="@(!CanQuickForceTakeover())"
+                        @onclick="ForceTakeoverForCurrentOperatorAsync">
+                    @T["ForceTakeover"]
+                </button>
+                <button class="hid-button-secondary hid-button-sm"
+                        disabled="@_busy"
+                        @onclick="RefreshAsync">
+                    @T["Refresh"]
+                </button>
+            </div>
+        </div>
     }
 
     @if (_dashboard is not null && string.Equals(_dashboard.State, "Recovering", StringComparison.OrdinalIgnoreCase))
@@ -909,6 +928,7 @@
 
     private bool _isLiveControlAvailable
         => IsSessionActiveForControl()
+           && GetControlBlockedDiagnostic() is null
            && !string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId)
            && string.Equals(CurrentOperatorPrincipalId, _control?.ActiveLease?.PrincipalId, StringComparison.OrdinalIgnoreCase);
 
