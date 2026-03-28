@@ -928,12 +928,12 @@
 
     private bool _isLiveControlAvailable
         => IsSessionActiveForControl()
-           && GetControlBlockedDiagnostic() is null
+           && GetLiveInputControlBlockDiagnostic() is null
            && !string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId)
            && string.Equals(CurrentOperatorPrincipalId, _control?.ActiveLease?.PrincipalId, StringComparison.OrdinalIgnoreCase);
 
     private string GetLiveControlBlockedHint()
-        => GetControlBlockedDiagnostic() is { } diagnostic
+        => GetLiveInputControlBlockDiagnostic() is { } diagnostic
             ? string.Format(T["ControlBlockedBannerWithCode"], diagnostic.Code, diagnostic.Message)
             : T["LiveControlUnavailableHint"];
 
@@ -946,7 +946,7 @@
                 : T["LiveControlPathReadyLease"];
         }
 
-        if (GetControlBlockedDiagnostic() is { } blocked)
+        if (GetLiveInputControlBlockDiagnostic() is { } blocked)
         {
             return $"{blocked.Code}: {blocked.Message}";
         }
@@ -961,7 +961,7 @@
             return _backendControlBlockOverride;
         }
 
-        var sessionBlock = ResolveSessionControlBlockReason();
+        var sessionBlock = ResolveSessionControlBlockReason(includeTransportReadiness: true);
         if (sessionBlock is not null)
         {
             return sessionBlock;
@@ -970,9 +970,21 @@
         return ResolveLeaseControlBlockReason();
     }
 
-    private ControlBlockDiagnostic? ResolveSessionControlBlockReason()
+    private ControlBlockDiagnostic? GetLiveInputControlBlockDiagnostic()
     {
-        if (_transportReadiness is not null
+        var sessionBlock = ResolveSessionControlBlockReason(includeTransportReadiness: false);
+        if (sessionBlock is not null)
+        {
+            return sessionBlock;
+        }
+
+        return ResolveLeaseControlBlockReason();
+    }
+
+    private ControlBlockDiagnostic? ResolveSessionControlBlockReason(bool includeTransportReadiness)
+    {
+        if (includeTransportReadiness
+            && _transportReadiness is not null
             && string.Equals(_transportReadiness.ReasonCode, "session_not_active", StringComparison.OrdinalIgnoreCase))
         {
             var reasonCode = string.IsNullOrWhiteSpace(_transportReadiness.ReasonCode)
@@ -1248,7 +1260,7 @@
             await LoadTransportDiagnosticsAsync();
             EnsureShareRequestDefaults();
             await SyncLiveControlStateAfterRefreshAsync();
-            if (ResolveSessionControlBlockReason() is null && ResolveLeaseControlBlockReason() is null)
+            if (ResolveSessionControlBlockReason(includeTransportReadiness: true) is null && ResolveLeaseControlBlockReason() is null)
             {
                 _backendControlBlockOverride = null;
             }
