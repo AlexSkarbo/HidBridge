@@ -55,6 +55,25 @@
         <span>@T["MediaLastEvent"]: @GetLastEventLabel()</span>
     </div>
 
+    @if (LiveControlAvailable)
+    {
+        if (LiveControlEnabled)
+        {
+            <div class="hid-inline-meta">
+                <span>@T["MediaPlayerLiveControlReadyHint"]</span>
+                <button class="hid-button-secondary hid-button-sm"
+                        disabled="@_busy"
+                        @onclick="CaptureMediaInputFocusAsync">
+                    @T["MediaPlayerCaptureInput"]
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="hid-meta-note">@T["MediaPlayerLiveControlDisabledHint"]</div>
+        }
+    }
+
     @{
         var notPlayableReason = GetNotPlayableReason();
     }
@@ -69,7 +88,15 @@
         <div class="hid-meta-note">@T["MediaPlaybackError"]: @_error</div>
     }
 
-    <video @ref="_videoElement" controls autoplay playsinline class="hid-media-player"></video>
+    <div class="hid-media-player-shell">
+        <video @ref="_videoElement"
+               controls
+               autoplay
+               playsinline
+               tabindex="0"
+               @onclick="CaptureMediaInputFocusAsync"
+               class="hid-media-player"></video>
+    </div>
 
     @if (string.IsNullOrWhiteSpace(PlaybackUrl))
     {
@@ -107,6 +134,12 @@
 
     [Parameter]
     public bool AutoStartWhenReady { get; set; } = true;
+
+    [Parameter]
+    public bool LiveControlAvailable { get; set; }
+
+    [Parameter]
+    public bool LiveControlEnabled { get; set; }
 
     private IJSObjectReference? _module;
     private DotNetObjectReference<SessionMediaPanel>? _dotNetRef;
@@ -612,6 +645,23 @@
         }
 
         return value.Trim();
+    }
+
+    private async Task CaptureMediaInputFocusAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.InvokeVoidAsync("focusPlaybackElement", _videoElement);
+        }
+        catch
+        {
+            // Best effort only; live control can still work via manual focus.
+        }
     }
 
     public async ValueTask DisposeAsync()

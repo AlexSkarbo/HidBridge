@@ -292,7 +292,9 @@
                                        BackendReady="@(_transportReadiness?.Ready)"
                                        BackendReasonCode="@_transportReadiness?.ReasonCode"
                                        BackendReason="@_transportReadiness?.Reason"
-                                       BackendMediaFailureReason="@GetTransportMediaFailureReason(_transportReadiness, _transportHealth)" />
+                                       BackendMediaFailureReason="@GetTransportMediaFailureReason(_transportReadiness, _transportHealth)"
+                                       LiveControlAvailable="@_isLiveControlAvailable"
+                                       LiveControlEnabled="@_liveControlEnabled" />
                 </div>
 
                 <div>

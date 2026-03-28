@@ -875,6 +875,10 @@ html[data-platform="apple"] .hid-logo {
     background: color-mix(in srgb, var(--hid-surface-strong) 82%, #000 18%);
 }
 
+.hid-media-player-shell {
+    position: relative;
+}
+
 .hid-field {
     display: inline-flex;
     align-items: center;

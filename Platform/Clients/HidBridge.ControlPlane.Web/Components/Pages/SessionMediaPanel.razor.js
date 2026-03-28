@@ -422,6 +422,19 @@ export function setPlaybackOptions(videoElement, options) {
   applyOptions(options);
 }
 
+export function focusPlaybackElement(videoElement) {
+  const target = videoElement || runtime.video;
+  if (!target || typeof target.focus !== "function") {
+    return false;
+  }
+  try {
+    target.focus({ preventScroll: true });
+  } catch {
+    target.focus();
+  }
+  return true;
+}
+
 export async function stopPlayback(videoElement) {
   runtime.stopRequested = true;
   if (videoElement) {
