@@ -10,7 +10,8 @@ const runtime = {
   whepDeleteUrl: null,
   reconnectTimer: null,
   reconnectAttempts: 0,
-  reconnectDelayMs: 1200,
+  reconnectDelayMs: 900,
+  maxReconnectDelayMs: 5000,
   maxReconnectAttempts: 20,
   autoReconnect: true,
   stopRequested: false,
@@ -76,6 +77,9 @@ function applyOptions(options) {
   if (Number.isFinite(options.reconnectDelayMs)) {
     runtime.reconnectDelayMs = Math.max(250, Math.trunc(options.reconnectDelayMs));
   }
+  if (Number.isFinite(options.maxReconnectDelayMs)) {
+    runtime.maxReconnectDelayMs = Math.max(runtime.reconnectDelayMs, Math.trunc(options.maxReconnectDelayMs));
+  }
   if (Number.isFinite(options.maxReconnectAttempts)) {
     runtime.maxReconnectAttempts = Math.max(1, Math.trunc(options.maxReconnectAttempts));
   }
@@ -103,7 +107,10 @@ function scheduleReconnect(reason, error) {
 
   runtime.reconnectAttempts += 1;
   const attempt = runtime.reconnectAttempts;
-  const delay = runtime.reconnectDelayMs;
+  const delay = Math.min(
+    runtime.maxReconnectDelayMs,
+    runtime.reconnectDelayMs * Math.pow(2, Math.max(0, attempt - 1)),
+  );
   emit("reconnect-attempt", { attempt, reason, nextDelayMs: delay, error });
 
   runtime.reconnectTimer = window.setTimeout(async () => {
@@ -115,8 +122,10 @@ function scheduleReconnect(reason, error) {
     try {
       await startCore();
       emit("reconnect-success", { attempt });
+      runtime.reconnectAttempts = 0;
     } catch (retryError) {
       const message = retryError?.message || "Playback reconnect failed.";
+      runtime.running = false;
       emit("playback-error", { error: message });
       scheduleReconnect("retry-failed", message);
     }
@@ -295,6 +304,7 @@ async function startWhepPlayback(playbackUrl) {
   peer.onconnectionstatechange = () => {
     emit("connection-state", { connectionState: peer.connectionState });
     if (peer.connectionState === "failed" || peer.connectionState === "disconnected") {
+      runtime.running = false;
       scheduleReconnect("peer-connection-state");
     }
   };
@@ -302,6 +312,7 @@ async function startWhepPlayback(playbackUrl) {
   peer.oniceconnectionstatechange = () => {
     emit("ice-state", { iceConnectionState: peer.iceConnectionState });
     if (peer.iceConnectionState === "failed" || peer.iceConnectionState === "disconnected") {
+      runtime.running = false;
       scheduleReconnect("ice-connection-state");
     }
   };

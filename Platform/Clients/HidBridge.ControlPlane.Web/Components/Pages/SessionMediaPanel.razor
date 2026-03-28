@@ -124,8 +124,13 @@
     private DateTimeOffset? _lastEventAtUtc;
     private int _trackCount;
     private int _reconnectAttempts;
-    private const int ReconnectDelayMs = 1200;
+    private CancellationTokenSource? _autoStartCts;
+    private bool _autoStartLoopActive;
+    private const int ReconnectDelayMs = 900;
+    private const int MaxReconnectDelayMs = 5000;
     private const int MaxReconnectAttempts = 20;
+    private const int AutoStartRetryDelayMs = 1500;
+    private const int AutoStartMaxAttempts = 8;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -138,12 +143,7 @@
         {
             _module = await Js.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/SessionMediaPanel.razor.js");
             _dotNetRef = DotNetObjectReference.Create(this);
-
-            var currentUrl = NormalizeUrl(PlaybackUrl);
-            if (ShouldAutoStart(currentUrl))
-            {
-                await StartPlaybackInternalAsync(currentUrl);
-            }
+            EnsureAutoStartLoop();
         }
         catch
         {
@@ -155,25 +155,25 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!_isRunning || _module is null)
+        if (_module is null)
         {
-            var autoUrl = NormalizeUrl(PlaybackUrl);
-            if (_module is null || !ShouldAutoStart(autoUrl))
-            {
-                return;
-            }
-
-            await StartPlaybackInternalAsync(autoUrl);
+            CancelAutoStartLoop();
             return;
         }
 
         var nextUrl = NormalizeUrl(PlaybackUrl);
-        if (string.Equals(_activePlaybackUrl, nextUrl, StringComparison.Ordinal))
+        if (_isRunning && string.Equals(_activePlaybackUrl, nextUrl, StringComparison.Ordinal))
         {
             return;
         }
 
-        await StartPlaybackInternalAsync(nextUrl);
+        if (_isRunning)
+        {
+            await StartPlaybackInternalAsync(nextUrl);
+            return;
+        }
+
+        EnsureAutoStartLoop();
     }
 
     private async Task StartPlaybackAsync()
@@ -187,6 +187,8 @@
         {
             return;
         }
+
+        CancelAutoStartLoop();
 
         var nextUrl = NormalizeUrl(PlaybackUrl);
         if (string.IsNullOrWhiteSpace(nextUrl))
@@ -261,11 +263,14 @@
         finally
         {
             _busy = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
     private async Task StopPlaybackAsync()
     {
+        CancelAutoStartLoop();
+
         if (_module is null)
         {
             _isRunning = false;
@@ -339,6 +344,7 @@
                 {
                     AutoReconnect = _autoReconnect,
                     ReconnectDelayMs = ReconnectDelayMs,
+                    MaxReconnectDelayMs = MaxReconnectDelayMs,
                     MaxReconnectAttempts = MaxReconnectAttempts,
                 });
         }
@@ -380,7 +386,7 @@
 
         if (runtimeEvent.Attempt.HasValue)
         {
-            _reconnectAttempts = Math.Max(_reconnectAttempts, runtimeEvent.Attempt.Value);
+            _reconnectAttempts = Math.Max(0, runtimeEvent.Attempt.Value);
         }
 
         if (runtimeEvent.IsRunning.HasValue)
@@ -396,6 +402,17 @@
             || string.Equals(runtimeEvent.Type, "reconnect-success", StringComparison.OrdinalIgnoreCase))
         {
             _error = null;
+        }
+
+        if (string.Equals(runtimeEvent.Type, "reconnect-success", StringComparison.OrdinalIgnoreCase))
+        {
+            _reconnectAttempts = 0;
+        }
+
+        if (string.Equals(runtimeEvent.Type, "reconnect-exhausted", StringComparison.OrdinalIgnoreCase))
+        {
+            _isRunning = false;
+            EnsureAutoStartLoop();
         }
 
         return InvokeAsync(StateHasChanged);
@@ -415,6 +432,82 @@
 
         return string.Equals(MediaState, "Ready", StringComparison.OrdinalIgnoreCase)
             || string.Equals(MediaState, "Streaming", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void EnsureAutoStartLoop()
+    {
+        var playbackUrl = NormalizeUrl(PlaybackUrl);
+        if (_module is null || !ShouldAutoStart(playbackUrl))
+        {
+            CancelAutoStartLoop();
+            return;
+        }
+
+        if (_autoStartLoopActive)
+        {
+            return;
+        }
+
+        _autoStartCts?.Cancel();
+        _autoStartCts?.Dispose();
+        _autoStartCts = new CancellationTokenSource();
+        _ = RunAutoStartLoopAsync(_autoStartCts.Token);
+    }
+
+    private void CancelAutoStartLoop()
+    {
+        _autoStartCts?.Cancel();
+        _autoStartCts?.Dispose();
+        _autoStartCts = null;
+    }
+
+    private async Task RunAutoStartLoopAsync(CancellationToken cancellationToken)
+    {
+        _autoStartLoopActive = true;
+        var attempts = 0;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var playbackUrl = NormalizeUrl(PlaybackUrl);
+                if (_module is null || !ShouldAutoStart(playbackUrl))
+                {
+                    break;
+                }
+
+                attempts++;
+                await StartPlaybackInternalAsync(playbackUrl);
+                if (_isRunning)
+                {
+                    break;
+                }
+
+                if (attempts >= AutoStartMaxAttempts)
+                {
+                    if (string.IsNullOrWhiteSpace(_error))
+                    {
+                        _error = "Playback auto-start retries exhausted.";
+                        await InvokeAsync(StateHasChanged);
+                    }
+
+                    break;
+                }
+
+                await Task.Delay(AutoStartRetryDelayMs, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            _autoStartLoopActive = false;
+            if (!cancellationToken.IsCancellationRequested && !_isRunning)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
     }
 
     private string GetLastEventLabel()
@@ -542,6 +635,7 @@
             }
         }
 
+        CancelAutoStartLoop();
         _dotNetRef?.Dispose();
         _dotNetRef = null;
     }
@@ -559,6 +653,7 @@
     {
         public bool AutoReconnect { get; set; } = true;
         public int ReconnectDelayMs { get; set; } = SessionMediaPanel.ReconnectDelayMs;
+        public int MaxReconnectDelayMs { get; set; } = SessionMediaPanel.MaxReconnectDelayMs;
         public int MaxReconnectAttempts { get; set; } = SessionMediaPanel.MaxReconnectAttempts;
     }
 
