@@ -122,6 +122,10 @@
                     <input class="hid-input" @bind="_agentProfile.MediaHostBaseUrl" @bind:event="oninput" />
                 </label>
                 <label class="hid-field-label">
+                    @T["AgentProfileMediaHealthUrl"]
+                    <input class="hid-input" @bind="_agentProfile.MediaHealthUrl" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
                     @T["AgentProfileUartPort"]
                     <input class="hid-input" @bind="_agentProfile.UartPort" @bind:event="oninput" />
                 </label>
@@ -137,6 +141,10 @@
                     @T["AgentProfileAudioDevice"]
                     <input class="hid-input" @bind="_agentProfile.FfmpegAudioDevice" @bind:event="oninput" />
                 </label>
+                <label class="hid-field-label">
+                    @T["AgentProfileFfmpegExecutablePath"]
+                    <input class="hid-input" @bind="_agentProfile.FfmpegExecutablePath" @bind:event="oninput" />
+                </label>
                 <label class="hid-field">
                     <input type="checkbox" @bind="_agentProfile.FfmpegUseTestSource" />
                     <span>@T["AgentProfileUseTestSource"]</span>
@@ -144,6 +152,10 @@
                 <label class="hid-field">
                     <input type="checkbox" @bind="_agentProfile.MediaBackendAutoStart" />
                     <span>@T["AgentProfileMediaBackendAutoStart"]</span>
+                </label>
+                <label class="hid-field">
+                    <input type="checkbox" @bind="_agentProfile.RequireMediaReady" />
+                    <span>@T["AgentProfileRequireMediaReady"]</span>
                 </label>
             </div>
 
@@ -160,7 +172,19 @@
                 @T["AgentProfileGeneratedCommand"]
                 <textarea class="hid-input" rows="7" readonly>@BuildRuntimeCtlCommand()</textarea>
             </div>
+            <div class="hid-candidate-actions">
+                <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyRuntimeCtlCommandAsync">@T["AgentProfileCopyCommand"]</button>
+            </div>
             <div class="hid-subtle-copy">@T["AgentProfileCommandHint"]</div>
+
+            <div class="hid-field-label">
+                @T["AgentProfileGeneratedAcceptanceCommand"]
+                <textarea class="hid-input" rows="7" readonly>@BuildAcceptanceCommand()</textarea>
+            </div>
+            <div class="hid-candidate-actions">
+                <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyAcceptanceCommandAsync">@T["AgentProfileCopyCommand"]</button>
+            </div>
+            <div class="hid-subtle-copy">@T["AgentProfileAcceptanceHint"]</div>
         </section>
     </div>
 
@@ -291,6 +315,12 @@
     private string BuildRuntimeCtlCommand()
     {
         var profile = _agentProfile.Normalize();
+        var envParts = new List<string>
+        {
+            $"$env:HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL={QuotePowerShell(profile.MediaHealthUrl)}",
+            $"$env:HIDBRIDGE_EDGE_PROXY_REQUIREMEDIAREADY={QuotePowerShell(profile.RequireMediaReady ? "true" : "false")}",
+        };
+
         var commandParts = new List<string>
         {
             "dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-stack",
@@ -305,6 +335,7 @@
             $"-MediaPlaybackUrl {QuotePowerShell(profile.BuildPlaybackUrl())}",
             $"-MediaBackendAutoStart {(profile.MediaBackendAutoStart ? "true" : "false")}",
             $"-FfmpegUseTestSource {(profile.FfmpegUseTestSource ? "true" : "false")}",
+            $"-FfmpegExecutablePath {QuotePowerShell(profile.FfmpegExecutablePath)}",
         };
 
         if (!profile.FfmpegUseTestSource && !string.IsNullOrWhiteSpace(profile.FfmpegVideoDevice))
@@ -317,7 +348,57 @@
             commandParts.Add($"-FfmpegAudioDevice {QuotePowerShell(profile.FfmpegAudioDevice)}");
         }
 
-        return string.Join(" ", commandParts);
+        return $"{string.Join("; ", envParts)}; {string.Join(" ", commandParts)}";
+    }
+
+    private string BuildAcceptanceCommand()
+    {
+        var profile = _agentProfile.Normalize();
+        var commandParts = new List<string>
+        {
+            "dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-acceptance",
+            "-CommandExecutor uart",
+            "-SkipRuntimeBootstrap",
+            "-StopExisting",
+            "-StopStackAfter",
+            "-PeerReadyTimeoutSec 45",
+            "-MaxDurationSec 420",
+            profile.RequireMediaReady ? "-RequireMediaReady" : string.Empty,
+            "-RequireMediaPlaybackUrl",
+            $"-UartPort {QuotePowerShell(profile.UartPort)}",
+            $"-UartHmacKey {QuotePowerShell(profile.UartHmacKey)}",
+            $"-MediaWhipUrl {QuotePowerShell(profile.BuildWhipUrl())}",
+            $"-MediaWhepUrl {QuotePowerShell(profile.BuildWhepUrl())}",
+            $"-MediaPlaybackUrl {QuotePowerShell(profile.BuildPlaybackUrl())}",
+            $"-MediaHealthUrl {QuotePowerShell(profile.MediaHealthUrl)}",
+        };
+
+        return string.Join(" ", commandParts.Where(static part => !string.IsNullOrWhiteSpace(part)));
+    }
+
+    private async Task CopyRuntimeCtlCommandAsync()
+        => await CopyCommandAsync(BuildRuntimeCtlCommand());
+
+    private async Task CopyAcceptanceCommandAsync()
+        => await CopyCommandAsync(BuildAcceptanceCommand());
+
+    private async Task CopyCommandAsync(string command)
+    {
+        if (_settingsModule is null)
+        {
+            _agentProfileStatus = T["AgentProfileSaveFailed"];
+            return;
+        }
+
+        try
+        {
+            var copied = await _settingsModule.InvokeAsync<bool>("copyTextToClipboard", command);
+            _agentProfileStatus = copied ? T["AgentProfileCommandCopied"] : T["AgentProfileCopyFailed"];
+        }
+        catch
+        {
+            _agentProfileStatus = T["AgentProfileCopyFailed"];
+        }
     }
 
     private static string QuotePowerShell(string value)
@@ -347,13 +428,16 @@
     {
         public string FfmpegLatencyProfile { get; set; } = "balanced";
         public string MediaHostBaseUrl { get; set; } = "http://127.0.0.1:19851";
+        public string MediaHealthUrl { get; set; } = "http://127.0.0.1:18081/api/v1/versions";
         public string MediaStreamId { get; set; } = "edge-main";
         public string UartPort { get; set; } = "COM6";
         public string UartHmacKey { get; set; } = "your-master-secret";
+        public string FfmpegExecutablePath { get; set; } = "ffmpeg";
         public string FfmpegVideoDevice { get; set; } = string.Empty;
         public string FfmpegAudioDevice { get; set; } = string.Empty;
         public bool FfmpegUseTestSource { get; set; }
         public bool MediaBackendAutoStart { get; set; }
+        public bool RequireMediaReady { get; set; } = true;
 
         public static AgentProfileSettings CreateDefault() => new();
 
@@ -375,13 +459,16 @@
             {
                 FfmpegLatencyProfile = normalizedProfile,
                 MediaHostBaseUrl = normalizedHost,
+                MediaHealthUrl = string.IsNullOrWhiteSpace(MediaHealthUrl) ? "http://127.0.0.1:18081/api/v1/versions" : MediaHealthUrl.Trim(),
                 MediaStreamId = string.IsNullOrWhiteSpace(MediaStreamId) ? "edge-main" : MediaStreamId.Trim(),
                 UartPort = string.IsNullOrWhiteSpace(UartPort) ? "COM6" : UartPort.Trim(),
                 UartHmacKey = string.IsNullOrWhiteSpace(UartHmacKey) ? "your-master-secret" : UartHmacKey.Trim(),
+                FfmpegExecutablePath = string.IsNullOrWhiteSpace(FfmpegExecutablePath) ? "ffmpeg" : FfmpegExecutablePath.Trim(),
                 FfmpegVideoDevice = (FfmpegVideoDevice ?? string.Empty).Trim(),
                 FfmpegAudioDevice = (FfmpegAudioDevice ?? string.Empty).Trim(),
                 FfmpegUseTestSource = FfmpegUseTestSource,
                 MediaBackendAutoStart = MediaBackendAutoStart,
+                RequireMediaReady = RequireMediaReady,
             };
         }
 

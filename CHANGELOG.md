@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-03-28 (settings: profile generator emits valid stack/acceptance commands)
+
+Summary:
+
+- Extended Settings -> Agent profile with `MediaHealthUrl`, `FfmpegExecutablePath`, and `RequireMediaReady`.
+- Fixed generated `webrtc-stack` command to avoid unsupported CLI flags by exporting required values through env vars.
+- Added generated `webrtc-acceptance` command from the same profile to keep stack/smoke config aligned.
+- Added copy-to-clipboard actions for both generated commands.
+
+Detailed notes:
+
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/Settings.razor`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/Settings.razor.js`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Localization/OperatorText.cs`
+
 ## 2026-03-27 (integration): cover ffmpeg-dcd runtime-evidence readiness fallback
 
 Summary:
