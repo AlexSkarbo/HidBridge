@@ -150,5 +150,6 @@ public sealed record AgentInstallBootstrapPayload(
     string PackageUrl,
     string PackageSha256,
     string AgentExecutableRelativePath,
-    string DefaultInstallDirectory,
+    string DefaultInstallDirectoryWindows,
+    string DefaultInstallDirectoryLinux,
     DateTimeOffset ExpiresAtUtc);

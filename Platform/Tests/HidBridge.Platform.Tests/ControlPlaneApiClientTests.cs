@@ -154,11 +154,17 @@ public sealed class ControlPlaneApiClientTests
         var handler = new RecordingHandler(new AgentInstallLinkResponseViewModel(
             InstallUrl: "http://127.0.0.1:18093/agent-install/bootstrap.ps1?token=abc",
             BootstrapScriptUrl: "http://127.0.0.1:18093/agent-install/bootstrap.ps1?token=abc",
+            BootstrapScriptUrlWindows: "http://127.0.0.1:18093/agent-install/bootstrap.ps1?token=abc",
+            BootstrapScriptUrlLinux: "http://127.0.0.1:18093/agent-install/bootstrap.sh?token=abc",
+            AgentSettingsUrl: "http://127.0.0.1:18093/agent-install/agentsettings.json?token=abc",
+            BundleUrl: "http://127.0.0.1:18093/agent-install/bundle.zip?token=abc",
             SessionId: "room-1",
             PeerId: "peer-1",
             EndpointId: "endpoint_local_demo",
             ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(30),
-            OneShotCommand: "powershell -Command ..."));
+            OneShotCommand: "powershell -Command ...",
+            OneShotCommandWindows: "powershell -Command ...",
+            OneShotCommandLinux: "bash -lc \"curl ...\""));
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
         var apiClient = new ControlPlaneApiClient(httpClient);
 

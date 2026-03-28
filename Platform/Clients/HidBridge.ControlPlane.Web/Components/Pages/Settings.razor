@@ -191,6 +191,14 @@
             </div>
             <div class="hid-subtle-copy">@T["AgentProfileAcceptanceHint"]</div>
 
+            <div class="hid-field-label">
+                agentsettings.json (profile preview)
+                <textarea class="hid-input" rows="12" readonly>@BuildAgentSettingsJsonPreview()</textarea>
+            </div>
+            <div class="hid-candidate-actions">
+                <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyAgentSettingsPreviewAsync">Copy agentsettings.json</button>
+            </div>
+
             <div class="hid-candidate-actions">
                 <button class="hid-button-primary hid-button-sm" type="button" @onclick="GenerateInstallLinkAsync">@T["AgentProfileGenerateInstallUrl"]</button>
             </div>
@@ -203,16 +211,36 @@
             @if (_installLinkResponse is not null)
             {
                 <div class="hid-field-label">
-                    @T["AgentProfileGeneratedInstallUrl"]
-                    <textarea class="hid-input" rows="4" readonly>@_installLinkResponse.InstallUrl</textarea>
+                    @T["AgentProfileGeneratedInstallUrl"] (Windows)
+                    <textarea class="hid-input" rows="3" readonly>@_installLinkResponse.BootstrapScriptUrlWindows</textarea>
                 </div>
                 <div class="hid-field-label">
-                    @T["AgentProfileGeneratedInstallOneShot"]
-                    <textarea class="hid-input" rows="4" readonly>@_installLinkResponse.OneShotCommand</textarea>
+                    @T["AgentProfileGeneratedInstallUrl"] (Linux)
+                    <textarea class="hid-input" rows="3" readonly>@_installLinkResponse.BootstrapScriptUrlLinux</textarea>
+                </div>
+                <div class="hid-field-label">
+                    agentsettings.json URL
+                    <textarea class="hid-input" rows="2" readonly>@_installLinkResponse.AgentSettingsUrl</textarea>
+                </div>
+                <div class="hid-field-label">
+                    Install bundle URL (zip)
+                    <textarea class="hid-input" rows="2" readonly>@_installLinkResponse.BundleUrl</textarea>
+                </div>
+                <div class="hid-field-label">
+                    @T["AgentProfileGeneratedInstallOneShot"] (Windows)
+                    <textarea class="hid-input" rows="3" readonly>@_installLinkResponse.OneShotCommandWindows</textarea>
+                </div>
+                <div class="hid-field-label">
+                    @T["AgentProfileGeneratedInstallOneShot"] (Linux)
+                    <textarea class="hid-input" rows="3" readonly>@_installLinkResponse.OneShotCommandLinux</textarea>
                 </div>
                 <div class="hid-candidate-actions">
-                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallUrlAsync">@T["AgentProfileCopyCommand"]</button>
-                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallOneShotAsync">@T["AgentProfileCopyOneShotCommand"]</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallUrlWindowsAsync">Copy URL Win</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallUrlLinuxAsync">Copy URL Linux</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallSettingsUrlAsync">Copy settings URL</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallBundleUrlAsync">Copy bundle URL</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallOneShotWindowsAsync">Copy one-shot Win</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallOneShotLinuxAsync">Copy one-shot Linux</button>
                 </div>
                 <div class="hid-subtle-copy">
                     @T["AgentProfileInstallLinkExpires"]: @_installLinkResponse.ExpiresAtUtc.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
@@ -414,17 +442,62 @@
         return string.Join(" ", commandParts.Where(static part => !string.IsNullOrWhiteSpace(part)));
     }
 
+    private string BuildAgentSettingsJsonPreview()
+    {
+        var profile = _agentProfile.Normalize();
+        return $$"""
+{
+  "BaseUrl": {{ToJsonString(ApiOptions.Value.BaseUrl?.Trim().TrimEnd('/') ?? string.Empty)}},
+  "SessionId": {{ToJsonString(string.Empty)}},
+  "PeerId": {{ToJsonString(string.Empty)}},
+  "EndpointId": {{ToJsonString(profile.EndpointId)}},
+  "CommandExecutor": "uart",
+  "TransportEngine": "dcd",
+  "MediaEngine": "ffmpeg-dcd",
+  "FfmpegLatencyProfile": {{ToJsonString(profile.FfmpegLatencyProfile)}},
+  "MediaStreamId": {{ToJsonString(profile.MediaStreamId)}},
+  "MediaWhipUrl": {{ToJsonString(profile.BuildWhipUrl())}},
+  "MediaWhepUrl": {{ToJsonString(profile.BuildWhepUrl())}},
+  "MediaPlaybackUrl": {{ToJsonString(profile.BuildPlaybackUrl())}},
+  "MediaHealthUrl": {{ToJsonString(profile.MediaHealthUrl)}},
+  "FfmpegExecutablePath": {{ToJsonString(profile.FfmpegExecutablePath)}},
+  "FfmpegVideoDevice": {{ToJsonString(profile.FfmpegVideoDevice)}},
+  "FfmpegAudioDevice": {{ToJsonString(profile.FfmpegAudioDevice)}},
+  "FfmpegUseTestSource": {{ToJsonBool(profile.FfmpegUseTestSource)}},
+  "MediaBackendAutoStart": {{ToJsonBool(profile.MediaBackendAutoStart)}},
+  "RequireMediaReady": {{ToJsonBool(profile.RequireMediaReady)}},
+  "UartPort": {{ToJsonString(profile.UartPort)}},
+  "UartHmacKey": {{ToJsonString(profile.UartHmacKey)}}
+}
+""";
+    }
+
     private async Task CopyRuntimeCtlCommandAsync()
         => await CopyCommandAsync(BuildRuntimeCtlCommand());
 
     private async Task CopyAcceptanceCommandAsync()
         => await CopyCommandAsync(BuildAcceptanceCommand());
 
-    private async Task CopyInstallUrlAsync()
-        => await CopyCommandAsync(_installLinkResponse?.InstallUrl ?? string.Empty);
+    private async Task CopyAgentSettingsPreviewAsync()
+        => await CopyCommandAsync(BuildAgentSettingsJsonPreview());
 
-    private async Task CopyInstallOneShotAsync()
-        => await CopyCommandAsync(_installLinkResponse?.OneShotCommand ?? string.Empty);
+    private async Task CopyInstallUrlWindowsAsync()
+        => await CopyCommandAsync(_installLinkResponse?.BootstrapScriptUrlWindows ?? _installLinkResponse?.InstallUrl ?? string.Empty);
+
+    private async Task CopyInstallUrlLinuxAsync()
+        => await CopyCommandAsync(_installLinkResponse?.BootstrapScriptUrlLinux ?? string.Empty);
+
+    private async Task CopyInstallSettingsUrlAsync()
+        => await CopyCommandAsync(_installLinkResponse?.AgentSettingsUrl ?? string.Empty);
+
+    private async Task CopyInstallBundleUrlAsync()
+        => await CopyCommandAsync(_installLinkResponse?.BundleUrl ?? string.Empty);
+
+    private async Task CopyInstallOneShotWindowsAsync()
+        => await CopyCommandAsync(_installLinkResponse?.OneShotCommandWindows ?? _installLinkResponse?.OneShotCommand ?? string.Empty);
+
+    private async Task CopyInstallOneShotLinuxAsync()
+        => await CopyCommandAsync(_installLinkResponse?.OneShotCommandLinux ?? string.Empty);
 
     private async Task CopyCommandAsync(string command)
     {
@@ -499,6 +572,11 @@
         var normalized = value?.Trim() ?? string.Empty;
         return $"'{normalized.Replace("'", "''", StringComparison.Ordinal)}'";
     }
+
+    private static string ToJsonString(string value)
+        => $"\"{(value ?? string.Empty).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+
+    private static string ToJsonBool(bool value) => value ? "true" : "false";
 
     public async ValueTask DisposeAsync()
     {

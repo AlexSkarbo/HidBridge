@@ -104,11 +104,17 @@ public sealed class AgentInstallLinkRequestViewModel
 public sealed record AgentInstallLinkResponseViewModel(
     string InstallUrl,
     string BootstrapScriptUrl,
+    string BootstrapScriptUrlWindows,
+    string BootstrapScriptUrlLinux,
+    string AgentSettingsUrl,
+    string BundleUrl,
     string SessionId,
     string PeerId,
     string EndpointId,
     DateTimeOffset ExpiresAtUtc,
-    string OneShotCommand);
+    string OneShotCommand,
+    string OneShotCommandWindows,
+    string OneShotCommandLinux);
 
 /// <summary>
 /// Represents the fleet inventory dashboard consumed by the operator shell.

@@ -263,7 +263,11 @@ var agentInstallOptions = new AgentInstallRuntimeOptions
     PackageUrl = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_PACKAGE_URL"] ?? string.Empty,
     PackageSha256 = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_PACKAGE_SHA256"] ?? string.Empty,
     AgentExecutableRelativePath = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_EXECUTABLE_RELATIVE_PATH"] ?? "HidBridge.EdgeProxy.Agent.exe",
-    DefaultInstallDirectory = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_DEFAULT_DIRECTORY"] ?? @"$env:ProgramData\HidBridge\EdgeAgent",
+    DefaultInstallDirectoryWindows = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_DEFAULT_DIRECTORY_WINDOWS"]
+        ?? builder.Configuration["HIDBRIDGE_AGENT_INSTALL_DEFAULT_DIRECTORY"]
+        ?? @"$env:ProgramData\HidBridge\EdgeAgent",
+    DefaultInstallDirectoryLinux = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_DEFAULT_DIRECTORY_LINUX"]
+        ?? "/opt/hidbridge/edge-agent",
 };
 var endpointExtraCapabilities = ParseCapabilityDescriptors(builder.Configuration["HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES"]);
 var uartOptions = new HidBridgeUartClientOptions(

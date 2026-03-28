@@ -206,20 +206,31 @@ public static class SystemEndpoints
                     PackageUrl: installOptions.PackageUrl.Trim(),
                     PackageSha256: installOptions.PackageSha256.Trim(),
                     AgentExecutableRelativePath: installOptions.AgentExecutableRelativePath.Trim(),
-                    DefaultInstallDirectory: installOptions.DefaultInstallDirectory,
+                    DefaultInstallDirectoryWindows: installOptions.DefaultInstallDirectoryWindows,
+                    DefaultInstallDirectoryLinux: installOptions.DefaultInstallDirectoryLinux,
                     ExpiresAtUtc: expiresAtUtc);
 
                 var token = tokenService.CreateToken(payload);
-                var bootstrapScriptUrl = $"{publicBaseUrl}/agent-install/bootstrap.ps1?token={Uri.EscapeDataString(token)}";
+                var escapedToken = Uri.EscapeDataString(token);
+                var bootstrapScriptUrlWindows = $"{publicBaseUrl}/agent-install/bootstrap.ps1?token={escapedToken}";
+                var bootstrapScriptUrlLinux = $"{publicBaseUrl}/agent-install/bootstrap.sh?token={escapedToken}";
+                var agentSettingsUrl = $"{publicBaseUrl}/agent-install/agentsettings.json?token={escapedToken}";
+                var bundleUrl = $"{publicBaseUrl}/agent-install/bundle.zip?token={escapedToken}";
 
                 return Results.Ok(new AgentInstallLinkResponse(
-                    InstallUrl: bootstrapScriptUrl,
-                    BootstrapScriptUrl: bootstrapScriptUrl,
+                    InstallUrl: bootstrapScriptUrlWindows,
+                    BootstrapScriptUrl: bootstrapScriptUrlWindows,
+                    BootstrapScriptUrlWindows: bootstrapScriptUrlWindows,
+                    BootstrapScriptUrlLinux: bootstrapScriptUrlLinux,
+                    AgentSettingsUrl: agentSettingsUrl,
+                    BundleUrl: bundleUrl,
                     SessionId: sessionId,
                     PeerId: peerId,
                     EndpointId: endpointId,
                     ExpiresAtUtc: expiresAtUtc,
-                    OneShotCommand: $"powershell -ExecutionPolicy Bypass -NoProfile -Command \"iwr '{bootstrapScriptUrl}' -UseBasicParsing | iex\""));
+                    OneShotCommand: BuildWindowsOneShotCommand(bootstrapScriptUrlWindows),
+                    OneShotCommandWindows: BuildWindowsOneShotCommand(bootstrapScriptUrlWindows),
+                    OneShotCommandLinux: BuildLinuxOneShotCommand(bootstrapScriptUrlLinux)));
             })
         .WithTags(ApiEndpointTags.System)
         .WithSummary("Generates one signed install URL for remote edge-agent bootstrap.")
@@ -236,12 +247,72 @@ public static class SystemEndpoints
                     return Results.BadRequest($"# Invalid bootstrap token: {error}");
                 }
 
-                var script = BuildBootstrapScript(payload, httpContext.Request.Scheme, httpContext.Request.Host.ToString());
+                var script = BuildBootstrapScriptWindows(payload, httpContext.Request.Scheme, httpContext.Request.Host.ToString());
                 return Results.Text(script, "text/plain; charset=utf-8");
             })
         .WithTags(ApiEndpointTags.System)
         .WithSummary("Returns bootstrap PowerShell for one signed agent install token.")
         .WithDescription("Tokenized bootstrap endpoint intended for one-click remote edge-agent setup.");
+
+        endpoints.MapGet("/agent-install/bootstrap.sh",
+            (
+                HttpContext httpContext,
+                string? token,
+                AgentInstallTokenService tokenService) =>
+            {
+                if (!tokenService.TryValidate(token, out var payload, out var error))
+                {
+                    return Results.BadRequest($"# Invalid bootstrap token: {error}");
+                }
+
+                var script = BuildBootstrapScriptLinux(payload, httpContext.Request.Scheme, httpContext.Request.Host.ToString());
+                return Results.Text(script, "text/plain; charset=utf-8");
+            })
+        .WithTags(ApiEndpointTags.System)
+        .WithSummary("Returns bootstrap shell script for one signed agent install token.")
+        .WithDescription("Tokenized bootstrap endpoint intended for one-click remote edge-agent setup on Linux.");
+
+        endpoints.MapGet("/agent-install/agentsettings.json",
+            (
+                string? token,
+                AgentInstallTokenService tokenService) =>
+            {
+                if (!tokenService.TryValidate(token, out var payload, out var error))
+                {
+                    return Results.BadRequest(new
+                    {
+                        code = "invalid_token",
+                        message = error,
+                    });
+                }
+
+                return Results.Text(BuildAgentSettingsJson(payload), "application/json; charset=utf-8");
+            })
+        .WithTags(ApiEndpointTags.System)
+        .WithSummary("Returns generated agentsettings.json for one signed token.")
+        .WithDescription("Allows remote host operators to fetch pre-filled agent settings without executing bootstrap scripts.");
+
+        endpoints.MapGet("/agent-install/bundle.zip",
+            (
+                HttpContext httpContext,
+                string? token,
+                AgentInstallTokenService tokenService) =>
+            {
+                if (!tokenService.TryValidate(token, out var payload, out var error))
+                {
+                    return Results.BadRequest(new
+                    {
+                        code = "invalid_token",
+                        message = error,
+                    });
+                }
+
+                var zipBytes = BuildInstallBundleZip(payload, httpContext.Request.Scheme, httpContext.Request.Host.ToString());
+                return Results.File(zipBytes, "application/zip", $"hidbridge-agent-install-{payload.SessionId}.zip");
+            })
+        .WithTags(ApiEndpointTags.System)
+        .WithSummary("Returns one install bundle zip for remote hosts.")
+        .WithDescription("Includes agentsettings.json together with bootstrap scripts for Windows and Linux.");
 
         return endpoints;
     }
@@ -265,10 +336,7 @@ public static class SystemEndpoints
         return string.IsNullOrWhiteSpace(normalized) ? "edge" : normalized.ToLowerInvariant();
     }
 
-    private static string BuildBootstrapScript(
-        AgentInstallBootstrapPayload payload,
-        string requestScheme,
-        string requestHost)
+    private static string BuildAgentSettingsJson(AgentInstallBootstrapPayload payload)
     {
         var configJson = $$"""
 {
@@ -295,8 +363,18 @@ public static class SystemEndpoints
   "UartHmacKey": {{ToJsonString(payload.UartHmacKey)}}
 }
 """;
+
+        return configJson;
+    }
+
+    private static string BuildBootstrapScriptWindows(
+        AgentInstallBootstrapPayload payload,
+        string requestScheme,
+        string requestHost)
+    {
+        var configJson = BuildAgentSettingsJson(payload);
         var escapedConfig = configJson.Replace("'", "''", StringComparison.Ordinal);
-        var escapedInstallDir = payload.DefaultInstallDirectory.Replace("'", "''", StringComparison.Ordinal);
+        var escapedInstallDir = payload.DefaultInstallDirectoryWindows.Replace("'", "''", StringComparison.Ordinal);
         var escapedPackageUrl = payload.PackageUrl.Replace("'", "''", StringComparison.Ordinal);
         var escapedPackageSha = payload.PackageSha256.Replace("'", "''", StringComparison.Ordinal);
         var escapedExeRelativePath = payload.AgentExecutableRelativePath.Replace("'", "''", StringComparison.Ordinal);
@@ -317,7 +395,7 @@ $configJson = @'
 {{escapedConfig}}
 '@
 
-$configPath = Join-Path $InstallDir 'appsettings.json'
+$configPath = Join-Path $InstallDir 'agentsettings.json'
 Set-Content -Path $configPath -Value $configJson -Encoding UTF8
 Write-Host "[hidbridge] Wrote config: $configPath" -ForegroundColor Green
 
@@ -356,6 +434,135 @@ Write-Host "[hidbridge] Open session: {{escapedSessionUrl}}"
 """;
     }
 
+    private static string BuildBootstrapScriptLinux(
+        AgentInstallBootstrapPayload payload,
+        string requestScheme,
+        string requestHost)
+    {
+        var configJson = BuildAgentSettingsJson(payload);
+        var escapedInstallDir = EscapeBash(payload.DefaultInstallDirectoryLinux);
+        var escapedPackageUrl = EscapeBash(payload.PackageUrl);
+        var escapedPackageSha = EscapeBash(payload.PackageSha256);
+        var escapedExeRelativePath = EscapeBash(payload.AgentExecutableRelativePath);
+        var escapedSessionUrl = EscapeBash($"{requestScheme}://{requestHost}/sessions/{Uri.EscapeDataString(payload.SessionId)}");
+
+        return $$"""
+#!/usr/bin/env bash
+set -euo pipefail
+
+INSTALL_DIR="${1:-{{escapedInstallDir}}}"
+START_AGENT="${2:-true}"
+
+echo "[hidbridge] Preparing install directory..."
+mkdir -p "$INSTALL_DIR"
+
+cat > "$INSTALL_DIR/agentsettings.json" <<'JSON'
+{{configJson}}
+JSON
+echo "[hidbridge] Wrote config: $INSTALL_DIR/agentsettings.json"
+
+PACKAGE_URL='{{escapedPackageUrl}}'
+PACKAGE_SHA='{{escapedPackageSha}}'
+if [[ -n "$PACKAGE_URL" ]]; then
+  ZIP_PATH="$INSTALL_DIR/edge-agent-package.zip"
+  echo "[hidbridge] Downloading package: $PACKAGE_URL"
+  curl -fsSL "$PACKAGE_URL" -o "$ZIP_PATH"
+  if [[ -n "$PACKAGE_SHA" ]]; then
+    ACTUAL_SHA="$(sha256sum "$ZIP_PATH" | awk '{print tolower($1)}')"
+    EXPECTED_SHA="$(echo "$PACKAGE_SHA" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+      echo "[hidbridge] Package hash mismatch. expected=$EXPECTED_SHA actual=$ACTUAL_SHA" >&2
+      exit 1
+    fi
+  fi
+  unzip -o "$ZIP_PATH" -d "$INSTALL_DIR" >/dev/null
+  rm -f "$ZIP_PATH"
+fi
+
+EXE_PATH="$INSTALL_DIR/{{escapedExeRelativePath}}"
+if [[ ! -f "$EXE_PATH" ]]; then
+  echo "[hidbridge] Agent executable not found at $EXE_PATH" >&2
+  echo "[hidbridge] Config is ready. Place published agent files into install dir and run manually."
+  echo "[hidbridge] Session URL: {{escapedSessionUrl}}"
+  exit 0
+fi
+
+if [[ "$START_AGENT" == "true" ]]; then
+  echo "[hidbridge] Starting edge agent: $EXE_PATH"
+  chmod +x "$EXE_PATH" || true
+  nohup "$EXE_PATH" --settings "$INSTALL_DIR/agentsettings.json" > "$INSTALL_DIR/edge-agent.log" 2>&1 &
+  sleep 3
+fi
+
+echo "[hidbridge] Bootstrap completed."
+echo "[hidbridge] Open session: {{escapedSessionUrl}}"
+""";
+    }
+
+    private static byte[] BuildInstallBundleZip(
+        AgentInstallBootstrapPayload payload,
+        string requestScheme,
+        string requestHost)
+    {
+        var windowsScript = BuildBootstrapScriptWindows(payload, requestScheme, requestHost);
+        var linuxScript = BuildBootstrapScriptLinux(payload, requestScheme, requestHost);
+        var settingsJson = BuildAgentSettingsJson(payload);
+        using var stream = new MemoryStream();
+        using (var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            AddZipEntry(archive, "agentsettings.json", settingsJson);
+            AddZipEntry(archive, "install-agent-windows.ps1", windowsScript);
+            AddZipEntry(archive, "install-agent-linux.sh", linuxScript);
+            AddZipEntry(archive, "README.txt", BuildInstallBundleReadme(payload, requestScheme, requestHost));
+        }
+
+        return stream.ToArray();
+    }
+
+    private static void AddZipEntry(System.IO.Compression.ZipArchive archive, string path, string content)
+    {
+        var entry = archive.CreateEntry(path, System.IO.Compression.CompressionLevel.Optimal);
+        using var writer = new StreamWriter(entry.Open(), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write(content);
+    }
+
+    private static string BuildInstallBundleReadme(
+        AgentInstallBootstrapPayload payload,
+        string requestScheme,
+        string requestHost)
+    {
+        var sessionUrl = $"{requestScheme}://{requestHost}/sessions/{Uri.EscapeDataString(payload.SessionId)}";
+        return $$"""
+HidBridge Edge Agent install bundle
+
+Session: {{payload.SessionId}}
+Peer: {{payload.PeerId}}
+Endpoint: {{payload.EndpointId}}
+Open session: {{sessionUrl}}
+
+Files:
+- agentsettings.json
+- install-agent-windows.ps1
+- install-agent-linux.sh
+
+Usage (Windows):
+powershell -ExecutionPolicy Bypass -File .\install-agent-windows.ps1
+
+Usage (Linux):
+chmod +x ./install-agent-linux.sh
+./install-agent-linux.sh
+""";
+    }
+
+    private static string BuildWindowsOneShotCommand(string bootstrapScriptUrl)
+        => $"powershell -ExecutionPolicy Bypass -NoProfile -Command \"iwr '{bootstrapScriptUrl}' -UseBasicParsing | iex\"";
+
+    private static string BuildLinuxOneShotCommand(string bootstrapScriptUrl)
+        => $"bash -lc \"curl -fsSL '{bootstrapScriptUrl}' | bash\"";
+
+    private static string EscapeBash(string value)
+        => (value ?? string.Empty).Replace("'", "'\"'\"'", StringComparison.Ordinal);
+
     private static string ToJsonString(string value)
         => $"\"{(value ?? string.Empty).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 
@@ -393,8 +600,14 @@ public sealed record AgentInstallLinkRequest(
 public sealed record AgentInstallLinkResponse(
     string InstallUrl,
     string BootstrapScriptUrl,
+    string BootstrapScriptUrlWindows,
+    string BootstrapScriptUrlLinux,
+    string AgentSettingsUrl,
+    string BundleUrl,
     string SessionId,
     string PeerId,
     string EndpointId,
     DateTimeOffset ExpiresAtUtc,
-    string OneShotCommand);
+    string OneShotCommand,
+    string OneShotCommandWindows,
+    string OneShotCommandLinux);

@@ -41,7 +41,12 @@ public sealed class AgentInstallRuntimeOptions
     public string AgentExecutableRelativePath { get; set; } = "HidBridge.EdgeProxy.Agent.exe";
 
     /// <summary>
-    /// Default install root path used by bootstrap script.
+    /// Default Windows install root path used by bootstrap scripts.
     /// </summary>
-    public string DefaultInstallDirectory { get; set; } = @"$env:ProgramData\HidBridge\EdgeAgent";
+    public string DefaultInstallDirectoryWindows { get; set; } = @"$env:ProgramData\HidBridge\EdgeAgent";
+
+    /// <summary>
+    /// Default Linux install root path used by bootstrap scripts.
+    /// </summary>
+    public string DefaultInstallDirectoryLinux { get; set; } = "/opt/hidbridge/edge-agent";
 }

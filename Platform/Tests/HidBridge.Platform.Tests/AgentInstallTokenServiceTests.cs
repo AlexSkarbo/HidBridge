@@ -38,7 +38,8 @@ public sealed class AgentInstallTokenServiceTests
             PackageUrl: "",
             PackageSha256: "",
             AgentExecutableRelativePath: "HidBridge.EdgeProxy.Agent.exe",
-            DefaultInstallDirectory: @"$env:ProgramData\HidBridge\EdgeAgent",
+            DefaultInstallDirectoryWindows: @"$env:ProgramData\HidBridge\EdgeAgent",
+            DefaultInstallDirectoryLinux: "/opt/hidbridge/edge-agent",
             ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10));
 
         var token = service.CreateToken(expected);
@@ -80,7 +81,8 @@ public sealed class AgentInstallTokenServiceTests
             PackageUrl: "",
             PackageSha256: "",
             AgentExecutableRelativePath: "HidBridge.EdgeProxy.Agent.exe",
-            DefaultInstallDirectory: @"$env:ProgramData\HidBridge\EdgeAgent",
+            DefaultInstallDirectoryWindows: @"$env:ProgramData\HidBridge\EdgeAgent",
+            DefaultInstallDirectoryLinux: "/opt/hidbridge/edge-agent",
             ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(-1));
 
         var token = service.CreateToken(expired);
