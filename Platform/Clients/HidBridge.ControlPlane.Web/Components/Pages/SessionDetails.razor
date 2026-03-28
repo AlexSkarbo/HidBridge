@@ -40,6 +40,11 @@
         <div class="hid-alert hid-alert--info">@_actionMessage</div>
     }
 
+    @if (GetControlBlockedDiagnostic() is { } globalControlBlockedBanner)
+    {
+        <div class="hid-alert hid-alert--warning">@string.Format(T["ControlBlockedSessionReasonCode"], globalControlBlockedBanner.Code, globalControlBlockedBanner.Message)</div>
+    }
+
     @if (_dashboard is not null && string.Equals(_dashboard.State, "Recovering", StringComparison.OrdinalIgnoreCase))
     {
         <div class="hid-alert hid-alert--info">@T["SessionRecoveringHint"]</div>
@@ -888,6 +893,7 @@
     private CancellationTokenSource? _recoveryPollingCts;
     private Task? _recoveryPollingTask;
     private bool _isRefreshing;
+    private ControlBlockDiagnostic? _backendControlBlockOverride;
 
     private string CurrentOperatorPrincipalId => Identity.PrincipalId;
     private string EffectiveSharePrincipalId =>
@@ -930,6 +936,11 @@
 
     private ControlBlockDiagnostic? GetControlBlockedDiagnostic()
     {
+        if (_backendControlBlockOverride is not null)
+        {
+            return _backendControlBlockOverride;
+        }
+
         var sessionBlock = ResolveSessionControlBlockReason();
         if (sessionBlock is not null)
         {
@@ -1217,6 +1228,10 @@
             await LoadTransportDiagnosticsAsync();
             EnsureShareRequestDefaults();
             await SyncLiveControlStateAfterRefreshAsync();
+            if (ResolveSessionControlBlockReason() is null && ResolveLeaseControlBlockReason() is null)
+            {
+                _backendControlBlockOverride = null;
+            }
             _error = null;
             _denial = null;
             _backendUnavailableMessage = null;
@@ -1505,6 +1520,11 @@
 
             var resolvedAck = _lastCommandAck ?? new CommandAckViewModel(payload.CommandId, "Unknown");
             var accepted = IsAcceptedCommandAck(resolvedAck.Status);
+            CaptureControlBlockFromError(resolvedAck.Error);
+            if (accepted)
+            {
+                _backendControlBlockOverride = null;
+            }
             var detail = resolvedAck.Error is null
                 ? $"{action} -> {resolvedAck.Status}"
                 : $"{resolvedAck.Error.Code}: {resolvedAck.Error.Message}";
@@ -1529,6 +1549,7 @@
             _denial = exception.AuthorizationDenied;
             _error = ResolveApiErrorMessage(exception);
             _backendUnavailableMessage = null;
+            CaptureControlBlockFromException(exception);
             var detail = exception.AuthorizationDenied?.Message ?? ResolveApiErrorMessage(exception);
             RegisterCommandScenarioResult(scenarioId, scenarioName, "Rejected", false, detail);
         }
@@ -1818,6 +1839,7 @@
                 !IsAcceptedCommandAck(result.Status));
             if (rejectedOrTimeout is not null)
             {
+                CaptureControlBlockFromError(rejectedOrTimeout.Error);
                 _actionMessage = $"{scenarioName}: {rejectedOrTimeout.Status}";
                 var detail = rejectedOrTimeout.Error is null
                     ? rejectedOrTimeout.Status
@@ -1826,6 +1848,7 @@
             }
             else
             {
+                _backendControlBlockOverride = null;
                 _actionMessage = $"{scenarioName}: Applied ({ack?.AppliedCount ?? 0}).";
                 RegisterCommandScenarioResult("live-batch", scenarioName, "Applied", true, $"applied={ack?.AppliedCount ?? 0}");
             }
@@ -1844,6 +1867,7 @@
             _denial = exception.AuthorizationDenied;
             _error = ResolveApiErrorMessage(exception);
             _backendUnavailableMessage = null;
+            CaptureControlBlockFromException(exception);
             RegisterCommandScenarioResult("live-batch", scenarioName, "Rejected", false, ResolveApiErrorMessage(exception));
         }
         catch (Exception exception)
@@ -1911,6 +1935,71 @@
     private static bool IsAcceptedCommandAck(string? status)
         => string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "Applied", StringComparison.OrdinalIgnoreCase);
+
+    private void CaptureControlBlockFromException(ControlPlaneApiException exception)
+    {
+        if (exception.ControlConflict is not null)
+        {
+            var message = BuildControlConflictMessage(exception.ControlConflict);
+            _backendControlBlockOverride = new ControlBlockDiagnostic(
+                exception.ControlConflict.Code,
+                message);
+            return;
+        }
+
+        if (TryMapErrorCodeToControlBlock(null, exception.RawBody, out var diagnostic))
+        {
+            _backendControlBlockOverride = diagnostic;
+        }
+    }
+
+    private void CaptureControlBlockFromError(ErrorInfoViewModel? error)
+    {
+        if (error is null)
+        {
+            return;
+        }
+
+        if (TryMapErrorCodeToControlBlock(error.Code, error.Message, out var diagnostic))
+        {
+            _backendControlBlockOverride = diagnostic;
+        }
+    }
+
+    private bool TryMapErrorCodeToControlBlock(string? code, string? message, out ControlBlockDiagnostic diagnostic)
+    {
+        diagnostic = null!;
+        var normalizedCode = string.IsNullOrWhiteSpace(code)
+            ? null
+            : code.Trim();
+
+        if (string.IsNullOrWhiteSpace(normalizedCode))
+        {
+            return false;
+        }
+
+        var fallbackMessage = string.IsNullOrWhiteSpace(message)
+            ? T["ControlBlockedSessionGeneric"]
+            : message.Trim();
+
+        switch (normalizedCode)
+        {
+            case "E_SESSION_CONTROL_REQUIRED":
+                diagnostic = new ControlBlockDiagnostic("lease_missing", T["ControlBlockedLeaseMissing"]);
+                return true;
+            case "E_CONTROL_LEASE_HELD_BY_OTHER":
+                diagnostic = new ControlBlockDiagnostic("lease_held_by_other", fallbackMessage);
+                return true;
+            case "E_CONTROL_NOT_ELIGIBLE":
+                diagnostic = new ControlBlockDiagnostic("not_eligible", fallbackMessage);
+                return true;
+            case "E_CONTROL_PARTICIPANT_MISMATCH":
+                diagnostic = new ControlBlockDiagnostic("participant_mismatch", fallbackMessage);
+                return true;
+            default:
+                return false;
+        }
+    }
 
     private async Task SyncLiveControlStateAfterRefreshAsync()
     {

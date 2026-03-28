@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-28 (session ui): backend-first control-block banner from lease/session diagnostics
+
+Summary:
+
+- Added one global session-level warning banner driven by backend lease/session diagnostics.
+- Prioritized backend-derived control-block reasons captured from command ACK/conflict responses.
+- Kept existing readiness/lease-derived diagnostics and merged them with ACK-based conflict signals.
+- Ensures operator sees immediate “control blocked by lease/session” reason before interacting with command deck/media panel.
+
+Detailed notes:
+
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/SessionDetails.razor`
+
 ## 2026-03-28 (install flow): signed agent bootstrap URL generation from Settings
 
 Summary:
