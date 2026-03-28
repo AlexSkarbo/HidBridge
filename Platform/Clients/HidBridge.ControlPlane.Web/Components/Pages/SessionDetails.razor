@@ -284,6 +284,9 @@
                 </div>
 
                 <div id="live-input-capture-zone" tabindex="0">
+                    @{
+                        var controlBlocked = GetControlBlockedDiagnostic();
+                    }
                     <SessionMediaPanel SessionId="@SessionId"
                                        PlaybackUrl="@GetTransportMediaPlayback(_transportReadiness, _transportHealth)"
                                        MediaReady="@(_transportReadiness?.MediaReady ?? _transportHealth?.MediaReady)"
@@ -293,6 +296,8 @@
                                        BackendReasonCode="@_transportReadiness?.ReasonCode"
                                        BackendReason="@_transportReadiness?.Reason"
                                        BackendMediaFailureReason="@GetTransportMediaFailureReason(_transportReadiness, _transportHealth)"
+                                       ControlBlockedCode="@controlBlocked?.Code"
+                                       ControlBlockedReason="@controlBlocked?.Message"
                                        LiveControlAvailable="@_isLiveControlAvailable"
                                        LiveControlEnabled="@_liveControlEnabled" />
                 </div>

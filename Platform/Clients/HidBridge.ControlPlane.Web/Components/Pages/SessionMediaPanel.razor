@@ -55,6 +55,11 @@
         <span>@T["MediaLastEvent"]: @GetLastEventLabel()</span>
     </div>
 
+    @if (GetControlBlockedBanner() is { } controlBlocked)
+    {
+        <div class="hid-alert hid-alert--warning">@T["MediaControlBlockedBanner"]: @controlBlocked</div>
+    }
+
     @if (LiveControlAvailable)
     {
         if (LiveControlEnabled)
@@ -140,6 +145,12 @@
 
     [Parameter]
     public bool LiveControlEnabled { get; set; }
+
+    [Parameter]
+    public string? ControlBlockedCode { get; set; }
+
+    [Parameter]
+    public string? ControlBlockedReason { get; set; }
 
     private IJSObjectReference? _module;
     private DotNetObjectReference<SessionMediaPanel>? _dotNetRef;
@@ -432,7 +443,8 @@
             _error = runtimeEvent.Error;
         }
         else if (string.Equals(runtimeEvent.Type, "started", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(runtimeEvent.Type, "reconnect-success", StringComparison.OrdinalIgnoreCase))
+            || string.Equals(runtimeEvent.Type, "reconnect-success", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(runtimeEvent.Type, "playing", StringComparison.OrdinalIgnoreCase))
         {
             _error = null;
         }
@@ -446,6 +458,11 @@
         {
             _isRunning = false;
             EnsureAutoStartLoop();
+        }
+
+        if (_isRunning && _trackCount > 0)
+        {
+            _error = null;
         }
 
         return InvokeAsync(StateHasChanged);
@@ -560,6 +577,11 @@
 
     private string? GetNotPlayableReason()
     {
+        if (_isRunning && _trackCount > 0)
+        {
+            return null;
+        }
+
         var backendReason = GetBackendNotPlayableReason();
         if (!string.IsNullOrWhiteSpace(backendReason))
         {
@@ -577,6 +599,28 @@
         }
 
         return null;
+    }
+
+    private string? GetControlBlockedBanner()
+    {
+        if (LiveControlAvailable)
+        {
+            return null;
+        }
+
+        var code = NormalizeDiagnosticInput(ControlBlockedCode);
+        var reason = NormalizeDiagnosticInput(ControlBlockedReason);
+        if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(reason))
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(reason))
+        {
+            return $"{code}: {reason}";
+        }
+
+        return reason ?? code;
     }
 
     private string? GetBackendNotPlayableReason()
