@@ -198,9 +198,24 @@ export function initializeLiveInput(dotNetObjectRef) {
 
 export function setLiveControlEnabled(enabled) {
   liveControlEnabled = !!enabled;
-  if (!liveControlEnabled) {
+  if (liveControlEnabled) {
+    focusCaptureZone();
+  } else {
     onBlurOrHidden();
   }
+}
+
+export function focusCaptureZone() {
+  const element = targetElement();
+  if (!element || typeof element.focus !== "function") {
+    return false;
+  }
+  try {
+    element.focus({ preventScroll: true });
+  } catch {
+    element.focus();
+  }
+  return hasCaptureFocus();
 }
 
 export async function requestPointerLock() {

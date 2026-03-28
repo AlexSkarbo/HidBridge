@@ -369,6 +369,7 @@
                     </div>
 
                     <p class="hid-meta-note">@T["CommandDeckHint"]</p>
+                    <p class="hid-meta-note"><strong>@T["ControlPathStatusLabel"]</strong> @GetLiveControlPathStatus()</p>
                     <div class="hid-candidate-actions" style="margin-bottom: 0.75rem;">
                         <button class="hid-button-primary hid-button-sm"
                                 disabled="@(_busy || !_isLiveControlAvailable)"
@@ -864,6 +865,7 @@
     private IJSObjectReference? _liveInputModule;
     private bool _liveControlEnabled;
     private bool _pointerLockEnabled;
+    private bool _liveControlAutoArmRequested;
     private const int CommandAuditTrailCapacity = 6;
     private const string CommandScenarioTextId = "text";
     private const string CommandScenarioShortcutId = "shortcut";
@@ -901,6 +903,23 @@
         => GetControlBlockedDiagnostic() is { } diagnostic
             ? string.Format(T["ControlBlockedBannerWithCode"], diagnostic.Code, diagnostic.Message)
             : T["LiveControlUnavailableHint"];
+
+    private string GetLiveControlPathStatus()
+    {
+        if (_isLiveControlAvailable)
+        {
+            return _liveControlEnabled
+                ? T["LiveControlPathReadyCapturing"]
+                : T["LiveControlPathReadyLease"];
+        }
+
+        if (GetControlBlockedDiagnostic() is { } blocked)
+        {
+            return $"{blocked.Code}: {blocked.Message}";
+        }
+
+        return T["LiveControlPathNotReady"];
+    }
 
     private ControlBlockDiagnostic? GetControlBlockedDiagnostic()
     {
@@ -1117,6 +1136,7 @@
                 "./Components/Pages/SessionDetails.razor.js");
             _liveInputDotNetRef = DotNetObjectReference.Create(this);
             await _liveInputModule.InvokeVoidAsync("initializeLiveInput", _liveInputDotNetRef);
+            await SyncLiveControlStateAfterRefreshAsync();
         }
         catch
         {
@@ -1189,6 +1209,7 @@
             _timeline = await ApiClient.GetOperatorTimelineAsync(SessionId, 20);
             await LoadTransportDiagnosticsAsync();
             EnsureShareRequestDefaults();
+            await SyncLiveControlStateAfterRefreshAsync();
             _error = null;
             _denial = null;
             _backendUnavailableMessage = null;
@@ -1257,6 +1278,11 @@
             $"{T["ControlRequestedMessage"]} {candidate.PrincipalId}.",
             async () =>
             {
+                if (string.Equals(candidate.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _liveControlAutoArmRequested = true;
+                }
+
                 _ = await ApiClient.EnsureControlAsync(
                     SessionId,
                     new SessionControlEnsureRequestViewModel
@@ -1280,6 +1306,7 @@
             return;
         }
 
+        _liveControlAutoArmRequested = true;
         await RequestControlAsync(candidate);
     }
 
@@ -1297,13 +1324,22 @@
             return;
         }
 
+        _liveControlAutoArmRequested = true;
         await ForceTakeoverAsync(candidate);
     }
 
     private async Task ForceTakeoverAsync(ControlCandidateViewModel candidate)
         => await RunActionAsync(
             $"{T["ControlTakeoverMessage"]} {candidate.PrincipalId}.",
-            () => ApiClient.ForceTakeoverControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, 30, "operator takeover"));
+            async () =>
+            {
+                if (string.Equals(candidate.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _liveControlAutoArmRequested = true;
+                }
+
+                await ApiClient.ForceTakeoverControlAsync(SessionId, candidate.ParticipantId, CurrentOperatorPrincipalId, 30, "operator takeover");
+            });
 
     private async Task ApproveInvitationAsync(SessionShareViewModel invitation)
         => await RunActionAsync(
@@ -1504,11 +1540,6 @@
 
     private async Task ToggleLiveControlAsync()
     {
-        if (_liveInputModule is null)
-        {
-            return;
-        }
-
         if (!_liveControlEnabled)
         {
             await RefreshAsync();
@@ -1520,11 +1551,12 @@
             return;
         }
 
-        _liveControlEnabled = !_liveControlEnabled;
-        await _liveInputModule.InvokeVoidAsync("setLiveControlEnabled", _liveControlEnabled);
-        _actionMessage = _liveControlEnabled
-            ? "Live control is enabled."
-            : "Live control is disabled.";
+        var enable = !_liveControlEnabled;
+        var changed = await SetLiveControlEnabledAsync(enable, updateMessage: true, autoEnabled: false);
+        if (enable && changed)
+        {
+            _liveControlAutoArmRequested = false;
+        }
     }
 
     private async Task TogglePointerLockAsync()
@@ -1548,14 +1580,8 @@
 
     private async Task PanicResetAsync()
     {
-        _pointerLockEnabled = false;
-        if (_liveInputModule is not null)
-        {
-            await _liveInputModule.InvokeVoidAsync("setLiveControlEnabled", false);
-            await _liveInputModule.InvokeVoidAsync("exitPointerLock");
-        }
-
-        _liveControlEnabled = false;
+        _ = await SetLiveControlEnabledAsync(false, updateMessage: false, autoEnabled: false);
+        _liveControlAutoArmRequested = false;
         await DispatchBatchInternalAsync(
             "Panic Reset",
             [
@@ -1573,8 +1599,9 @@
         {
             if (_liveControlEnabled && !_isLiveControlAvailable)
             {
-                _liveControlEnabled = false;
+                _ = await SetLiveControlEnabledAsync(false, updateMessage: false, autoEnabled: false);
                 _actionMessage = GetLiveControlBlockedHint();
+                await InvokeAsync(StateHasChanged);
             }
             return;
         }
@@ -1877,6 +1904,90 @@
     private static bool IsAcceptedCommandAck(string? status)
         => string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "Applied", StringComparison.OrdinalIgnoreCase);
+
+    private async Task SyncLiveControlStateAfterRefreshAsync()
+    {
+        if (_liveControlEnabled && !_isLiveControlAvailable)
+        {
+            _ = await SetLiveControlEnabledAsync(false, updateMessage: false, autoEnabled: false);
+            _actionMessage ??= GetLiveControlBlockedHint();
+        }
+
+        if (_liveControlAutoArmRequested && _isLiveControlAvailable)
+        {
+            var enabled = await SetLiveControlEnabledAsync(
+                true,
+                updateMessage: _liveInputModule is not null,
+                autoEnabled: true);
+            if (enabled)
+            {
+                _liveControlAutoArmRequested = false;
+            }
+        }
+        else if (!IsSessionActiveForControl())
+        {
+            _liveControlAutoArmRequested = false;
+        }
+    }
+
+    private async Task<bool> SetLiveControlEnabledAsync(bool enabled, bool updateMessage, bool autoEnabled)
+    {
+        if (_liveInputModule is null && enabled)
+        {
+            _liveControlEnabled = false;
+            _pointerLockEnabled = false;
+            if (updateMessage)
+            {
+                _actionMessage = T["LiveControlJsUnavailableMessage"];
+            }
+
+            return false;
+        }
+
+        if (_liveInputModule is not null)
+        {
+            await _liveInputModule.InvokeVoidAsync("setLiveControlEnabled", enabled);
+            if (enabled)
+            {
+                try
+                {
+                    _ = await _liveInputModule.InvokeAsync<bool>("focusCaptureZone");
+                }
+                catch
+                {
+                    // Focus helper is best-effort only.
+                }
+            }
+            else
+            {
+                await _liveInputModule.InvokeVoidAsync("exitPointerLock");
+            }
+        }
+
+        _liveControlEnabled = enabled;
+        if (!enabled)
+        {
+            _pointerLockEnabled = false;
+        }
+
+        if (!updateMessage)
+        {
+            return _liveControlEnabled;
+        }
+
+        if (enabled)
+        {
+            _actionMessage = autoEnabled
+                ? T["LiveControlAutoEnabledMessage"]
+                : T["LiveControlEnabledMessage"];
+        }
+        else
+        {
+            _actionMessage = T["LiveControlDisabledMessage"];
+        }
+
+        return _liveControlEnabled;
+    }
 
     private string? ResolveCurrentParticipantId()
     {
