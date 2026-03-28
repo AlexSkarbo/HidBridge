@@ -3,9 +3,22 @@ let liveControlEnabled = false;
 let pointerLockLocked = false;
 let pending = [];
 let flushTimer = null;
-const flushDelayMs = 40;
+const flushDelayMs = 16;
 let captureElement = null;
 const targetElement = () => captureElement || document.getElementById("live-input-capture-zone") || document.body;
+const keyCodeToUsage = new Map([
+  ["KeyA", 0x04], ["KeyB", 0x05], ["KeyC", 0x06], ["KeyD", 0x07], ["KeyE", 0x08], ["KeyF", 0x09], ["KeyG", 0x0A], ["KeyH", 0x0B],
+  ["KeyI", 0x0C], ["KeyJ", 0x0D], ["KeyK", 0x0E], ["KeyL", 0x0F], ["KeyM", 0x10], ["KeyN", 0x11], ["KeyO", 0x12], ["KeyP", 0x13],
+  ["KeyQ", 0x14], ["KeyR", 0x15], ["KeyS", 0x16], ["KeyT", 0x17], ["KeyU", 0x18], ["KeyV", 0x19], ["KeyW", 0x1A], ["KeyX", 0x1B],
+  ["KeyY", 0x1C], ["KeyZ", 0x1D],
+  ["Digit1", 0x1E], ["Digit2", 0x1F], ["Digit3", 0x20], ["Digit4", 0x21], ["Digit5", 0x22], ["Digit6", 0x23], ["Digit7", 0x24], ["Digit8", 0x25], ["Digit9", 0x26], ["Digit0", 0x27],
+  ["Enter", 0x28], ["Escape", 0x29], ["Backspace", 0x2A], ["Tab", 0x2B], ["Space", 0x2C],
+  ["Minus", 0x2D], ["Equal", 0x2E], ["BracketLeft", 0x2F], ["BracketRight", 0x30], ["Backslash", 0x31],
+  ["Semicolon", 0x33], ["Quote", 0x34], ["Backquote", 0x35], ["Comma", 0x36], ["Period", 0x37], ["Slash", 0x38],
+  ["ArrowRight", 0x4F], ["ArrowLeft", 0x50], ["ArrowDown", 0x51], ["ArrowUp", 0x52],
+  ["Delete", 0x4C], ["Home", 0x4A], ["End", 0x4D], ["PageUp", 0x4B], ["PageDown", 0x4E],
+  ["F1", 0x3A], ["F2", 0x3B], ["F3", 0x3C], ["F4", 0x3D], ["F5", 0x3E], ["F6", 0x3F], ["F7", 0x40], ["F8", 0x41], ["F9", 0x42], ["F10", 0x43], ["F11", 0x44], ["F12", 0x45],
+]);
 
 function hasCaptureFocus() {
   const element = targetElement();
@@ -62,6 +75,30 @@ function parseButton(button) {
   }
 }
 
+function getModifierMask(event) {
+  return (event.ctrlKey ? 1 : 0)
+    + (event.shiftKey ? 2 : 0)
+    + (event.altKey ? 4 : 0)
+    + (event.metaKey ? 8 : 0);
+}
+
+function resolveUsage(event) {
+  if (!event || typeof event.code !== "string") {
+    return 0;
+  }
+  return keyCodeToUsage.get(event.code) || 0;
+}
+
+function isPlainTextKey(event) {
+  if (!event || typeof event.key !== "string") {
+    return false;
+  }
+  if (event.ctrlKey || event.altKey || event.metaKey) {
+    return false;
+  }
+  return event.key.length === 1;
+}
+
 function onKeyDown(event) {
   if (!liveControlEnabled) {
     return;
@@ -73,10 +110,17 @@ function onKeyDown(event) {
     return;
   }
   event.preventDefault();
-  push("keyboard.press", {
-    usage: event.keyCode & 0xff,
-    modifiers: (event.ctrlKey ? 1 : 0) + (event.shiftKey ? 2 : 0) + (event.altKey ? 4 : 0) + (event.metaKey ? 8 : 0),
-  });
+  const usage = resolveUsage(event);
+  if (usage > 0) {
+    push("keyboard.press", {
+      usage,
+      modifiers: getModifierMask(event),
+    });
+    return;
+  }
+  if (isPlainTextKey(event)) {
+    push("keyboard.text", { text: event.key });
+  }
 }
 
 function onKeyUp(event) {
