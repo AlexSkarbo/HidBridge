@@ -106,22 +106,9 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
 
         var argsTemplate = _options.FfmpegArgumentsTemplate;
         var argsSource = "ConfiguredTemplate";
-        if (string.IsNullOrWhiteSpace(argsTemplate) &&
-            !string.IsNullOrWhiteSpace(_options.MediaWhipUrl))
+        if (string.IsNullOrWhiteSpace(argsTemplate))
         {
-            // Prefer RTMP ingest template for SRS-style WHIP/WHEP backend because many
-            // stock ffmpeg builds do not ship WHIP muxer support. This keeps local
-            // runtime deterministic without requiring custom ffmpeg binaries.
-            if (TryBuildRtmpPublishUrlFromWhip(_options.MediaWhipUrl, context.StreamId, out var rtmpPublishUrl))
-            {
-                argsTemplate = BuildDefaultRtmpArgumentsTemplate(rtmpPublishUrl);
-                argsSource = "DefaultRtmpTemplate";
-            }
-            else
-            {
-                argsTemplate = BuildDefaultWhipArgumentsTemplate(_options.MediaWhipBearerToken);
-                argsSource = "DefaultWhipTemplate";
-            }
+            argsTemplate = BuildDefaultPublishArgumentsTemplate(_options, context, out argsSource);
         }
         if (string.IsNullOrWhiteSpace(argsTemplate))
         {
@@ -206,6 +193,7 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
                     ["whipUrl"] = _options.MediaWhipUrl,
                     ["whepUrl"] = _options.MediaWhepUrl,
                     ["argsSource"] = argsSource,
+                    ["latencyProfile"] = _options.GetFfmpegLatencyProfile().ToString(),
                 },
                 sessionState: "connecting",
                 videoTrackState: "negotiating",
@@ -1088,22 +1076,146 @@ internal sealed class FfmpegDataChannelDotNetMediaRuntimeEngine : IEdgeMediaRunt
     }
 
     /// <summary>
-    /// Builds default ffmpeg WHIP publish arguments used when template is not explicitly configured.
+    /// Builds default ffmpeg publish arguments from typed options (without requiring manual template wiring).
     /// </summary>
-    private static string BuildDefaultWhipArgumentsTemplate(string? whipBearerToken)
+    private static string BuildDefaultPublishArgumentsTemplate(
+        EdgeProxyOptions options,
+        EdgeMediaRuntimeContext context,
+        out string source)
     {
-        var headerPrefix = string.IsNullOrWhiteSpace(whipBearerToken)
+        if (!string.IsNullOrWhiteSpace(options.MediaWhipUrl) &&
+            TryBuildRtmpPublishUrlFromWhip(options.MediaWhipUrl, context.StreamId, out var rtmpPublishUrl))
+        {
+            source = "DefaultRtmpProfiledTemplate";
+            return BuildDefaultRtmpArgumentsTemplate(options, rtmpPublishUrl);
+        }
+
+        source = "DefaultWhipProfiledTemplate";
+        return BuildDefaultWhipArgumentsTemplate(options);
+    }
+
+    /// <summary>
+    /// Builds default ffmpeg WHIP publish arguments used when RTMP ingest URL cannot be derived.
+    /// </summary>
+    private static string BuildDefaultWhipArgumentsTemplate(EdgeProxyOptions options)
+    {
+        var input = BuildInputArguments(options);
+        var profile = BuildLatencyProfileTuning(options);
+        var headerPrefix = string.IsNullOrWhiteSpace(options.MediaWhipBearerToken)
             ? string.Empty
             : "-headers \"Authorization: Bearer {{whipBearerToken}}\\r\\n\" ";
-        return $"{headerPrefix}-re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 -shortest -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 30 -keyint_min 30 -c:a aac -b:a 128k -f whip {{whipUrl}}";
+
+        return string.Join(
+            ' ',
+            headerPrefix + input,
+            profile.VideoEncoderArgs,
+            profile.AudioEncoderArgs,
+            "-f whip {whipUrl}");
     }
 
     /// <summary>
     /// Builds default ffmpeg RTMP publish arguments for backends that expose WHIP/WHEP
     /// but are easier to ingest via RTMP from stock ffmpeg.
     /// </summary>
-    private static string BuildDefaultRtmpArgumentsTemplate(string rtmpPublishUrl)
-        => $"-re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 -shortest -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -c:a aac -b:a 128k -ar 48000 -ac 2 -f flv \"{rtmpPublishUrl}\"";
+    internal static string BuildDefaultRtmpArgumentsTemplate(EdgeProxyOptions options, string rtmpPublishUrl)
+    {
+        var input = BuildInputArguments(options);
+        var profile = BuildLatencyProfileTuning(options);
+        return string.Join(
+            ' ',
+            input,
+            profile.VideoEncoderArgs,
+            profile.AudioEncoderArgs,
+            $"-f flv \"{rtmpPublishUrl}\"");
+    }
+
+    private static string BuildInputArguments(EdgeProxyOptions options)
+    {
+        if (options.FfmpegUseTestSource || string.IsNullOrWhiteSpace(options.FfmpegVideoDevice))
+        {
+            return $"-re -f lavfi -i testsrc2=size={options.FfmpegResolution}:rate={options.FfmpegFrameRate} -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 -shortest";
+        }
+
+        var queue = options.GetFfmpegLatencyProfile() == EdgeProxyFfmpegLatencyProfile.Extreme ? "64" : "128";
+        var rtbuf = options.GetFfmpegLatencyProfile() == EdgeProxyFfmpegLatencyProfile.Extreme ? "16M" : "64M";
+        var inputDevice = string.IsNullOrWhiteSpace(options.FfmpegAudioDevice)
+            ? $"video=\\\"{EscapeDshowDevice(options.FfmpegVideoDevice)}\\\""
+            : $"video=\\\"{EscapeDshowDevice(options.FfmpegVideoDevice)}\\\":audio=\\\"{EscapeDshowDevice(options.FfmpegAudioDevice)}\\\"";
+
+        return string.Join(
+            ' ',
+            $"-thread_queue_size {queue}",
+            "-f dshow",
+            "-probesize 32",
+            "-analyzeduration 0",
+            "-fflags nobuffer",
+            "-flags low_delay",
+            "-use_wallclock_as_timestamps 1",
+            $"-rtbufsize {rtbuf}",
+            $"-video_size {options.FfmpegResolution}",
+            $"-framerate {options.FfmpegFrameRate}",
+            $"-i {inputDevice}");
+    }
+
+    private static string EscapeDshowDevice(string deviceName)
+        => (deviceName ?? string.Empty).Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private static (string VideoEncoderArgs, string AudioEncoderArgs) BuildLatencyProfileTuning(EdgeProxyOptions options)
+    {
+        var profile = options.GetFfmpegLatencyProfile();
+        var frameRate = Math.Max(1, options.FfmpegFrameRate);
+        var keyint = profile switch
+        {
+            EdgeProxyFfmpegLatencyProfile.Extreme => Math.Max(5, frameRate / 4),
+            EdgeProxyFfmpegLatencyProfile.Ultra => Math.Max(8, frameRate / 3),
+            _ => Math.Max(15, frameRate / 2),
+        };
+
+        var x264Params = profile switch
+        {
+            EdgeProxyFfmpegLatencyProfile.Extreme => $"repeat-headers=1:aud=1:sync-lookahead=0:rc-lookahead=0:sliced-threads=1:ref=1:keyint={keyint}:min-keyint={keyint}:scenecut=0:intra-refresh=1:vbv-init=0",
+            EdgeProxyFfmpegLatencyProfile.Ultra => $"repeat-headers=1:aud=1:sync-lookahead=0:rc-lookahead=0:sliced-threads=1:ref=1:keyint={keyint}:min-keyint={keyint}:scenecut=0",
+            _ => "repeat-headers=1:aud=1:sync-lookahead=0:rc-lookahead=0:sliced-threads=1",
+        };
+        var vbvBuf = profile switch
+        {
+            EdgeProxyFfmpegLatencyProfile.Extreme => "300k",
+            EdgeProxyFfmpegLatencyProfile.Ultra => "700k",
+            _ => "1500k",
+        };
+        var audioBitrate = profile switch
+        {
+            EdgeProxyFfmpegLatencyProfile.Extreme => "48k",
+            EdgeProxyFfmpegLatencyProfile.Ultra => "64k",
+            _ => options.FfmpegAudioBitrate,
+        };
+
+        var video = string.Join(
+            ' ',
+            "-c:v libx264",
+            "-preset ultrafast",
+            "-tune zerolatency",
+            "-pix_fmt yuv420p",
+            "-profile:v baseline",
+            "-level:v 4.1",
+            $"-g {keyint}",
+            $"-keyint_min {keyint}",
+            "-sc_threshold 0",
+            $" -x264-params \"{x264Params}\"".Trim(),
+            "-bf 0",
+            $"-b:v {options.FfmpegVideoBitrate}",
+            $"-maxrate {options.FfmpegVideoBitrate}",
+            $"-bufsize {vbvBuf}");
+
+        var audio = string.Join(
+            ' ',
+            "-c:a aac",
+            $"-b:a {audioBitrate}",
+            "-ar 48000",
+            "-ac 2");
+
+        return (video, audio);
+    }
 
     /// <summary>
     /// Derives RTMP ingest URL from WHIP endpoint query shape:

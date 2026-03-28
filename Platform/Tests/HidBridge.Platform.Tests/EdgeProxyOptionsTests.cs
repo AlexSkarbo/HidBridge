@@ -192,6 +192,33 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
+    public void IsValid_FfmpegLatencyProfile_IsParsedFromAliases()
+    {
+        var options = CreateBaselineOptions();
+        options.FfmpegLatencyProfile = "ultra-low-latency";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.True(isValid);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(EdgeProxyFfmpegLatencyProfile.Ultra, options.GetFfmpegLatencyProfile());
+    }
+
+    [Fact]
+    public void IsValid_RejectsUnknownFfmpegLatencyProfile()
+    {
+        var options = CreateBaselineOptions();
+        options.FfmpegLatencyProfile = "turbo";
+        options.Normalize();
+
+        var isValid = options.IsValid(out var error);
+
+        Assert.False(isValid);
+        Assert.Contains("FfmpegLatencyProfile", error);
+    }
+
+    [Fact]
     public void IsValid_RejectsUnknownMediaEngine()
     {
         var options = CreateBaselineOptions();

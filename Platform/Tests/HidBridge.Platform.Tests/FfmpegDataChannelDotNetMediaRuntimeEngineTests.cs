@@ -113,6 +113,50 @@ public sealed class FfmpegDataChannelDotNetMediaRuntimeEngineTests
     }
 
     [Fact]
+    public void BuildDefaultRtmpArgumentsTemplate_UsesDshowCaptureAndUltraProfile()
+    {
+        var options = CreateBaseOptions();
+        options.FfmpegArgumentsTemplate = string.Empty;
+        options.FfmpegUseTestSource = false;
+        options.FfmpegLatencyProfile = "ultra";
+        options.FfmpegVideoDevice = "USB3.0 Video";
+        options.FfmpegAudioDevice = "USB3.0 Audio";
+        options.FfmpegResolution = "1280x720";
+        options.FfmpegFrameRate = 30;
+        options.FfmpegVideoBitrate = "5000k";
+        options.FfmpegAudioBitrate = "128k";
+        options.Normalize();
+
+        var args = FfmpegDataChannelDotNetMediaRuntimeEngine.BuildDefaultRtmpArgumentsTemplate(
+            options,
+            "rtmp://127.0.0.1:19351/live/edge-main");
+
+        Assert.Contains("-f dshow", args, StringComparison.Ordinal);
+        Assert.Contains("video=\\\"USB3.0 Video\\\":audio=\\\"USB3.0 Audio\\\"", args, StringComparison.Ordinal);
+        Assert.Contains("-g 10", args, StringComparison.Ordinal);
+        Assert.Contains("-bufsize 700k", args, StringComparison.Ordinal);
+        Assert.Contains("-f flv \"rtmp://127.0.0.1:19351/live/edge-main\"", args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildDefaultRtmpArgumentsTemplate_UsesLavfiWhenCaptureDeviceIsMissing()
+    {
+        var options = CreateBaseOptions();
+        options.FfmpegArgumentsTemplate = string.Empty;
+        options.FfmpegUseTestSource = false;
+        options.FfmpegLatencyProfile = "balanced";
+        options.FfmpegVideoDevice = string.Empty;
+        options.Normalize();
+
+        var args = FfmpegDataChannelDotNetMediaRuntimeEngine.BuildDefaultRtmpArgumentsTemplate(
+            options,
+            "rtmp://127.0.0.1:19351/live/edge-main");
+
+        Assert.Contains("-f lavfi -i testsrc2", args, StringComparison.Ordinal);
+        Assert.Contains("-shortest", args, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StartAsync_AutoStartEnabled_NoBackendExecutable_ReportsMediaBackendNotConfigured()
     {
         var port = GetFreeTcpPort();

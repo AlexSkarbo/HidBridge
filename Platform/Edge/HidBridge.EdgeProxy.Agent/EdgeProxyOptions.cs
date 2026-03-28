@@ -86,6 +86,49 @@ public sealed class EdgeProxyOptions
     public string FfmpegExecutablePath { get; set; } = string.Empty;
 
     /// <summary>
+    /// ffmpeg latency profile used when runtime composes default arguments.
+    /// Supported values: <c>balanced</c>, <c>ultra</c>, <c>extreme</c>.
+    /// </summary>
+    public string FfmpegLatencyProfile { get; set; } = "balanced";
+
+    /// <summary>
+    /// DirectShow video device name used for default capture arguments.
+    /// When empty (or when <see cref="FfmpegUseTestSource"/> is true), runtime falls back to lavfi test source.
+    /// </summary>
+    public string FfmpegVideoDevice { get; set; } = string.Empty;
+
+    /// <summary>
+    /// DirectShow audio device name used for default capture arguments.
+    /// </summary>
+    public string FfmpegAudioDevice { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Default capture resolution for generated ffmpeg arguments (for example <c>1280x720</c>).
+    /// </summary>
+    public string FfmpegResolution { get; set; } = "1280x720";
+
+    /// <summary>
+    /// Default capture framerate for generated ffmpeg arguments.
+    /// </summary>
+    public int FfmpegFrameRate { get; set; } = 30;
+
+    /// <summary>
+    /// Default video bitrate for generated ffmpeg arguments (for example <c>4500k</c>).
+    /// </summary>
+    public string FfmpegVideoBitrate { get; set; } = "4500k";
+
+    /// <summary>
+    /// Default audio bitrate for generated ffmpeg arguments (for example <c>128k</c>).
+    /// </summary>
+    public string FfmpegAudioBitrate { get; set; } = "128k";
+
+    /// <summary>
+    /// Forces generated arguments to use lavfi synthetic source instead of capture devices.
+    /// Useful for deterministic smoke or CI workers without hardware capture.
+    /// </summary>
+    public bool FfmpegUseTestSource { get; set; }
+
+    /// <summary>
     /// Optional ffmpeg arguments template used by <c>MediaEngine=ffmpeg-dcd</c>.
     /// Supports placeholders: <c>{sessionId}</c>, <c>{peerId}</c>, <c>{endpointId}</c>, <c>{streamId}</c>, <c>{source}</c>, <c>{baseUrl}</c>, <c>{whipUrl}</c>, <c>{whepUrl}</c>, <c>{whipBearerToken}</c>.
     /// </summary>
@@ -299,9 +342,28 @@ public sealed class EdgeProxyOptions
         MediaEngine = (MediaEngine ?? string.Empty).Trim();
         EngineSwitchMode = (EngineSwitchMode ?? string.Empty).Trim();
         FfmpegExecutablePath = (FfmpegExecutablePath ?? string.Empty).Trim();
+        FfmpegLatencyProfile = (FfmpegLatencyProfile ?? string.Empty).Trim();
+        FfmpegVideoDevice = (FfmpegVideoDevice ?? string.Empty).Trim();
+        FfmpegAudioDevice = (FfmpegAudioDevice ?? string.Empty).Trim();
+        FfmpegResolution = (FfmpegResolution ?? string.Empty).Trim();
+        FfmpegVideoBitrate = (FfmpegVideoBitrate ?? string.Empty).Trim();
+        FfmpegAudioBitrate = (FfmpegAudioBitrate ?? string.Empty).Trim();
         FfmpegArgumentsTemplate = (FfmpegArgumentsTemplate ?? string.Empty).Trim();
         FfmpegStopTimeoutMs = Math.Max(250, FfmpegStopTimeoutMs);
         FfmpegTelemetryStaleAfterSec = Math.Max(2, FfmpegTelemetryStaleAfterSec);
+        FfmpegFrameRate = Math.Clamp(FfmpegFrameRate, 1, 120);
+        if (string.IsNullOrWhiteSpace(FfmpegResolution))
+        {
+            FfmpegResolution = "1280x720";
+        }
+        if (string.IsNullOrWhiteSpace(FfmpegVideoBitrate))
+        {
+            FfmpegVideoBitrate = "4500k";
+        }
+        if (string.IsNullOrWhiteSpace(FfmpegAudioBitrate))
+        {
+            FfmpegAudioBitrate = "128k";
+        }
         EngineCanaryPercent = Math.Clamp(EngineCanaryPercent, 0, 100);
         EngineSloMinCommandSampleCount = Math.Max(1, EngineSloMinCommandSampleCount);
         EngineSloAckTimeoutRateMaxPct = Math.Clamp(EngineSloAckTimeoutRateMaxPct, 0.0, 100.0);
@@ -391,6 +453,19 @@ public sealed class EdgeProxyOptions
     }
 
     /// <summary>
+    /// Resolves configured ffmpeg latency profile.
+    /// </summary>
+    public EdgeProxyFfmpegLatencyProfile GetFfmpegLatencyProfile()
+    {
+        if (TryParseFfmpegLatencyProfile(FfmpegLatencyProfile, out var profile))
+        {
+            return profile;
+        }
+
+        return EdgeProxyFfmpegLatencyProfile.Balanced;
+    }
+
+    /// <summary>
     /// Resolves engine switch strategy mode.
     /// </summary>
     public EdgeProxyEngineSwitchMode GetEngineSwitchMode()
@@ -431,6 +506,12 @@ public sealed class EdgeProxyOptions
         if (!TryParseMediaEngineKind(MediaEngine, out _))
         {
             error = $"MediaEngine '{MediaEngine}' is not supported. Use 'none' or 'ffmpeg-dcd'.";
+            return false;
+        }
+
+        if (!TryParseFfmpegLatencyProfile(FfmpegLatencyProfile, out _))
+        {
+            error = $"FfmpegLatencyProfile '{FfmpegLatencyProfile}' is not supported. Use 'balanced', 'ultra', or 'extreme'.";
             return false;
         }
 
@@ -619,6 +700,38 @@ public sealed class EdgeProxyOptions
                 return true;
             default:
                 kind = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Parses ffmpeg latency profile aliases.
+    /// </summary>
+    private static bool TryParseFfmpegLatencyProfile(string? value, out EdgeProxyFfmpegLatencyProfile profile)
+    {
+        var normalized = (value ?? string.Empty)
+            .Trim()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+
+        switch (normalized)
+        {
+            case "":
+            case "balanced":
+            case "default":
+                profile = EdgeProxyFfmpegLatencyProfile.Balanced;
+                return true;
+            case "ultra":
+            case "ultralowlatency":
+                profile = EdgeProxyFfmpegLatencyProfile.Ultra;
+                return true;
+            case "extreme":
+            case "extremelowlatency":
+                profile = EdgeProxyFfmpegLatencyProfile.Extreme;
+                return true;
+            default:
+                profile = default;
                 return false;
         }
     }
