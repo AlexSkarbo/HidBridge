@@ -1,11 +1,13 @@
 @page "/settings"
 @attribute [Authorize(Policy = OperatorPolicies.Viewer)]
+@implements IAsyncDisposable
 @inject OperatorText T
 @inject OperatorAuthDescriptor Auth
 @inject OperatorIdentityContext Identity
 @inject Microsoft.Extensions.Options.IOptions<HidBridge.ControlPlane.Web.Configuration.ControlPlaneApiOptions> ApiOptions
 @inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager Navigation
+@inject IJSRuntime Js
 
 <PageTitle>@T["NavSettings"]</PageTitle>
 
@@ -82,6 +84,84 @@
                 <span>@T["CurrentTheme"]: @_themePreference</span>
             </div>
         </section>
+
+        <section class="hid-settings-section">
+            <div>
+                <h3 class="hid-card-title">@T["AgentProfileTitle"]</h3>
+                <p class="hid-card-subtitle">@T["AgentProfileSubtitle"]</p>
+            </div>
+
+            <div class="hid-choice-grid">
+                @foreach (var option in AgentLatencyProfiles)
+                {
+                    var isActive = string.Equals(option.Code, _agentProfile.FfmpegLatencyProfile, StringComparison.OrdinalIgnoreCase);
+                    <button type="button"
+                            class="hid-choice-card @(isActive ? "hid-choice-card--active" : null)"
+                            @onclick="() => SelectLatencyProfile(option.Code)">
+                        <div class="hid-choice-card-head">
+                            <div>
+                                <div class="hid-choice-title">@option.Title</div>
+                                <div class="hid-choice-card-note">@option.Description</div>
+                            </div>
+                            @if (isActive)
+                            {
+                                <span class="hid-badge hid-badge--positive">@T["Active"]</span>
+                            }
+                        </div>
+                    </button>
+                }
+            </div>
+
+            <div class="hid-choice-grid">
+                <label class="hid-field-label">
+                    @T["AgentProfileStreamId"]
+                    <input class="hid-input" @bind="_agentProfile.MediaStreamId" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
+                    @T["AgentProfileMediaHost"]
+                    <input class="hid-input" @bind="_agentProfile.MediaHostBaseUrl" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
+                    @T["AgentProfileUartPort"]
+                    <input class="hid-input" @bind="_agentProfile.UartPort" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
+                    @T["AgentProfileUartHmacKey"]
+                    <input class="hid-input" @bind="_agentProfile.UartHmacKey" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
+                    @T["AgentProfileVideoDevice"]
+                    <input class="hid-input" @bind="_agentProfile.FfmpegVideoDevice" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
+                    @T["AgentProfileAudioDevice"]
+                    <input class="hid-input" @bind="_agentProfile.FfmpegAudioDevice" @bind:event="oninput" />
+                </label>
+                <label class="hid-field">
+                    <input type="checkbox" @bind="_agentProfile.FfmpegUseTestSource" />
+                    <span>@T["AgentProfileUseTestSource"]</span>
+                </label>
+                <label class="hid-field">
+                    <input type="checkbox" @bind="_agentProfile.MediaBackendAutoStart" />
+                    <span>@T["AgentProfileMediaBackendAutoStart"]</span>
+                </label>
+            </div>
+
+            <div class="hid-candidate-actions">
+                <button class="hid-button-primary hid-button-sm" type="button" @onclick="SaveAgentProfileAsync">@T["AgentProfileSave"]</button>
+                <button class="hid-button-secondary hid-button-sm" type="button" @onclick="ResetAgentProfileAsync">@T["AgentProfileReset"]</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_agentProfileStatus))
+            {
+                <div class="hid-subtle-copy">@_agentProfileStatus</div>
+            }
+
+            <div class="hid-field-label">
+                @T["AgentProfileGeneratedCommand"]
+                <textarea class="hid-input" rows="7" readonly>@BuildRuntimeCtlCommand()</textarea>
+            </div>
+            <div class="hid-subtle-copy">@T["AgentProfileCommandHint"]</div>
+        </section>
     </div>
 
     <section class="hid-settings-grid">
@@ -115,6 +195,10 @@
 
 @code {
     private string _themePreference = "auto";
+    private IJSObjectReference? _settingsModule;
+    private AgentProfileSettings _agentProfile = AgentProfileSettings.CreateDefault();
+    private string? _agentProfileStatus;
+    private const string AgentProfileStorageKey = "hidbridge.agentProfile.v1";
 
     private IReadOnlyList<ThemeOption> ThemeOptions =>
     [
@@ -123,9 +207,41 @@
         new("dark", T["ThemeDark"], T["ThemeDarkHelp"]),
     ];
 
+    private IReadOnlyList<ThemeOption> AgentLatencyProfiles =>
+    [
+        new("balanced", T["AgentProfileLatencyBalanced"], T["AgentProfileLatencyBalancedHelp"]),
+        new("ultra", T["AgentProfileLatencyUltra"], T["AgentProfileLatencyUltraHelp"]),
+        new("extreme", T["AgentProfileLatencyExtreme"], T["AgentProfileLatencyExtremeHelp"]),
+    ];
+
     protected override void OnInitialized()
     {
         _themePreference = HttpContextAccessor.HttpContext?.Request.Cookies["hidbridge_theme"] ?? "auto";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _settingsModule = await Js.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Settings.razor.js");
+            var stored = await _settingsModule.InvokeAsync<AgentProfileSettings?>("loadAgentProfile", AgentProfileStorageKey);
+            if (stored is not null)
+            {
+                _agentProfile = stored.Normalize();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch
+        {
+            _settingsModule = null;
+            _agentProfileStatus = T["AgentProfileLoadFailed"];
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private string BuildCultureUrl(string culture)
@@ -140,5 +256,141 @@
     private string FormatUserCreatedAt(DateTimeOffset? value)
         => value?.ToString("yyyy-MM-dd HH:mm:ss zzz") ?? T["NotAvailable"];
 
+    private void SelectLatencyProfile(string profileCode)
+    {
+        _agentProfile.FfmpegLatencyProfile = profileCode;
+    }
+
+    private async Task SaveAgentProfileAsync()
+    {
+        _agentProfile = _agentProfile.Normalize();
+        if (_settingsModule is null)
+        {
+            _agentProfileStatus = T["AgentProfileSaveFailed"];
+            return;
+        }
+
+        try
+        {
+            var saved = await _settingsModule.InvokeAsync<bool>("saveAgentProfile", AgentProfileStorageKey, _agentProfile);
+            _agentProfileStatus = saved ? T["AgentProfileSaved"] : T["AgentProfileSaveFailed"];
+        }
+        catch
+        {
+            _agentProfileStatus = T["AgentProfileSaveFailed"];
+        }
+    }
+
+    private async Task ResetAgentProfileAsync()
+    {
+        _agentProfile = AgentProfileSettings.CreateDefault();
+        await SaveAgentProfileAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string BuildRuntimeCtlCommand()
+    {
+        var profile = _agentProfile.Normalize();
+        var commandParts = new List<string>
+        {
+            "dotnet run --project Platform/Tools/HidBridge.RuntimeCtl/HidBridge.RuntimeCtl.csproj -- --platform-root Platform webrtc-stack",
+            "-StopExisting",
+            "-CommandExecutor uart",
+            $"-UartPort {QuotePowerShell(profile.UartPort)}",
+            $"-UartHmacKey {QuotePowerShell(profile.UartHmacKey)}",
+            $"-FfmpegLatencyProfile {QuotePowerShell(profile.FfmpegLatencyProfile)}",
+            $"-MediaStreamId {QuotePowerShell(profile.MediaStreamId)}",
+            $"-MediaWhipUrl {QuotePowerShell(profile.BuildWhipUrl())}",
+            $"-MediaWhepUrl {QuotePowerShell(profile.BuildWhepUrl())}",
+            $"-MediaPlaybackUrl {QuotePowerShell(profile.BuildPlaybackUrl())}",
+            $"-MediaBackendAutoStart {(profile.MediaBackendAutoStart ? "true" : "false")}",
+            $"-FfmpegUseTestSource {(profile.FfmpegUseTestSource ? "true" : "false")}",
+        };
+
+        if (!profile.FfmpegUseTestSource && !string.IsNullOrWhiteSpace(profile.FfmpegVideoDevice))
+        {
+            commandParts.Add($"-FfmpegVideoDevice {QuotePowerShell(profile.FfmpegVideoDevice)}");
+        }
+
+        if (!profile.FfmpegUseTestSource && !string.IsNullOrWhiteSpace(profile.FfmpegAudioDevice))
+        {
+            commandParts.Add($"-FfmpegAudioDevice {QuotePowerShell(profile.FfmpegAudioDevice)}");
+        }
+
+        return string.Join(" ", commandParts);
+    }
+
+    private static string QuotePowerShell(string value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        return $"'{normalized.Replace("'", "''", StringComparison.Ordinal)}'";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_settingsModule is not null)
+        {
+            try
+            {
+                await _settingsModule.DisposeAsync();
+            }
+            catch
+            {
+                // Ignore module disposal failures during navigation shutdown.
+            }
+        }
+    }
+
     private sealed record ThemeOption(string Code, string Title, string Description);
+
+    private sealed class AgentProfileSettings
+    {
+        public string FfmpegLatencyProfile { get; set; } = "balanced";
+        public string MediaHostBaseUrl { get; set; } = "http://127.0.0.1:19851";
+        public string MediaStreamId { get; set; } = "edge-main";
+        public string UartPort { get; set; } = "COM6";
+        public string UartHmacKey { get; set; } = "your-master-secret";
+        public string FfmpegVideoDevice { get; set; } = string.Empty;
+        public string FfmpegAudioDevice { get; set; } = string.Empty;
+        public bool FfmpegUseTestSource { get; set; }
+        public bool MediaBackendAutoStart { get; set; }
+
+        public static AgentProfileSettings CreateDefault() => new();
+
+        public AgentProfileSettings Normalize()
+        {
+            var normalizedProfile = string.IsNullOrWhiteSpace(FfmpegLatencyProfile)
+                ? "balanced"
+                : FfmpegLatencyProfile.Trim().ToLowerInvariant();
+            if (normalizedProfile is not ("balanced" or "ultra" or "extreme"))
+            {
+                normalizedProfile = "balanced";
+            }
+
+            var normalizedHost = string.IsNullOrWhiteSpace(MediaHostBaseUrl)
+                ? "http://127.0.0.1:19851"
+                : MediaHostBaseUrl.Trim().TrimEnd('/');
+
+            return new AgentProfileSettings
+            {
+                FfmpegLatencyProfile = normalizedProfile,
+                MediaHostBaseUrl = normalizedHost,
+                MediaStreamId = string.IsNullOrWhiteSpace(MediaStreamId) ? "edge-main" : MediaStreamId.Trim(),
+                UartPort = string.IsNullOrWhiteSpace(UartPort) ? "COM6" : UartPort.Trim(),
+                UartHmacKey = string.IsNullOrWhiteSpace(UartHmacKey) ? "your-master-secret" : UartHmacKey.Trim(),
+                FfmpegVideoDevice = (FfmpegVideoDevice ?? string.Empty).Trim(),
+                FfmpegAudioDevice = (FfmpegAudioDevice ?? string.Empty).Trim(),
+                FfmpegUseTestSource = FfmpegUseTestSource,
+                MediaBackendAutoStart = MediaBackendAutoStart,
+            };
+        }
+
+        public string BuildWhipUrl()
+            => $"{MediaHostBaseUrl.TrimEnd('/')}/rtc/v1/whip/?app=live&stream={Uri.EscapeDataString(MediaStreamId)}";
+
+        public string BuildWhepUrl()
+            => $"{MediaHostBaseUrl.TrimEnd('/')}/rtc/v1/whep/?app=live&stream={Uri.EscapeDataString(MediaStreamId)}";
+
+        public string BuildPlaybackUrl() => BuildWhepUrl();
+    }
 }

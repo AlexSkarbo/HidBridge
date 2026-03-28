@@ -72,9 +72,14 @@ internal static class WebRtcStackCommand
         var logRoot = Path.Combine(platformRoot, ".logs", "webrtc-stack", DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(logRoot);
 
+        var configuredMediaStreamId = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIASTREAMID") ?? string.Empty).Trim();
         var configuredWhepUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty).Trim();
         var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
         var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
+        var configuredFfmpegLatencyProfile = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGLATENCYPROFILE") ?? string.Empty).Trim();
+        var configuredFfmpegUseTestSource = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGUSETESTSOURCE") ?? string.Empty).Trim();
+        var configuredFfmpegVideoDevice = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGVIDEODEVICE") ?? string.Empty).Trim();
+        var configuredFfmpegAudioDevice = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGAUDIODEVICE") ?? string.Empty).Trim();
         var configuredMediaHealthUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAHEALTHURL") ?? string.Empty).Trim();
         var configuredAssumeMediaReadyWithoutProbe = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_ASSUMEMEDIAREADYWITHOUTPROBE") ?? string.Empty).Trim();
         var configuredMediaBackendAutoStart = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART") ?? string.Empty).Trim();
@@ -85,6 +90,19 @@ internal static class WebRtcStackCommand
         var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
         var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
         var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
+        var effectiveMediaStreamId = string.IsNullOrWhiteSpace(options.MediaStreamId)
+            ? (string.IsNullOrWhiteSpace(configuredMediaStreamId) ? "edge-main" : configuredMediaStreamId)
+            : options.MediaStreamId.Trim();
+        configuredWhipUrl = string.IsNullOrWhiteSpace(options.MediaWhipUrl) ? configuredWhipUrl : options.MediaWhipUrl.Trim();
+        configuredWhepUrl = string.IsNullOrWhiteSpace(options.MediaWhepUrl) ? configuredWhepUrl : options.MediaWhepUrl.Trim();
+        configuredPlaybackUrl = string.IsNullOrWhiteSpace(options.MediaPlaybackUrl) ? configuredPlaybackUrl : options.MediaPlaybackUrl.Trim();
+        configuredFfmpegLatencyProfile = string.IsNullOrWhiteSpace(options.FfmpegLatencyProfile) ? configuredFfmpegLatencyProfile : options.FfmpegLatencyProfile.Trim();
+        configuredFfmpegVideoDevice = string.IsNullOrWhiteSpace(options.FfmpegVideoDevice) ? configuredFfmpegVideoDevice : options.FfmpegVideoDevice.Trim();
+        configuredFfmpegAudioDevice = string.IsNullOrWhiteSpace(options.FfmpegAudioDevice) ? configuredFfmpegAudioDevice : options.FfmpegAudioDevice.Trim();
+        if (options.FfmpegUseTestSource.HasValue)
+        {
+            configuredFfmpegUseTestSource = options.FfmpegUseTestSource.Value ? "true" : "false";
+        }
 
         if (string.IsNullOrWhiteSpace(configuredWhipUrl)
             || string.IsNullOrWhiteSpace(configuredWhepUrl)
@@ -93,10 +111,10 @@ internal static class WebRtcStackCommand
             if (await IsTcpEndpointReachableAsync("127.0.0.1", 19851, 400))
             {
                 configuredWhipUrl = string.IsNullOrWhiteSpace(configuredWhipUrl)
-                    ? "http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream=edge-main"
+                    ? $"http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream={Uri.EscapeDataString(effectiveMediaStreamId)}"
                     : configuredWhipUrl;
                 configuredWhepUrl = string.IsNullOrWhiteSpace(configuredWhepUrl)
-                    ? "http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main"
+                    ? $"http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream={Uri.EscapeDataString(effectiveMediaStreamId)}"
                     : configuredWhepUrl;
                 configuredPlaybackUrl = string.IsNullOrWhiteSpace(configuredPlaybackUrl)
                     ? configuredWhepUrl
@@ -106,6 +124,8 @@ internal static class WebRtcStackCommand
         }
         var effectiveMediaBackendAutoStart = !string.IsNullOrWhiteSpace(configuredMediaBackendAutoStart)
             ? configuredMediaBackendAutoStart
+            : options.MediaBackendAutoStart.HasValue
+                ? (options.MediaBackendAutoStart.Value ? "true" : "false")
             : "false";
         var effectiveMediaBackendExecutablePath = configuredMediaBackendExecutablePath;
 
@@ -328,9 +348,19 @@ internal static class WebRtcStackCommand
         var effectivePlaybackUrl = !string.IsNullOrWhiteSpace(configuredWhepUrl)
             ? configuredWhepUrl
             : configuredPlaybackUrl;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIASTREAMID"] = effectiveMediaStreamId;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = effectivePlaybackUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGLATENCYPROFILE", configuredFfmpegLatencyProfile);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGVIDEODEVICE", configuredFfmpegVideoDevice);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGAUDIODEVICE", configuredFfmpegAudioDevice);
+        if (!string.IsNullOrWhiteSpace(configuredFfmpegUseTestSource))
+        {
+            adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_FFMPEGUSETESTSOURCE"] = TryParseOptionalBool(configuredFfmpegUseTestSource)
+                ? "true"
+                : "false";
+        }
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIABACKENDAUTOSTART"] = TryParseOptionalBool(effectiveMediaBackendAutoStart) ? "true" : "false";
         SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDEXECUTABLEPATH", resolvedMediaBackendExecutablePath);
         SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_MEDIABACKENDARGUMENTSTEMPLATE", configuredMediaBackendArgumentsTemplate);
@@ -390,6 +420,8 @@ internal static class WebRtcStackCommand
             mediaWhipUrl = configuredWhipUrl,
             mediaWhepUrl = configuredWhepUrl,
             mediaPlaybackUrl = effectivePlaybackUrl,
+            mediaStreamId = effectiveMediaStreamId,
+            ffmpegLatencyProfile = configuredFfmpegLatencyProfile,
             mediaBackendAutoStart = TryParseOptionalBool(effectiveMediaBackendAutoStart),
             mediaBackendExecutablePath = resolvedMediaBackendExecutablePath,
             runtimeBootstrapSkipped = options.SkipRuntimeBootstrap,
@@ -431,6 +463,11 @@ internal static class WebRtcStackCommand
         Console.WriteLine($"Media WHEP:     {(string.IsNullOrWhiteSpace(configuredWhepUrl) ? "<not configured>" : configuredWhepUrl)}");
         Console.WriteLine($"Media WHIP:     {(string.IsNullOrWhiteSpace(configuredWhipUrl) ? "<not configured>" : configuredWhipUrl)}");
         Console.WriteLine($"Media playback: {(string.IsNullOrWhiteSpace(effectivePlaybackUrl) ? "<not configured>" : effectivePlaybackUrl)}");
+        Console.WriteLine($"Media stream:   {effectiveMediaStreamId}");
+        if (!string.IsNullOrWhiteSpace(configuredFfmpegLatencyProfile))
+        {
+            Console.WriteLine($"FFmpeg profile: {configuredFfmpegLatencyProfile}");
+        }
         Console.WriteLine($"Media backend auto-start: {(string.IsNullOrWhiteSpace(effectiveMediaBackendAutoStart) ? "false" : effectiveMediaBackendAutoStart)}");
         if (!string.IsNullOrWhiteSpace(resolvedMediaBackendExecutablePath))
         {
@@ -921,6 +958,15 @@ internal static class WebRtcStackCommand
         public string TokenScope { get; set; } = string.Empty;
         public int PeerReadyTimeoutSec { get; set; } = 30;
         public string OutputJsonPath { get; set; } = string.Empty;
+        public string FfmpegLatencyProfile { get; set; } = string.Empty;
+        public string FfmpegVideoDevice { get; set; } = string.Empty;
+        public string FfmpegAudioDevice { get; set; } = string.Empty;
+        public bool? FfmpegUseTestSource { get; set; }
+        public string MediaStreamId { get; set; } = string.Empty;
+        public string MediaWhipUrl { get; set; } = string.Empty;
+        public string MediaWhepUrl { get; set; } = string.Empty;
+        public string MediaPlaybackUrl { get; set; } = string.Empty;
+        public bool? MediaBackendAutoStart { get; set; }
         public bool SkipIdentityReset { get; set; } = true;
         public bool SkipCiLocal { get; set; } = true;
         public bool SkipRuntimeBootstrap { get; set; }
@@ -981,6 +1027,15 @@ internal static class WebRtcStackCommand
                         options.PeerReadyTimeoutSpecified = true;
                         break;
                     case "outputjsonpath": options.OutputJsonPath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "ffmpeglatencyprofile": options.FfmpegLatencyProfile = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "ffmpegvideodevice": options.FfmpegVideoDevice = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "ffmpegaudiodevice": options.FfmpegAudioDevice = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "ffmpegusetestsource": options.FfmpegUseTestSource = ParseNullableBoolSwitch(name, value, hasValue, ref i, ref error); break;
+                    case "mediastreamid": options.MediaStreamId = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediawhipurl": options.MediaWhipUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediawhepurl": options.MediaWhepUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediaplaybackurl": options.MediaPlaybackUrl = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "mediabackendautostart": options.MediaBackendAutoStart = ParseNullableBoolSwitch(name, value, hasValue, ref i, ref error); break;
                     case "skipidentityreset": options.SkipIdentityReset = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "skipcilocal": options.SkipCiLocal = ParseSwitch(name, value, hasValue, ref i, ref error); break;
                     case "skipruntimebootstrap": options.SkipRuntimeBootstrap = ParseSwitch(name, value, hasValue, ref i, ref error); break;
@@ -1037,6 +1092,22 @@ internal static class WebRtcStackCommand
                 error = $"Option -{name} requires boolean value true/false when explicitly set.";
                 return false;
             }
+            index++;
+            return parsed;
+        }
+
+        private static bool? ParseNullableBoolSwitch(string name, string? value, bool hasValue, ref int index, ref string? error)
+        {
+            if (!hasValue)
+            {
+                return true;
+            }
+            if (!TryParseBool(value, out var parsed))
+            {
+                error = $"Option -{name} requires boolean value true/false when explicitly set.";
+                return null;
+            }
+
             index++;
             return parsed;
         }
