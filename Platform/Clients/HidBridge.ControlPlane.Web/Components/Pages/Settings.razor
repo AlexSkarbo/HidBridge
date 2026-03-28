@@ -4,6 +4,7 @@
 @inject OperatorText T
 @inject OperatorAuthDescriptor Auth
 @inject OperatorIdentityContext Identity
+@inject HidBridge.ControlPlane.Web.Services.ControlPlaneApiClient ApiClient
 @inject Microsoft.Extensions.Options.IOptions<HidBridge.ControlPlane.Web.Configuration.ControlPlaneApiOptions> ApiOptions
 @inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager Navigation
@@ -130,6 +131,10 @@
                     <input class="hid-input" @bind="_agentProfile.UartPort" @bind:event="oninput" />
                 </label>
                 <label class="hid-field-label">
+                    @T["AgentProfileEndpointId"]
+                    <input class="hid-input" @bind="_agentProfile.EndpointId" @bind:event="oninput" />
+                </label>
+                <label class="hid-field-label">
                     @T["AgentProfileUartHmacKey"]
                     <input class="hid-input" @bind="_agentProfile.UartHmacKey" @bind:event="oninput" />
                 </label>
@@ -185,6 +190,37 @@
                 <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyAcceptanceCommandAsync">@T["AgentProfileCopyCommand"]</button>
             </div>
             <div class="hid-subtle-copy">@T["AgentProfileAcceptanceHint"]</div>
+
+            <div class="hid-candidate-actions">
+                <button class="hid-button-primary hid-button-sm" type="button" @onclick="GenerateInstallLinkAsync">@T["AgentProfileGenerateInstallUrl"]</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_installFlowStatus))
+            {
+                <div class="hid-subtle-copy">@_installFlowStatus</div>
+            }
+
+            @if (_installLinkResponse is not null)
+            {
+                <div class="hid-field-label">
+                    @T["AgentProfileGeneratedInstallUrl"]
+                    <textarea class="hid-input" rows="4" readonly>@_installLinkResponse.InstallUrl</textarea>
+                </div>
+                <div class="hid-field-label">
+                    @T["AgentProfileGeneratedInstallOneShot"]
+                    <textarea class="hid-input" rows="4" readonly>@_installLinkResponse.OneShotCommand</textarea>
+                </div>
+                <div class="hid-candidate-actions">
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallUrlAsync">@T["AgentProfileCopyCommand"]</button>
+                    <button class="hid-button-secondary hid-button-sm" type="button" @onclick="CopyInstallOneShotAsync">@T["AgentProfileCopyOneShotCommand"]</button>
+                </div>
+                <div class="hid-subtle-copy">
+                    @T["AgentProfileInstallLinkExpires"]: @_installLinkResponse.ExpiresAtUtc.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+                </div>
+                <div class="hid-subtle-copy">
+                    @T["AgentProfileInstallLinkSession"]: @_installLinkResponse.SessionId / @_installLinkResponse.PeerId / @_installLinkResponse.EndpointId
+                </div>
+            }
         </section>
     </div>
 
@@ -222,6 +258,8 @@
     private IJSObjectReference? _settingsModule;
     private AgentProfileSettings _agentProfile = AgentProfileSettings.CreateDefault();
     private string? _agentProfileStatus;
+    private string? _installFlowStatus;
+    private AgentInstallLinkResponseViewModel? _installLinkResponse;
     private const string AgentProfileStorageKey = "hidbridge.agentProfile.v1";
 
     private IReadOnlyList<ThemeOption> ThemeOptions =>
@@ -382,6 +420,12 @@
     private async Task CopyAcceptanceCommandAsync()
         => await CopyCommandAsync(BuildAcceptanceCommand());
 
+    private async Task CopyInstallUrlAsync()
+        => await CopyCommandAsync(_installLinkResponse?.InstallUrl ?? string.Empty);
+
+    private async Task CopyInstallOneShotAsync()
+        => await CopyCommandAsync(_installLinkResponse?.OneShotCommand ?? string.Empty);
+
     private async Task CopyCommandAsync(string command)
     {
         if (_settingsModule is null)
@@ -398,6 +442,55 @@
         catch
         {
             _agentProfileStatus = T["AgentProfileCopyFailed"];
+        }
+    }
+
+    private async Task GenerateInstallLinkAsync()
+    {
+        try
+        {
+            var profile = _agentProfile.Normalize();
+            var baseUrl = ApiOptions.Value.BaseUrl?.Trim().TrimEnd('/') ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                _installFlowStatus = T["AgentProfileInstallUrlFailed"];
+                return;
+            }
+
+            var response = await ApiClient.GenerateAgentInstallLinkAsync(new AgentInstallLinkRequestViewModel
+            {
+                BaseUrl = baseUrl,
+                ControlPlaneWebUrl = Navigation.BaseUri.TrimEnd('/'),
+                EndpointId = profile.EndpointId,
+                UartPort = profile.UartPort,
+                UartHmacKey = profile.UartHmacKey,
+                FfmpegLatencyProfile = profile.FfmpegLatencyProfile,
+                MediaStreamId = profile.MediaStreamId,
+                MediaWhipUrl = profile.BuildWhipUrl(),
+                MediaWhepUrl = profile.BuildWhepUrl(),
+                MediaPlaybackUrl = profile.BuildPlaybackUrl(),
+                MediaHealthUrl = profile.MediaHealthUrl,
+                FfmpegExecutablePath = profile.FfmpegExecutablePath,
+                FfmpegVideoDevice = profile.FfmpegVideoDevice,
+                FfmpegAudioDevice = profile.FfmpegAudioDevice,
+                FfmpegUseTestSource = profile.FfmpegUseTestSource,
+                MediaBackendAutoStart = profile.MediaBackendAutoStart,
+                RequireMediaReady = profile.RequireMediaReady,
+                ExpiresInMinutes = 30,
+            });
+
+            if (response is null)
+            {
+                _installFlowStatus = T["AgentProfileInstallUrlFailed"];
+                return;
+            }
+
+            _installLinkResponse = response;
+            _installFlowStatus = T["AgentProfileInstallUrlReady"];
+        }
+        catch
+        {
+            _installFlowStatus = T["AgentProfileInstallUrlFailed"];
         }
     }
 
@@ -431,6 +524,7 @@
         public string MediaHealthUrl { get; set; } = "http://127.0.0.1:18081/api/v1/versions";
         public string MediaStreamId { get; set; } = "edge-main";
         public string UartPort { get; set; } = "COM6";
+        public string EndpointId { get; set; } = "endpoint_local_demo";
         public string UartHmacKey { get; set; } = "your-master-secret";
         public string FfmpegExecutablePath { get; set; } = "ffmpeg";
         public string FfmpegVideoDevice { get; set; } = string.Empty;
@@ -462,6 +556,7 @@
                 MediaHealthUrl = string.IsNullOrWhiteSpace(MediaHealthUrl) ? "http://127.0.0.1:18081/api/v1/versions" : MediaHealthUrl.Trim(),
                 MediaStreamId = string.IsNullOrWhiteSpace(MediaStreamId) ? "edge-main" : MediaStreamId.Trim(),
                 UartPort = string.IsNullOrWhiteSpace(UartPort) ? "COM6" : UartPort.Trim(),
+                EndpointId = string.IsNullOrWhiteSpace(EndpointId) ? "endpoint_local_demo" : EndpointId.Trim(),
                 UartHmacKey = string.IsNullOrWhiteSpace(UartHmacKey) ? "your-master-secret" : UartHmacKey.Trim(),
                 FfmpegExecutablePath = string.IsNullOrWhiteSpace(FfmpegExecutablePath) ? "ffmpeg" : FfmpegExecutablePath.Trim(),
                 FfmpegVideoDevice = (FfmpegVideoDevice ?? string.Empty).Trim(),

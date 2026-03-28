@@ -248,6 +248,23 @@ var uartReleasePortAfterExecute = bool.TryParse(builder.Configuration["HIDBRIDGE
     : uartPassiveHealthMode;
 var agentId = builder.Configuration["HIDBRIDGE_AGENT_ID"] ?? "agent_hidbridge_uart_local";
 var endpointId = builder.Configuration["HIDBRIDGE_ENDPOINT_ID"] ?? "endpoint_local_demo";
+var agentInstallOptions = new AgentInstallRuntimeOptions
+{
+    Enabled = bool.TryParse(builder.Configuration["HIDBRIDGE_AGENT_INSTALL_ENABLED"], out var parsedInstallEnabled)
+        ? parsedInstallEnabled
+        : true,
+    SigningKey = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_SIGNING_KEY"]
+        ?? builder.Configuration["HIDBRIDGE_UART_HMAC_KEY"]
+        ?? "change-me-agent-install-signing-key",
+    TokenTtlMinutes = int.TryParse(builder.Configuration["HIDBRIDGE_AGENT_INSTALL_TOKEN_TTL_MINUTES"], out var parsedInstallTtlMinutes)
+        ? Math.Clamp(parsedInstallTtlMinutes, 5, 24 * 60)
+        : 30,
+    PublicBaseUrl = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_PUBLIC_BASE_URL"] ?? string.Empty,
+    PackageUrl = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_PACKAGE_URL"] ?? string.Empty,
+    PackageSha256 = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_PACKAGE_SHA256"] ?? string.Empty,
+    AgentExecutableRelativePath = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_EXECUTABLE_RELATIVE_PATH"] ?? "HidBridge.EdgeProxy.Agent.exe",
+    DefaultInstallDirectory = builder.Configuration["HIDBRIDGE_AGENT_INSTALL_DEFAULT_DIRECTORY"] ?? @"$env:ProgramData\HidBridge\EdgeAgent",
+};
 var endpointExtraCapabilities = ParseCapabilityDescriptors(builder.Configuration["HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES"]);
 var uartOptions = new HidBridgeUartClientOptions(
     uartPort,
@@ -292,6 +309,8 @@ builder.Services.AddSingleton(new ApiRuntimeSettings
     TransportSlo = transportSloOptions,
 });
 builder.Services.AddSingleton(policyBootstrapOptions);
+builder.Services.AddSingleton(agentInstallOptions);
+builder.Services.AddSingleton<AgentInstallTokenService>();
 
 builder.Services.AddSingleton<IConnector>(_ =>
     new HidBridgeUartConnector(

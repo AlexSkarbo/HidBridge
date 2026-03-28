@@ -129,6 +129,50 @@ public sealed class ControlPlaneApiClientTests
     }
 
     /// <summary>
+    /// Verifies agent install-link generation route and payload.
+    /// </summary>
+    [Fact]
+    public async Task GenerateAgentInstallLinkAsync_SendsExpectedRouteAndPayload()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new AgentInstallLinkRequestViewModel
+        {
+            BaseUrl = "http://127.0.0.1:18093",
+            ControlPlaneWebUrl = "http://127.0.0.1:18110",
+            EndpointId = "endpoint_local_demo",
+            UartPort = "COM6",
+            UartHmacKey = "secret",
+            FfmpegLatencyProfile = "balanced",
+            MediaStreamId = "edge-main",
+            MediaWhipUrl = "http://127.0.0.1:19851/rtc/v1/whip/?app=live&stream=edge-main",
+            MediaWhepUrl = "http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main",
+            MediaPlaybackUrl = "http://127.0.0.1:19851/rtc/v1/whep/?app=live&stream=edge-main",
+            MediaHealthUrl = "http://127.0.0.1:18081/api/v1/versions",
+            FfmpegExecutablePath = "ffmpeg",
+            RequireMediaReady = true,
+        };
+        var handler = new RecordingHandler(new AgentInstallLinkResponseViewModel(
+            InstallUrl: "http://127.0.0.1:18093/agent-install/bootstrap.ps1?token=abc",
+            BootstrapScriptUrl: "http://127.0.0.1:18093/agent-install/bootstrap.ps1?token=abc",
+            SessionId: "room-1",
+            PeerId: "peer-1",
+            EndpointId: "endpoint_local_demo",
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(30),
+            OneShotCommand: "powershell -Command ..."));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:18093") };
+        var apiClient = new ControlPlaneApiClient(httpClient);
+
+        _ = await apiClient.GenerateAgentInstallLinkAsync(request, cancellationToken);
+
+        Assert.Equal(HttpMethod.Post, handler.LastMethod);
+        Assert.Equal("http://localhost:18093/api/v1/runtime/agent-install/link", handler.LastRequestUri);
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object?>>(handler.LastRequestBody!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("endpoint_local_demo", payload!["endpointId"]?.ToString());
+        Assert.Equal("COM6", payload["uartPort"]?.ToString());
+    }
+
+    /// <summary>
     /// Verifies the open-session route and payload.
     /// </summary>
     [Fact]

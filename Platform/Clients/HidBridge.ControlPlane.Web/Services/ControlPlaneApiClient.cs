@@ -34,6 +34,18 @@ public sealed class ControlPlaneApiClient
         => await GetJsonAsync<ApiRuntimeViewModel>("/api/v1/runtime/uart", cancellationToken);
 
     /// <summary>
+    /// Generates one signed install URL for remote edge-agent bootstrap.
+    /// </summary>
+    public async Task<AgentInstallLinkResponseViewModel?> GenerateAgentInstallLinkAsync(
+        AgentInstallLinkRequestViewModel body,
+        CancellationToken cancellationToken = default)
+        => await SendJsonAsync<AgentInstallLinkResponseViewModel>(
+            HttpMethod.Post,
+            "/api/v1/runtime/agent-install/link",
+            body,
+            cancellationToken);
+
+    /// <summary>
     /// Reads the fleet inventory dashboard.
     /// </summary>
     public async Task<InventoryDashboardViewModel?> GetInventoryDashboardAsync(CancellationToken cancellationToken = default)

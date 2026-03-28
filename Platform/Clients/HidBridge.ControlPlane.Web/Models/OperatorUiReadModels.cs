@@ -72,6 +72,45 @@ public sealed record ApiRuntimeMaintenanceViewModel(
     double TelemetryRetentionDays);
 
 /// <summary>
+/// Represents request payload used to generate one remote edge-agent install URL.
+/// </summary>
+public sealed class AgentInstallLinkRequestViewModel
+{
+    public string BaseUrl { get; set; } = string.Empty;
+    public string? ControlPlaneWebUrl { get; set; }
+    public string? SessionId { get; set; }
+    public string? PeerId { get; set; }
+    public string EndpointId { get; set; } = "endpoint_local_demo";
+    public string UartPort { get; set; } = "COM6";
+    public string UartHmacKey { get; set; } = "your-master-secret";
+    public string FfmpegLatencyProfile { get; set; } = "balanced";
+    public string MediaStreamId { get; set; } = "edge-main";
+    public string MediaWhipUrl { get; set; } = string.Empty;
+    public string MediaWhepUrl { get; set; } = string.Empty;
+    public string MediaPlaybackUrl { get; set; } = string.Empty;
+    public string MediaHealthUrl { get; set; } = string.Empty;
+    public string FfmpegExecutablePath { get; set; } = "ffmpeg";
+    public string? FfmpegVideoDevice { get; set; }
+    public string? FfmpegAudioDevice { get; set; }
+    public bool FfmpegUseTestSource { get; set; }
+    public bool MediaBackendAutoStart { get; set; }
+    public bool RequireMediaReady { get; set; } = true;
+    public int? ExpiresInMinutes { get; set; } = 30;
+}
+
+/// <summary>
+/// Represents generated install URL response for remote edge-agent bootstrap.
+/// </summary>
+public sealed record AgentInstallLinkResponseViewModel(
+    string InstallUrl,
+    string BootstrapScriptUrl,
+    string SessionId,
+    string PeerId,
+    string EndpointId,
+    DateTimeOffset ExpiresAtUtc,
+    string OneShotCommand);
+
+/// <summary>
 /// Represents the fleet inventory dashboard consumed by the operator shell.
 /// </summary>
 public sealed record InventoryDashboardViewModel(

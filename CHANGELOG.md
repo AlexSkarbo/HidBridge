@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-28 (install flow): signed agent bootstrap URL generation from Settings
+
+Summary:
+
+- Added backend install-link flow to generate time-limited signed bootstrap URLs for remote edge-agent setup.
+- Added tokenized bootstrap endpoint returning PowerShell script with prefilled `appsettings.json` and optional package download/start logic.
+- Added Settings UI action to generate install URL + one-shot command directly from the selected agent profile.
+- Added typed web client method and models for install-link request/response.
+- Added unit coverage for signed token round-trip/expiry and API client route payload.
+
+Detailed notes:
+
+- `Platform/Platform/HidBridge.ControlPlane.Api/Endpoints/SystemEndpoints.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/AgentInstallRuntimeOptions.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/AgentInstallTokenService.cs`
+- `Platform/Platform/HidBridge.ControlPlane.Api/Program.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Components/Pages/Settings.razor`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Services/ControlPlaneApiClient.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Models/OperatorUiReadModels.cs`
+- `Platform/Clients/HidBridge.ControlPlane.Web/Localization/OperatorText.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/AgentInstallTokenServiceTests.cs`
+- `Platform/Tests/HidBridge.Platform.Tests/ControlPlaneApiClientTests.cs`
+
 ## 2026-03-28 (settings: profile generator emits valid stack/acceptance commands)
 
 Summary:
