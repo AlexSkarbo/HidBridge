@@ -305,9 +305,9 @@
                         <button class="hid-button-secondary" @onclick="RefreshAsync">@T["Refresh"]</button>
                     </div>
 
-                    @if (GetControlBlockedBanner() is { } controlBlockedBanner)
+                    @if (GetControlBlockedDiagnostic() is { } controlBlockedBanner)
                     {
-                        <div class="hid-alert hid-alert--warning">@controlBlockedBanner</div>
+                        <div class="hid-alert hid-alert--warning">@string.Format(T["ControlBlockedBannerWithCode"], controlBlockedBanner.Code, controlBlockedBanner.Message)</div>
                     }
 
                     @if (_control.ActiveLease is null)
@@ -898,12 +898,14 @@
            && string.Equals(CurrentOperatorPrincipalId, _control?.ActiveLease?.PrincipalId, StringComparison.OrdinalIgnoreCase);
 
     private string GetLiveControlBlockedHint()
-        => GetControlBlockedBanner() ?? T["LiveControlUnavailableHint"];
+        => GetControlBlockedDiagnostic() is { } diagnostic
+            ? string.Format(T["ControlBlockedBannerWithCode"], diagnostic.Code, diagnostic.Message)
+            : T["LiveControlUnavailableHint"];
 
-    private string? GetControlBlockedBanner()
+    private ControlBlockDiagnostic? GetControlBlockedDiagnostic()
     {
         var sessionBlock = ResolveSessionControlBlockReason();
-        if (!string.IsNullOrWhiteSpace(sessionBlock))
+        if (sessionBlock is not null)
         {
             return sessionBlock;
         }
@@ -911,15 +913,18 @@
         return ResolveLeaseControlBlockReason();
     }
 
-    private string? ResolveSessionControlBlockReason()
+    private ControlBlockDiagnostic? ResolveSessionControlBlockReason()
     {
         if (_transportReadiness is not null
             && string.Equals(_transportReadiness.ReasonCode, "session_not_active", StringComparison.OrdinalIgnoreCase))
         {
+            var reasonCode = string.IsNullOrWhiteSpace(_transportReadiness.ReasonCode)
+                ? "session_not_active"
+                : _transportReadiness.ReasonCode;
             var reason = string.IsNullOrWhiteSpace(_transportReadiness.Reason)
                 ? T["ControlBlockedSessionGeneric"]
                 : _transportReadiness.Reason;
-            return string.Format(T["ControlBlockedSessionReasonCode"], _transportReadiness.ReasonCode, reason);
+            return new ControlBlockDiagnostic(reasonCode, reason);
         }
 
         if (_dashboard is null)
@@ -931,16 +936,18 @@
             || string.Equals(_dashboard.State, "Ended", StringComparison.OrdinalIgnoreCase)
             || string.Equals(_dashboard.State, "Terminating", StringComparison.OrdinalIgnoreCase))
         {
-            return string.Format(
-                T["ControlBlockedSessionState"],
-                _dashboard.State,
-                GetStateReasonLabel());
+            return new ControlBlockDiagnostic(
+                "session_state_blocked",
+                string.Format(
+                    T["ControlBlockedSessionState"],
+                    _dashboard.State,
+                    GetStateReasonLabel()));
         }
 
         return null;
     }
 
-    private string? ResolveLeaseControlBlockReason()
+    private ControlBlockDiagnostic? ResolveLeaseControlBlockReason()
     {
         if (_control is null || _dashboard is null)
         {
@@ -949,21 +956,23 @@
 
         if (_control.ActiveLease is null)
         {
-            return T["ControlBlockedLeaseMissing"];
+            return new ControlBlockDiagnostic("lease_missing", T["ControlBlockedLeaseMissing"]);
         }
 
         if (string.IsNullOrWhiteSpace(CurrentOperatorPrincipalId))
         {
-            return T["ControlBlockedOperatorUnknown"];
+            return new ControlBlockDiagnostic("operator_unknown", T["ControlBlockedOperatorUnknown"]);
         }
 
         if (!string.Equals(_control.ActiveLease.PrincipalId, CurrentOperatorPrincipalId, StringComparison.OrdinalIgnoreCase))
         {
-            return string.Format(
-                T["ControlBlockedLeaseHeldBy"],
-                _control.ActiveLease.PrincipalId,
-                FormatTime(_control.ActiveLease.ExpiresAtUtc),
-                FormatLeaseRemaining(_control.ActiveLease.ExpiresAtUtc));
+            return new ControlBlockDiagnostic(
+                "lease_held_by_other",
+                string.Format(
+                    T["ControlBlockedLeaseHeldBy"],
+                    _control.ActiveLease.PrincipalId,
+                    FormatTime(_control.ActiveLease.ExpiresAtUtc),
+                    FormatLeaseRemaining(_control.ActiveLease.ExpiresAtUtc)));
         }
 
         return null;
@@ -2687,6 +2696,10 @@
         bool Accepted,
         string Detail,
         DateTimeOffset OccurredAtUtc);
+
+    private sealed record ControlBlockDiagnostic(
+        string Code,
+        string Message);
 
     public sealed record LiveInputEvent(
         string Action,
