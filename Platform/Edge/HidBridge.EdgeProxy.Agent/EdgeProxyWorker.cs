@@ -566,6 +566,9 @@ public sealed class EdgeProxyWorker : BackgroundService
         {
             ["engineSwitchMode"] = _enginePlan.SwitchMode.ToString(),
             ["engineTransport"] = _enginePlan.TransportEngineKind.ToString(),
+            ["transportEngine"] = _forceRelayFallback
+                ? EdgeProxyTransportEngineKind.RelayCompat.ToString()
+                : _enginePlan.TransportEngineKind.ToString(),
             ["engineMedia"] = _enginePlan.MediaEngineKind.ToString(),
             ["engineCanaryBucket"] = _enginePlan.CanaryBucket?.ToString(CultureInfo.InvariantCulture) ?? "n/a",
             ["engineForceRelayFallback"] = _forceRelayFallback ? "true" : "false",
@@ -634,7 +637,7 @@ public sealed class EdgeProxyWorker : BackgroundService
 
         _enginePolicyState = "degraded";
         _enginePolicyReason = $"timeoutRatePct={timeoutRatePct:F2}, reconnectPerHour={reconnectPerHour:F2}, roundtripP95Ms={roundtripP95:F2}";
-        if (!_forceRelayFallback)
+        if (_options.DcdAllowRelayFallback && !_forceRelayFallback)
         {
             _forceRelayFallback = true;
             _logger.LogWarning(

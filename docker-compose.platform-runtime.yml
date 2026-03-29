@@ -103,6 +103,7 @@ services:
       HIDBRIDGE_WEBRTC_REQUIRE_CAPABILITY: "true"
       HIDBRIDGE_WEBRTC_ENABLE_CONNECTOR_BRIDGE: "false"
       HIDBRIDGE_WEBRTC_ENABLE_DCD_CONTROL_BRIDGE: "true"
+      HIDBRIDGE_TRANSPORT_FALLBACK_TO_DEFAULT_ON_WEBRTC_ERROR: "false"
       HIDBRIDGE_WEBRTC_REQUIRE_MEDIA_READY: "true"
       HIDBRIDGE_ENDPOINT_EXTRA_CAPABILITIES: transport.webrtc.datachannel.v1@1.0
       HIDBRIDGE_UART_PASSIVE_HEALTH_MODE: "true"
@@ -133,6 +134,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      HIDBRIDGE_PLATFORM_ROOT: /src/Platform
       ControlPlaneApi__BaseUrl: http://hidbridge_api:18093
       ControlPlaneApi__OperatorPrincipalId: smoke-runner
       ControlPlaneApi__PropagateIdentityHeaders: "false"

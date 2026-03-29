@@ -1,6 +1,8 @@
 using HidBridge.ControlPlane.Web.Services;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace HidBridge.Platform.Tests;
@@ -20,7 +22,10 @@ public sealed class OperationalArtifactServiceTests
         fixture.Write(".smoke-data/Sql/20260312-010904/smoke.summary.txt", "smoke summary");
         fixture.Write(".smoke-data/Sql/20260312-010904/controlplane.stderr.log", "stderr");
 
-        var service = new OperationalArtifactService(fixture.Environment);
+        var service = new OperationalArtifactService(
+            fixture.Environment,
+            fixture.Configuration,
+            NullLogger<OperationalArtifactService>.Instance);
         var summary = service.GetSummary();
 
         Assert.NotNull(summary.Doctor);
@@ -40,7 +45,10 @@ public sealed class OperationalArtifactServiceTests
         var relative = ".smoke-data/Sql/20260312-010904/smoke.summary.txt";
         fixture.Write(relative, "ok");
 
-        var service = new OperationalArtifactService(fixture.Environment);
+        var service = new OperationalArtifactService(
+            fixture.Environment,
+            fixture.Configuration,
+            NullLogger<OperationalArtifactService>.Instance);
         var fullPath = service.ResolveSafePath(relative);
 
         Assert.EndsWith("smoke.summary.txt", fullPath, StringComparison.OrdinalIgnoreCase);
@@ -58,9 +66,16 @@ public sealed class OperationalArtifactServiceTests
             var contentRoot = Path.Combine(_root, "Platform", "Clients", "HidBridge.ControlPlane.Web");
             Directory.CreateDirectory(contentRoot);
             Environment = new TestWebHostEnvironment(contentRoot);
+            Configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["HIDBRIDGE_PLATFORM_ROOT"] = Path.Combine(_root, "Platform"),
+                })
+                .Build();
         }
 
         public IWebHostEnvironment Environment { get; }
+        public IConfiguration Configuration { get; }
 
         public void Write(string relativePath, string content)
         {

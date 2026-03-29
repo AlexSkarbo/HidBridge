@@ -76,6 +76,8 @@ internal static class WebRtcStackCommand
         var configuredWhepUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL") ?? string.Empty).Trim();
         var configuredWhipUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL") ?? string.Empty).Trim();
         var configuredPlaybackUrl = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL") ?? string.Empty).Trim();
+        var configuredFfmpegExecutablePath = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGEXECUTABLEPATH") ?? string.Empty).Trim();
+        var configuredFfmpegArgumentsTemplate = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGARGUMENTSTEMPLATE") ?? string.Empty).Trim();
         var configuredFfmpegLatencyProfile = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGLATENCYPROFILE") ?? string.Empty).Trim();
         var configuredFfmpegUseTestSource = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGUSETESTSOURCE") ?? string.Empty).Trim();
         var configuredFfmpegVideoDevice = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_FFMPEGVIDEODEVICE") ?? string.Empty).Trim();
@@ -90,12 +92,15 @@ internal static class WebRtcStackCommand
         var configuredMediaBackendProbeDelayMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBEDELAYMS") ?? string.Empty).Trim();
         var configuredMediaBackendProbeTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDPROBETIMEOUTMS") ?? string.Empty).Trim();
         var configuredMediaBackendStopTimeoutMs = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_MEDIABACKENDSTOPTIMEOUTMS") ?? string.Empty).Trim();
+        var configuredDcdAllowRelayFallback = (Environment.GetEnvironmentVariable("HIDBRIDGE_EDGE_PROXY_DCDALLOWRELAYFALLBACK") ?? string.Empty).Trim();
         var effectiveMediaStreamId = string.IsNullOrWhiteSpace(options.MediaStreamId)
             ? (string.IsNullOrWhiteSpace(configuredMediaStreamId) ? "edge-main" : configuredMediaStreamId)
             : options.MediaStreamId.Trim();
         configuredWhipUrl = string.IsNullOrWhiteSpace(options.MediaWhipUrl) ? configuredWhipUrl : options.MediaWhipUrl.Trim();
         configuredWhepUrl = string.IsNullOrWhiteSpace(options.MediaWhepUrl) ? configuredWhepUrl : options.MediaWhepUrl.Trim();
         configuredPlaybackUrl = string.IsNullOrWhiteSpace(options.MediaPlaybackUrl) ? configuredPlaybackUrl : options.MediaPlaybackUrl.Trim();
+        configuredFfmpegExecutablePath = string.IsNullOrWhiteSpace(options.FfmpegExecutablePath) ? configuredFfmpegExecutablePath : options.FfmpegExecutablePath.Trim();
+        configuredFfmpegArgumentsTemplate = string.IsNullOrWhiteSpace(options.FfmpegArgumentsTemplate) ? configuredFfmpegArgumentsTemplate : options.FfmpegArgumentsTemplate.Trim();
         configuredFfmpegLatencyProfile = string.IsNullOrWhiteSpace(options.FfmpegLatencyProfile) ? configuredFfmpegLatencyProfile : options.FfmpegLatencyProfile.Trim();
         configuredFfmpegVideoDevice = string.IsNullOrWhiteSpace(options.FfmpegVideoDevice) ? configuredFfmpegVideoDevice : options.FfmpegVideoDevice.Trim();
         configuredFfmpegAudioDevice = string.IsNullOrWhiteSpace(options.FfmpegAudioDevice) ? configuredFfmpegAudioDevice : options.FfmpegAudioDevice.Trim();
@@ -335,6 +340,10 @@ internal static class WebRtcStackCommand
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_KEYCLOAKBASEURL"] = options.KeycloakBaseUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_KEYCLOAKREALM"] = "hidbridge-dev";
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_COMMANDEXECUTOR"] = options.CommandExecutor;
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_TRANSPORTENGINE"] = "dcd";
+        adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_DCDALLOWRELAYFALLBACK"] = string.IsNullOrWhiteSpace(configuredDcdAllowRelayFallback)
+            ? "false"
+            : (TryParseOptionalBool(configuredDcdAllowRelayFallback) ? "true" : "false");
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTPORT"] = options.UartPort;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTBAUD"] = options.UartBaud.ToString();
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_UARTHMACKEY"] = options.UartHmacKey;
@@ -352,6 +361,8 @@ internal static class WebRtcStackCommand
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAPLAYBACKURL"] = effectivePlaybackUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHEPURL"] = configuredWhepUrl;
         adapterStart.Environment["HIDBRIDGE_EDGE_PROXY_MEDIAWHIPURL"] = configuredWhipUrl;
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGEXECUTABLEPATH", configuredFfmpegExecutablePath);
+        SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGARGUMENTSTEMPLATE", configuredFfmpegArgumentsTemplate);
         SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGLATENCYPROFILE", configuredFfmpegLatencyProfile);
         SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGVIDEODEVICE", configuredFfmpegVideoDevice);
         SetEnvironmentIfNotEmpty(adapterStart, "HIDBRIDGE_EDGE_PROXY_FFMPEGAUDIODEVICE", configuredFfmpegAudioDevice);
@@ -467,6 +478,10 @@ internal static class WebRtcStackCommand
         if (!string.IsNullOrWhiteSpace(configuredFfmpegLatencyProfile))
         {
             Console.WriteLine($"FFmpeg profile: {configuredFfmpegLatencyProfile}");
+        }
+        if (!string.IsNullOrWhiteSpace(configuredFfmpegExecutablePath))
+        {
+            Console.WriteLine($"FFmpeg executable: {configuredFfmpegExecutablePath}");
         }
         Console.WriteLine($"Media backend auto-start: {(string.IsNullOrWhiteSpace(effectiveMediaBackendAutoStart) ? "false" : effectiveMediaBackendAutoStart)}");
         if (!string.IsNullOrWhiteSpace(resolvedMediaBackendExecutablePath))
@@ -951,13 +966,15 @@ internal static class WebRtcStackCommand
         public int Exp022DurationSec { get; set; } = 600;
         public int AdapterDurationSec { get; set; } = 900;
         public string EndpointId { get; set; } = "endpoint_local_demo";
-        public string PrincipalId { get; set; } = "smoke-runner";
+        public string PrincipalId { get; set; } = "operator.smoke.admin";
         public string TokenUsername { get; set; } = "operator.smoke.admin";
         public string TokenPassword { get; set; } = "ChangeMe123!";
         public string KeycloakBaseUrl { get; set; } = "http://host.docker.internal:18096";
         public string TokenScope { get; set; } = string.Empty;
         public int PeerReadyTimeoutSec { get; set; } = 30;
         public string OutputJsonPath { get; set; } = string.Empty;
+        public string FfmpegExecutablePath { get; set; } = string.Empty;
+        public string FfmpegArgumentsTemplate { get; set; } = string.Empty;
         public string FfmpegLatencyProfile { get; set; } = string.Empty;
         public string FfmpegVideoDevice { get; set; } = string.Empty;
         public string FfmpegAudioDevice { get; set; } = string.Empty;
@@ -1027,6 +1044,8 @@ internal static class WebRtcStackCommand
                         options.PeerReadyTimeoutSpecified = true;
                         break;
                     case "outputjsonpath": options.OutputJsonPath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "ffmpegexecutablepath": options.FfmpegExecutablePath = RequireValue(name, value, ref i, ref hasValue, ref error); break;
+                    case "ffmpegargumentstemplate": options.FfmpegArgumentsTemplate = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "ffmpeglatencyprofile": options.FfmpegLatencyProfile = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "ffmpegvideodevice": options.FfmpegVideoDevice = RequireValue(name, value, ref i, ref hasValue, ref error); break;
                     case "ffmpegaudiodevice": options.FfmpegAudioDevice = RequireValue(name, value, ref i, ref hasValue, ref error); break;

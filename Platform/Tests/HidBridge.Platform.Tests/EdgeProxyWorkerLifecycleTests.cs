@@ -609,6 +609,9 @@ public sealed class EdgeProxyWorkerLifecycleTests
             PeerId = "peer-1",
             EndpointId = "endpoint-1",
             CommandExecutor = "uart",
+            EngineSwitchMode = "fixed",
+            TransportEngine = "relay-compat",
+            DcdAllowRelayFallback = true,
             UartPort = "COM6",
             ControlWsUrl = "ws://127.0.0.1:28092/ws/control",
             PollIntervalMs = 100,
@@ -621,6 +624,8 @@ public sealed class EdgeProxyWorkerLifecycleTests
             OrganizationId = "local-org",
             // Keep lifecycle tests deterministic and decoupled from ffmpeg runtime gates.
             MediaEngine = "none",
+            // Keep ffmpeg-preview tests deterministic (NoExecutableConfigured) regardless of host ffmpeg availability.
+            FfmpegExecutablePath = string.Empty,
         };
         configure?.Invoke(options);
         options.Normalize();

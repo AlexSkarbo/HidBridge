@@ -1,4 +1,6 @@
 using HidBridge.ControlPlane.Web.Models;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace HidBridge.ControlPlane.Web.Services;
 
@@ -15,32 +17,55 @@ public sealed class OperationalArtifactService
 
     private readonly string _platformRoot;
     private readonly string[] _allowedRoots;
+    private readonly bool _isAvailable;
 
     /// <summary>
     /// Creates the artifact service.
     /// </summary>
-    public OperationalArtifactService(IWebHostEnvironment environment)
+    public OperationalArtifactService(
+        IWebHostEnvironment environment,
+        IConfiguration configuration,
+        ILogger<OperationalArtifactService> logger)
     {
-        var clientsRoot = Directory.GetParent(environment.ContentRootPath)
-            ?? throw new InvalidOperationException("Unable to resolve Clients directory.");
-        var platformRoot = Directory.GetParent(clientsRoot.FullName)
-            ?? throw new InvalidOperationException("Unable to resolve Platform directory.");
+        var configuredRoot = (configuration["HIDBRIDGE_PLATFORM_ROOT"] ?? configuration["HidBridge:PlatformRoot"] ?? string.Empty).Trim();
+        if (TryResolvePlatformRoot(environment.ContentRootPath, configuredRoot, out var resolvedRoot))
+        {
+            _platformRoot = resolvedRoot;
+            _isAvailable = true;
+        }
+        else
+        {
+            _platformRoot = Path.GetFullPath(environment.ContentRootPath);
+            _isAvailable = false;
+            logger.LogWarning(
+                "Operational artifacts are disabled because Platform root could not be resolved. " +
+                "ContentRootPath={ContentRootPath}. Set HIDBRIDGE_PLATFORM_ROOT to enable artifact discovery.",
+                environment.ContentRootPath);
+        }
 
-        _platformRoot = platformRoot.FullName;
-        _allowedRoots =
-        [
-            Path.Combine(_platformRoot, ".logs"),
-            Path.Combine(_platformRoot, ".smoke-data"),
-            Path.Combine(_platformRoot, "Artifacts"),
-            Path.Combine(_platformRoot, "Identity", "Keycloak", "backups"),
-        ];
+        _allowedRoots = BuildAllowedRoots(_platformRoot);
     }
 
     /// <summary>
     /// Reads the latest operational artifact summary.
     /// </summary>
     public OperationalArtifactSummaryViewModel GetSummary()
-        => new(
+    {
+        if (!_isAvailable)
+        {
+            return new OperationalArtifactSummaryViewModel(
+                _platformRoot,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+        }
+
+        return new(
             _platformRoot,
             ReadLatestGroup("doctor", "Doctor", DoctorPreferredFiles),
             ReadLatestGroup("ci-local", "CI Local", CiLocalPreferredFiles),
@@ -50,12 +75,18 @@ public sealed class OperationalArtifactService
             ReadLatestGroup("token-debug", "Token Debug", []),
             ReadLatestBearerRolloutGroup(),
             ReadLatestGroup("identity-reset", "Identity Reset", []));
+    }
 
     /// <summary>
     /// Resolves one safe full path for download.
     /// </summary>
     public string ResolveSafePath(string relativePath)
     {
+        if (!_isAvailable)
+        {
+            throw new InvalidOperationException("Operational artifacts are unavailable. Set HIDBRIDGE_PLATFORM_ROOT to enable artifact downloads.");
+        }
+
         var normalized = relativePath
             .Replace('/', Path.DirectorySeparatorChar)
             .Replace('\\', Path.DirectorySeparatorChar)
@@ -183,4 +214,61 @@ public sealed class OperationalArtifactService
 
     private string ToRelativePath(string fullPath)
         => Path.GetRelativePath(_platformRoot, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+
+    private static string[] BuildAllowedRoots(string platformRoot)
+        =>
+        [
+            Path.Combine(platformRoot, ".logs"),
+            Path.Combine(platformRoot, ".smoke-data"),
+            Path.Combine(platformRoot, "Artifacts"),
+            Path.Combine(platformRoot, "Identity", "Keycloak", "backups"),
+        ];
+
+    private static bool TryResolvePlatformRoot(string contentRootPath, string configuredRoot, out string platformRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            var candidate = Path.GetFullPath(configuredRoot);
+            if (Directory.Exists(candidate))
+            {
+                platformRoot = candidate;
+                return true;
+            }
+        }
+
+        foreach (var candidate in EnumerateAncestorPaths(contentRootPath))
+        {
+            if (string.Equals(Path.GetFileName(candidate), "Platform", StringComparison.OrdinalIgnoreCase))
+            {
+                platformRoot = candidate;
+                return true;
+            }
+
+            var childPlatform = Path.Combine(candidate, "Platform");
+            if (Directory.Exists(childPlatform))
+            {
+                platformRoot = childPlatform;
+                return true;
+            }
+        }
+
+        platformRoot = string.Empty;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateAncestorPaths(string path)
+    {
+        var current = Path.GetFullPath(path);
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            yield return current;
+            var parent = Directory.GetParent(current);
+            if (parent is null)
+            {
+                yield break;
+            }
+
+            current = parent.FullName;
+        }
+    }
 }

@@ -108,13 +108,13 @@ public sealed class EdgeProxyOptionsTests
     }
 
     [Fact]
-    public void Normalize_DcdAllowRelayFallback_DefaultsTrue()
+    public void Normalize_DcdAllowRelayFallback_DefaultsFalse()
     {
         var options = CreateBaselineOptions();
 
         options.Normalize();
 
-        Assert.True(options.DcdAllowRelayFallback);
+        Assert.False(options.DcdAllowRelayFallback);
     }
 
     [Fact]

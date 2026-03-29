@@ -32,7 +32,7 @@ public sealed class EdgeProxyOptions
     /// <summary>
     /// Allows <c>TransportEngine=dcd</c> to fall back to relay command queue when no direct signal commands are available.
     /// </summary>
-    public bool DcdAllowRelayFallback { get; set; } = true;
+    public bool DcdAllowRelayFallback { get; set; } = false;
 
     /// <summary>
     /// Selects media runtime engine: <c>ffmpeg-dcd</c> (default) or <c>none</c> (compatibility fallback).
@@ -83,7 +83,7 @@ public sealed class EdgeProxyOptions
     /// <summary>
     /// Optional ffmpeg executable path used by <c>MediaEngine=ffmpeg-dcd</c>.
     /// </summary>
-    public string FfmpegExecutablePath { get; set; } = string.Empty;
+    public string FfmpegExecutablePath { get; set; } = "ffmpeg";
 
     /// <summary>
     /// ffmpeg latency profile used when runtime composes default arguments.
@@ -343,8 +343,8 @@ public sealed class EdgeProxyOptions
         EngineSwitchMode = (EngineSwitchMode ?? string.Empty).Trim();
         FfmpegExecutablePath = (FfmpegExecutablePath ?? string.Empty).Trim();
         FfmpegLatencyProfile = (FfmpegLatencyProfile ?? string.Empty).Trim();
-        FfmpegVideoDevice = (FfmpegVideoDevice ?? string.Empty).Trim();
-        FfmpegAudioDevice = (FfmpegAudioDevice ?? string.Empty).Trim();
+        FfmpegVideoDevice = TrimWrappingQuotes((FfmpegVideoDevice ?? string.Empty).Trim());
+        FfmpegAudioDevice = TrimWrappingQuotes((FfmpegAudioDevice ?? string.Empty).Trim());
         FfmpegResolution = (FfmpegResolution ?? string.Empty).Trim();
         FfmpegVideoBitrate = (FfmpegVideoBitrate ?? string.Empty).Trim();
         FfmpegAudioBitrate = (FfmpegAudioBitrate ?? string.Empty).Trim();
@@ -411,6 +411,21 @@ public sealed class EdgeProxyOptions
         {
             OperatorRolesCsv = "operator.edge";
         }
+    }
+
+    private static string TrimWrappingQuotes(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        if ((value.StartsWith('"') && value.EndsWith('"')) || (value.StartsWith('\'') && value.EndsWith('\'')))
+        {
+            return value.Substring(1, value.Length - 2).Trim();
+        }
+
+        return value;
     }
 
     /// <summary>
